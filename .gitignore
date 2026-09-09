@@ -1,0 +1,17 @@
+# Variables de entorno (nunca subir las reales, solo .env.example)
+.env
+
+# Entornos virtuales
+venv/
+.venv/
+env/
+
+# Python
+__pycache__/
+*.pyc
+.DS_Store
+.env.*
+!.env.example
+*.bak*
+.pytest_cache/
+.mypy_cache/
