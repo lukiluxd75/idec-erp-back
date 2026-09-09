@@ -1,0 +1,16 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+pydantic==2.13.4
+pydantic-settings==2.15.0
+python-jose[cryptography]==3.3.0
+requests==2.32.3
+python-dotenv==1.0.1
+sqlalchemy>=2.0.30
+psycopg2-binary>=2.9.9
+ldap3==2.9.1
+
+# Dominio geoextraccion
+python-multipart>=0.0.9
+geopandas>=0.14
+shapely>=2.0
+pandas>=2.0
