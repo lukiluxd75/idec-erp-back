@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     DB_NAME: str = "gis_seguridad"
     DATABASE_URL: Optional[str] = None
 
+    # Construction-detection GPU engine (stays on 10.0.0.30 — ERP is only a BFF)
+    DETECTION_ENGINE_URL: str = "http://10.0.0.30:8100"
+    DETECTION_ENGINE_API_KEY: str = ""
+    DETECTION_ENGINE_TIMEOUT_SECONDS: float = 120.0
+
     @computed_field
     @property
     def SQLALCHEMY_DATABASE_URI(self) -> str:
