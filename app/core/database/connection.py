@@ -34,6 +34,9 @@ def init_db_tables() -> bool:
     """
     try:
         from app.domains.seguridad.infrastructure import models  # noqa: F401
+        # El dominio 'resoluciones' NO se registra acá: su esquema (schema `resolutions`)
+        # ya existe y tiene datos reales cargados desde la app móvil — ver
+        # app/domains/resoluciones/infrastructure/models.py.
         Base.metadata.create_all(bind=engine)
         return True
     except Exception as exc:
