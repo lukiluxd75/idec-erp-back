@@ -28,3 +28,9 @@ try:
     api_router.include_router(deteccion_router, prefix="/deteccion")
 except Exception as exc:
     logger.warning(f"No se pudo cargar el dominio 'deteccion': {exc}")
+
+try:
+    from app.domains.resoluciones.presentation.router import router as resoluciones_router
+    api_router.include_router(resoluciones_router)
+except Exception as exc:
+    logger.warning(f"No se pudo cargar el dominio 'resoluciones': {exc}")
