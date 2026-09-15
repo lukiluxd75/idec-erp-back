@@ -5,9 +5,16 @@ from fastapi import Depends
 from app.domains.geoextraccion.application.use_cases import (
     GenerarShapefileUseCase,
     FusionarShapefilesUseCase,
+    CrearCapturaUseCase,
+    ListarCapturasPendientesUseCase,
+    ObtenerImagenCapturaUseCase,
+    DescartarCapturaUseCase,
 )
+from app.domains.geoextraccion.domain.ports.captura_store_port import CapturaStorePort
 from app.domains.geoextraccion.domain.ports.shapefile_port import ShapefilePort
 from app.domains.geoextraccion.infrastructure.geopandas_shapefile_adapter import GeoPandasShapefileAdapter
+from app.domains.geoextraccion.infrastructure.memoria_captura_store import MemoriaCapturaStore
+from app.domains.geoextraccion.infrastructure.ws_connection_manager import CapturasConnectionManager
 
 
 @lru_cache()
@@ -26,3 +33,41 @@ def get_fusionar_shapefiles_use_case(
     shapefile_service: ShapefilePort = Depends(get_shapefile_service),
 ) -> FusionarShapefilesUseCase:
     return FusionarShapefilesUseCase(shapefile_service=shapefile_service)
+
+
+@lru_cache()
+def get_captura_store() -> CapturaStorePort:
+    """Instancia única (singleton cacheado): todas las requests del mismo proceso
+    uvicorn tienen que compartir el mismo store en memoria."""
+    return MemoriaCapturaStore()
+
+
+@lru_cache()
+def get_connection_manager() -> CapturasConnectionManager:
+    """Instancia única (singleton cacheado): todos los requests/sockets del mismo
+    proceso uvicorn tienen que compartir el mismo registro de conexiones."""
+    return CapturasConnectionManager()
+
+
+def get_crear_captura_use_case(
+    store: CapturaStorePort = Depends(get_captura_store),
+) -> CrearCapturaUseCase:
+    return CrearCapturaUseCase(store=store)
+
+
+def get_listar_capturas_pendientes_use_case(
+    store: CapturaStorePort = Depends(get_captura_store),
+) -> ListarCapturasPendientesUseCase:
+    return ListarCapturasPendientesUseCase(store=store)
+
+
+def get_obtener_imagen_captura_use_case(
+    store: CapturaStorePort = Depends(get_captura_store),
+) -> ObtenerImagenCapturaUseCase:
+    return ObtenerImagenCapturaUseCase(store=store)
+
+
+def get_descartar_captura_use_case(
+    store: CapturaStorePort = Depends(get_captura_store),
+) -> DescartarCapturaUseCase:
+    return DescartarCapturaUseCase(store=store)
