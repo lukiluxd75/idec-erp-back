@@ -1,7 +1,9 @@
 from functools import lru_cache
 
 from fastapi import Depends
+from sqlalchemy.orm import Session
 
+from app.core.database.connection import get_db
 from app.domains.geoextraccion.application.use_cases import (
     GenerarShapefileUseCase,
     FusionarShapefilesUseCase,
@@ -13,7 +15,7 @@ from app.domains.geoextraccion.application.use_cases import (
 from app.domains.geoextraccion.domain.ports.captura_store_port import CapturaStorePort
 from app.domains.geoextraccion.domain.ports.shapefile_port import ShapefilePort
 from app.domains.geoextraccion.infrastructure.geopandas_shapefile_adapter import GeoPandasShapefileAdapter
-from app.domains.geoextraccion.infrastructure.memoria_captura_store import MemoriaCapturaStore
+from app.domains.geoextraccion.infrastructure.sql_captura_store import SqlCapturaStore
 from app.domains.geoextraccion.infrastructure.ws_connection_manager import CapturasConnectionManager
 
 
@@ -35,11 +37,11 @@ def get_fusionar_shapefiles_use_case(
     return FusionarShapefilesUseCase(shapefile_service=shapefile_service)
 
 
-@lru_cache()
-def get_captura_store() -> CapturaStorePort:
-    """Instancia única (singleton cacheado): todas las requests del mismo proceso
-    uvicorn tienen que compartir el mismo store en memoria."""
-    return MemoriaCapturaStore()
+def get_captura_store(db: Session = Depends(get_db)) -> CapturaStorePort:
+    """Sesión de DB por request (no singleton: a diferencia del store en memoria que
+    reemplazó, este vive en Postgres — compartido entre los N workers del backend
+    en vez de aislado por proceso, ver SqlCapturaStore)."""
+    return SqlCapturaStore(db=db)
 
 
 @lru_cache()
