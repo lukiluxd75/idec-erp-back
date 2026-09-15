@@ -3,9 +3,9 @@ from typing import Optional, Dict
 
 class DomainException(Exception):
     """
-    Excepción base para todas las excepciones de dominio del ERP (cualquier dominio).
-    Cada subclase declara `http_status` y, opcionalmente, `headers` para que el manejador
-    genérico de core/errors/handlers.py sepa cómo traducirla a HTTP sin conocer el tipo concreto.
+    Base exception for all ERP domain exceptions (any domain).
+    Each subclass declares `http_status` and optionally `headers` so the generic
+    handler in core/errors/handlers.py can map it to HTTP without knowing the concrete type.
     """
     http_status: int = 400
     headers: Optional[Dict[str, str]] = None
@@ -16,5 +16,5 @@ class DomainException(Exception):
 
 
 class UnauthorizedException(DomainException):
-    """Se lanza cuando el usuario está autenticado pero no tiene permiso para la acción solicitada."""
+    """Raised when the user is authenticated but lacks permission for the requested action."""
     http_status = 403

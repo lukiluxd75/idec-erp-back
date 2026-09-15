@@ -24,19 +24,19 @@ def create_application() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Configuración de CORS
+    # CORS configuration (FRONTEND_ORIGIN may be a comma-separated list)
     application.add_middleware(
         CORSMiddleware,
-        allow_origins=[settings.FRONTEND_ORIGIN],
+        allow_origins=settings.cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
 
-    # Registro de manejadores de excepciones del Dominio
+    # Register domain exception handlers
     register_exception_handlers(application)
 
-    # Inclusión de routers de la capa de presentación
+    # Include presentation-layer routers
     application.include_router(api_router, prefix=settings.API_V1_STR)
 
     return application

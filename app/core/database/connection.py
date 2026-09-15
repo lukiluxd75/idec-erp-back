@@ -3,7 +3,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 from app.core.config import settings
 
-# Motor de conexión a PostgreSQL / SQLite
+# PostgreSQL / SQLite connection engine
 db_uri = settings.SQLALCHEMY_DATABASE_URI
 if db_uri.startswith("sqlite"):
     engine = create_engine(
@@ -17,27 +17,27 @@ else:
         pool_recycle=3600,
     )
 
-# Fábrica de sesiones de base de datos
+# Database session factory
 SessionLocal = sessionmaker(
     autocommit=False,
     autoflush=False,
     bind=engine,
 )
 
-# Clase base declarativa para los modelos ORM
+# Declarative base class for ORM models
 Base = declarative_base()
 
 
 def init_db_tables() -> bool:
     """
-    Inicializa automáticamente las tablas de la base de datos si no existen.
+    Automatically create database tables if they do not exist.
     """
     try:
-        from app.domains.seguridad.infrastructure import models  # noqa: F401
-        # El dominio 'resoluciones' NO se registra acá: su esquema (schema `resolutions`)
-        # ya existe y tiene datos reales cargados desde la app móvil — ver
-        # app/domains/resoluciones/infrastructure/models.py.
-        from app.domains.geoextraccion.infrastructure import models  # noqa: F401
+        from app.domains.security.infrastructure import models  # noqa: F401
+        # The 'resolutions' domain is NOT registered here: its schema (`resolutions`)
+        # already exists with real data from the mobile app — see
+        # app/domains/resolutions/infrastructure/models.py.
+        from app.domains.geoextraction.infrastructure import models  # noqa: F401
         Base.metadata.create_all(bind=engine)
         return True
     except Exception as exc:
@@ -48,8 +48,8 @@ def init_db_tables() -> bool:
 
 def get_db() -> Generator[Session, None, None]:
     """
-    Generador de sesión de base de datos para inyección de dependencias en FastAPI.
-    Garantiza el cierre adecuado de la conexión al finalizar la petición.
+    Database session generator for FastAPI dependency injection.
+    Ensures the connection is closed properly when the request finishes.
     """
     db = SessionLocal()
     try:

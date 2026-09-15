@@ -1,8 +1,8 @@
 """
-Único lugar que conoce todos los dominios del ERP y los ensambla en la aplicación
-(ver CLAUDE.md §3). Para agregar un dominio nuevo: registrar su router acá — no hace
-falta tocar ningún otro dominio existente. Si un dominio falla al importar, se omite
-con una advertencia en vez de tumbar el arranque de toda la aplicación.
+Single place that knows every ERP domain and assembles them into the application
+(see CLAUDE.md §3). To add a domain: register its router here — do not touch other
+domains. If a domain fails to import, it is skipped with a warning instead of
+crashing the whole app.
 """
 import logging
 from fastapi import APIRouter
@@ -12,25 +12,25 @@ logger = logging.getLogger("uvicorn.error")
 api_router = APIRouter()
 
 try:
-    from app.domains.seguridad.presentation.router import router as seguridad_router
-    api_router.include_router(seguridad_router)
+    from app.domains.security.presentation.router import router as security_router
+    api_router.include_router(security_router)
 except Exception as exc:
-    logger.warning(f"No se pudo cargar el dominio 'seguridad': {exc}")
+    logger.warning("Could not load domain 'security': %s", exc)
 
 try:
-    from app.domains.geoextraccion.presentation.router import router as geoextraccion_router
-    api_router.include_router(geoextraccion_router, prefix="/geoextraccion")
+    from app.domains.geoextraction.presentation.router import router as geoextraction_router
+    api_router.include_router(geoextraction_router, prefix="/geoextraction")
 except Exception as exc:
-    logger.warning(f"No se pudo cargar el dominio 'geoextraccion': {exc}")
+    logger.warning("Could not load domain 'geoextraction': %s", exc)
 
 try:
-    from app.domains.deteccion.presentation.router import router as deteccion_router
-    api_router.include_router(deteccion_router, prefix="/deteccion")
+    from app.domains.detection.presentation.router import router as detection_router
+    api_router.include_router(detection_router, prefix="/detection")
 except Exception as exc:
-    logger.warning(f"No se pudo cargar el dominio 'deteccion': {exc}")
+    logger.warning("Could not load domain 'detection': %s", exc)
 
 try:
-    from app.domains.resoluciones.presentation.router import router as resoluciones_router
-    api_router.include_router(resoluciones_router)
+    from app.domains.resolutions.presentation.router import router as resolutions_router
+    api_router.include_router(resolutions_router)
 except Exception as exc:
-    logger.warning(f"No se pudo cargar el dominio 'resoluciones': {exc}")
+    logger.warning("Could not load domain 'resolutions': %s", exc)

@@ -5,36 +5,41 @@ from pydantic import computed_field
 
 class Settings(BaseSettings):
     """
-    Configuraciones globales del sistema Backend.
-    Carga variables desde variables de entorno y archivo .env.
+    Global Backend system settings.
+    Loads variables from environment variables and the .env file.
     """
     PROJECT_NAME: str = "Ecosistema Herramienta GIS - Backend"
     VERSION: str = "2.0.0"
     API_V1_STR: str = "/api"
 
-    # Keycloak — valores reales se cargan desde .env (nunca hardcodear secretos acá)
+    # Keycloak — real values are loaded from .env (never hardcode secrets here)
     KEYCLOAK_URL: str = "https://auth.catastrocbba.com"
     KEYCLOAK_REALM: str = "alcaldia-idec"
     KEYCLOAK_CLIENT_ID: str = "app-idec"
     KEYCLOAK_CLIENT_SECRET: str = ""
     KEYCLOAK_TIMEOUT_SECONDS: int = 20
 
-    # Zentyal (LDAP/Samba4 AD-DC) — integración de directorio institucional
-    # valores reales se cargan desde .env (nunca hardcodear secretos acá)
+    # Zentyal (LDAP/Samba4 AD-DC) — institutional directory integration
+    # real values are loaded from .env (never hardcode secrets here)
     ZENTYAL_LDAP_HOST: str = ""
     ZENTYAL_LDAP_PORT: int = 636
     ZENTYAL_LDAP_USE_SSL: bool = True
     ZENTYAL_LDAP_VERIFY_CERT: bool = False
     ZENTYAL_LDAP_BIND_DN: str = ""
     ZENTYAL_LDAP_BIND_PASSWORD: str = ""
-    # Base y filtro de búsqueda para resolver el DN real del usuario antes de escribir
-    # (el `cn` casi nunca coincide con el username de login en AD/Samba4 — no armar el DN a mano)
+    # Base DN and search filter to resolve the real user DN before writing
+    # (`cn` almost never matches the login username in AD/Samba4 — do not build the DN by hand)
     ZENTYAL_LDAP_SEARCH_BASE_DN: str = "dc=catastrocbba,dc=com"
     ZENTYAL_LDAP_USER_SEARCH_FILTER: str = "(sAMAccountName={username})"
     ZENTYAL_LDAP_TIMEOUT_SECONDS: int = 10
 
-    # CORS
+    # CORS — comma-separated list of allowed browser origins
     FRONTEND_ORIGIN: str = "http://localhost:8060"
+
+    @computed_field
+    @property
+    def cors_origins(self) -> list[str]:
+        return [o.strip() for o in self.FRONTEND_ORIGIN.split(",") if o.strip()]
 
     # PostgreSQL Database
     DB_HOST: str = "localhost"

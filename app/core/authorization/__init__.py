@@ -1,7 +1,7 @@
 """
-Resolución de permisos internos (RBAC/ABAC) del ERP, transversal a todos los dominios.
-Pendiente de implementación — ver ARQUITECTURA.md §6 y CLAUDE.md §5.
-No confundir con `domains/seguridad`, que es dueño de los DATOS de roles/permisos;
-este paquete es donde vivirá la dependencia `require_permission(...)` que cualquier
-dominio usa para proteger sus propios endpoints.
+Internal permission resolution (RBAC/ABAC) for the ERP, shared across all domains.
+Pending implementation — see ARQUITECTURA.md §6 and CLAUDE.md §5.
+Do not confuse with `domains/security`, which owns the role/permission DATA;
+this package is where the `require_permission(...)` dependency will live so any
+domain can use it to protect its own endpoints.
 """

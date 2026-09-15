@@ -1,6 +1,6 @@
 """
-Bus de eventos in-process para comunicar dominios sin acoplarlos directamente.
-Pendiente de implementación — ver ARQUITECTURA.md §8 y CLAUDE.md §7.
-Úsalo cuando un dominio necesite notificar algo a otro sin esperar una respuesta
-(ej. Catastro emite `PredioCreado`, Documentación se suscribe sin que Catastro lo sepa).
+In-process event bus to communicate domains without coupling them directly.
+Pending implementation — see ARQUITECTURA.md §8 and CLAUDE.md §7.
+Use when one domain needs to notify another without waiting for a response
+(e.g. Cadastre emits `PredioCreado`, Documentation subscribes without Cadastre knowing).
 """

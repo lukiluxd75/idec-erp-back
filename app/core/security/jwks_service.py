@@ -9,8 +9,8 @@ from app.core.security.exceptions import (
 
 class JWKSService:
     """
-    Servicio de infraestructura encargado de obtener, cachear en memoria
-    y recuperar las claves públicas (JWKS) del servidor Keycloak.
+    Infrastructure service that fetches, caches in memory,
+    and retrieves public keys (JWKS) from the Keycloak server.
     """
 
     def __init__(self, jwks_url: Optional[str] = None, timeout: Optional[int] = None):
@@ -20,7 +20,7 @@ class JWKSService:
 
     def fetch_jwks(self, force_refresh: bool = False) -> Dict[str, Any]:
         """
-        Descarga y cachea las claves públicas del endpoint JWKS de Keycloak.
+        Download and cache public keys from the Keycloak JWKS endpoint.
         """
         if self._cache is None or force_refresh:
             try:
@@ -36,8 +36,8 @@ class JWKSService:
 
     def get_signing_key(self, kid: Optional[str]) -> Dict[str, Any]:
         """
-        Busca y retorna la clave de firma RSA correspondiente al Key ID ('kid').
-        Si no la encuentra en la primera pasada, refresca el caché una vez por si hubo rotación de claves.
+        Find and return the RSA signing key for the given Key ID ('kid').
+        If not found on the first pass, refresh the cache once in case of key rotation.
         """
         if not kid:
             raise TokenVerificationException("El encabezado del token no contiene 'kid'")
@@ -45,7 +45,7 @@ class JWKSService:
         jwks = self.fetch_jwks()
         key = self._find_key_in_jwks(jwks, kid)
 
-        # Si no la encuentra, intenta refrescar el caché una vez
+        # If not found, try refreshing the cache once
         if key is None:
             jwks = self.fetch_jwks(force_refresh=True)
             key = self._find_key_in_jwks(jwks, kid)
