@@ -11,4 +11,21 @@ class ShapefileIlegibleException(DomainException):
     http_status = 400
 
 
-__all__ = ["GeometriaInvalidaException", "ShapefileIlegibleException"]
+class CapturaNoEncontradaException(DomainException):
+    """No hay ninguna captura pendiente con ese id para el usuario (no existe, no es
+    suya, o ya expiró/fue consumida — el store en memoria no distingue los tres casos,
+    ver MemoriaCapturaStore)."""
+    http_status = 404
+
+
+class CapturaInvalidaException(DomainException):
+    """La foto subida desde el celular llegó vacía o en un formato no soportado."""
+    http_status = 400
+
+
+__all__ = [
+    "GeometriaInvalidaException",
+    "ShapefileIlegibleException",
+    "CapturaNoEncontradaException",
+    "CapturaInvalidaException",
+]
