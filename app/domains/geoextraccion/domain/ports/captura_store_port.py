@@ -8,8 +8,12 @@ class CapturaStorePort(ABC):
     """
     Puerto que la infraestructura de Geoextracción debe implementar (ver CLAUDE.md §3).
     application/ solo conoce esta interfaz, nunca cómo/dónde se guarda la foto de
-    verdad (hoy: memoria del proceso — ver MemoriaCapturaStore; si algún día hace
-    falta persistirla, se escribe otro adaptador acá sin tocar casos de uso).
+    verdad (hoy: Postgres — ver SqlCapturaStore, tabla `geoextraccion_capturas`; si
+    hiciera falta cambiarlo, se escribe otro adaptador acá sin tocar casos de uso).
+    Empezó siendo un store en memoria del proceso, pero eso se rompía con el backend
+    corriendo en varios workers: cada proceso tenía su propia memoria, así que una
+    captura guardada por el worker que recibió el POST del celular era invisible
+    para el worker que atendía el GET de la web.
 
     Cada captura pertenece a un usuario (`user_sub`, el `sub` de Keycloak de quien la
     sacó desde el celular): todos los métodos reciben `user_sub` y solo operan sobre

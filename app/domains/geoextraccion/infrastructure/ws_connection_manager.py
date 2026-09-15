@@ -8,10 +8,16 @@ logger = logging.getLogger("uvicorn.error")
 class CapturasConnectionManager:
     """
     Registro en memoria de los sockets conectados al canal de novedades de Capturas
-    (calco de ResolucionesConnectionManager, mismo dominio de proceso que
-    MemoriaCapturaStore). Alcanza con memoria de proceso porque el backend corre en
-    un único proceso uvicorn — ver useCapturasUpdates.js del frontend, que ya asume
-    reconexión simple.
+    (calco de ResolucionesConnectionManager). A diferencia del store de capturas
+    (SqlCapturaStore, en Postgres — compartido entre workers), este registro SÍ es
+    por proceso: en un backend con varios workers (ej. `--workers 4`), cada uno
+    tiene su propio set de conexiones, así que un `avisar_cambio()` disparado por el
+    worker que recibió el POST del celular NO llega a un navegador conectado al
+    socket de otro worker. Con el store ya compartido, el peor caso pasó de "nunca
+    aparece" a "hace falta refrescar la página" — ver useCapturasUpdates.js del
+    frontend, que ya asume reconexión simple y no un canal 100% confiable. Resolver
+    esto de raíz (que el aviso llegue sin importar el worker) pide algo tipo Redis
+    pub/sub entre los procesos — no está montado hoy.
     """
 
     def __init__(self):

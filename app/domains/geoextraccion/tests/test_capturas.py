@@ -1,6 +1,10 @@
 import unittest
 from datetime import timedelta
 
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from app.core.database.connection import Base
 from app.domains.geoextraccion.application.use_cases.crear_captura_use_case import (
     CrearCapturaUseCase,
 )
@@ -17,15 +21,26 @@ from app.domains.geoextraccion.domain.exceptions import (
     CapturaInvalidaException,
     CapturaNoEncontradaException,
 )
-from app.domains.geoextraccion.infrastructure.memoria_captura_store import (
+from app.domains.geoextraccion.infrastructure.models import CapturaModel  # noqa: F401 (registra la tabla en Base)
+from app.domains.geoextraccion.infrastructure.sql_captura_store import (
     MAX_CAPTURAS_POR_USUARIO,
-    MemoriaCapturaStore,
+    SqlCapturaStore,
 )
+
+
+def _nuevo_store():
+    """SqlCapturaStore sobre SQLite en memoria: mismo código que corre contra
+    Postgres en producción (el store no usa nada específico de un dialecto), sin
+    depender de una base real para correr los tests."""
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(bind=engine, tables=[CapturaModel.__table__])
+    db = sessionmaker(bind=engine)()
+    return SqlCapturaStore(db=db)
 
 
 class TestCrearCapturaUseCase(unittest.TestCase):
     def setUp(self):
-        self.store = MemoriaCapturaStore()
+        self.store = _nuevo_store()
         self.use_case = CrearCapturaUseCase(store=self.store)
 
     def test_rechaza_contenido_vacio(self):
@@ -43,11 +58,13 @@ class TestCrearCapturaUseCase(unittest.TestCase):
 
 
 class TestAislamientoPorUsuario(unittest.TestCase):
-    """Nadie puede listar ni descargar las capturas de otro usuario — el store se
-    indexa por user_sub en cada método (ver CapturaStorePort)."""
+    """Nadie puede listar ni descargar las capturas de otro usuario — el store
+    filtra por user_sub en cada método (ver CapturaStorePort). Importa sobre todo
+    ahora que el store es compartido entre los N workers del backend vía Postgres,
+    no aislado por proceso como antes."""
 
     def setUp(self):
-        self.store = MemoriaCapturaStore()
+        self.store = _nuevo_store()
         self.crear = CrearCapturaUseCase(store=self.store)
         self.listar = ListarCapturasPendientesUseCase(store=self.store)
         self.obtener_imagen = ObtenerImagenCapturaUseCase(store=self.store)
@@ -75,10 +92,16 @@ class TestAislamientoPorUsuario(unittest.TestCase):
         ids = [c.id_captura for c in self.listar.execute("user-a")]
         self.assertEqual(ids, [c2.id_captura, c1.id_captura])
 
+    def test_los_bytes_van_y_vuelven_intactos(self):
+        captura = self.crear.execute(contenido=b"contenido-binario", mime="image/png", user_sub="user-a")
+        contenido, mime = self.obtener_imagen.execute(captura.id_captura, user_sub="user-a")
+        self.assertEqual(contenido, b"contenido-binario")
+        self.assertEqual(mime, "image/png")
+
 
 class TestTopePorUsuario(unittest.TestCase):
     def test_descarta_la_mas_vieja_al_superar_el_tope(self):
-        store = MemoriaCapturaStore()
+        store = _nuevo_store()
         crear = CrearCapturaUseCase(store=store)
         listar = ListarCapturasPendientesUseCase(store=store)
 
@@ -93,24 +116,25 @@ class TestTopePorUsuario(unittest.TestCase):
 
 class TestTTL(unittest.TestCase):
     def test_purga_capturas_vencidas(self):
-        store = MemoriaCapturaStore()
+        store = _nuevo_store()
         crear = CrearCapturaUseCase(store=store)
         listar = ListarCapturasPendientesUseCase(store=store)
 
         captura = crear.execute(contenido=b"foto", mime="image/jpeg", user_sub="user-a")
         self.assertEqual(len(listar.execute("user-a")), 1)
 
-        # Simula que pasaron 31 minutos retrocediendo la fecha_creacion guardada,
+        # Simula que pasaron 31 minutos retrocediendo la fecha_creacion en la fila,
         # en vez de mockear datetime.now() global (más simple y menos frágil).
-        almacenada = store._por_usuario["user-a"][captura.id_captura]
-        almacenada.fecha_creacion -= timedelta(minutes=31)
+        fila = store._db.query(CapturaModel).filter_by(id_captura=captura.id_captura).first()
+        fila.fecha_creacion -= timedelta(minutes=31)
+        store._db.commit()
 
         self.assertEqual(listar.execute("user-a"), [])
 
 
 class TestDescartarCapturaUseCase(unittest.TestCase):
     def test_falla_si_no_existe(self):
-        store = MemoriaCapturaStore()
+        store = _nuevo_store()
         use_case = DescartarCapturaUseCase(store=store)
         with self.assertRaises(CapturaNoEncontradaException):
             use_case.execute("no-existe", user_sub="user-a")

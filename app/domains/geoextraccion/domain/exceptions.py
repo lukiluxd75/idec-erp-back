@@ -13,8 +13,8 @@ class ShapefileIlegibleException(DomainException):
 
 class CapturaNoEncontradaException(DomainException):
     """No hay ninguna captura pendiente con ese id para el usuario (no existe, no es
-    suya, o ya expiró/fue consumida — el store en memoria no distingue los tres casos,
-    ver MemoriaCapturaStore)."""
+    suya, o ya expiró/fue consumida — el store no distingue los tres casos, ver
+    SqlCapturaStore)."""
     http_status = 404
 
 
