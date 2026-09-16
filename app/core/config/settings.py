@@ -54,6 +54,22 @@ class Settings(BaseSettings):
     DETECTION_ENGINE_API_KEY: str = ""
     DETECTION_ENGINE_TIMEOUT_SECONDS: float = 120.0
 
+    # Chatbot domain — external Ollama host (not this server; empty means "not
+    # configured yet", which the chat engine turns into a 503 instead of trying
+    # to connect anywhere)
+    CHATBOT_OLLAMA_URL: str = ""
+    CHATBOT_CHAT_MODEL: str = "gemma4:e4b"
+    CHATBOT_VISION_MODEL: str = "qwen3-vl:4b"
+    CHATBOT_EMBEDDING_MODEL: str = "nomic-embed-text"
+    CHATBOT_CHAT_TIMEOUT_SECONDS: float = 120.0
+    CHATBOT_VISION_TIMEOUT_SECONDS: float = 180.0
+    CHATBOT_EMBEDDING_TIMEOUT_SECONDS: float = 60.0
+    CHATBOT_MATCH_THRESHOLD: float = 0.50
+    # Tesseract OCR (document ingestion) — empty CHATBOT_TESSERACT_CMD uses
+    # whatever 'tesseract' resolves to on PATH
+    CHATBOT_TESSERACT_CMD: str = ""
+    CHATBOT_TESSERACT_LANG: str = "spa"
+
     @computed_field
     @property
     def SQLALCHEMY_DATABASE_URI(self) -> str:
