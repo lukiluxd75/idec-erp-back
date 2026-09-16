@@ -28,7 +28,7 @@ router = APIRouter(prefix="/captures", tags=["Geoextraction · Captures"])
 
 
 def _to_list_item(c: Capture) -> CaptureListItem:
-    return CaptureListItem(id_captura=c.id_captura, mime=c.mime, fecha_creacion=c.fecha_creacion)
+    return CaptureListItem(capture_id=c.capture_id, mime=c.mime, created_at=c.created_at)
 
 
 @router.get("", response_model=List[CaptureListItem])

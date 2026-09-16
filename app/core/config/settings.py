@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     DB_PORT: str = "5432"
     DB_USER: str = "postgres"
     DB_PASSWORD: str = "postgres"
-    DB_NAME: str = "gis_seguridad"
+    DB_NAME: str = "idec_erp"
     DATABASE_URL: Optional[str] = None
 
     # Construction-detection GPU engine (stays on 10.0.0.30 — ERP is only a BFF)

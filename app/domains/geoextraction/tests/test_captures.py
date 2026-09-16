@@ -53,7 +53,7 @@ class TestCreateCaptureUseCase(unittest.TestCase):
 
     def test_saves_valid_capture(self):
         capture = self.use_case.execute(content=b"foto", mime="image/jpeg", user_sub="user-a")
-        self.assertIsNotNone(capture.id_captura)
+        self.assertIsNotNone(capture.capture_id)
         self.assertEqual(capture.mime, "image/jpeg")
 
 
@@ -77,24 +77,24 @@ class TestIsolationByUser(unittest.TestCase):
     def test_cannot_download_other_user_capture(self):
         capture = self.create.execute(content=b"foto", mime="image/jpeg", user_sub="user-a")
         with self.assertRaises(CaptureNotFoundException):
-            self.get_image.execute(capture.id_captura, user_sub="user-b")
+            self.get_image.execute(capture.capture_id, user_sub="user-b")
 
     def test_cannot_discard_other_user_capture(self):
         capture = self.create.execute(content=b"foto", mime="image/jpeg", user_sub="user-a")
         with self.assertRaises(CaptureNotFoundException):
-            self.discard.execute(capture.id_captura, user_sub="user-b")
+            self.discard.execute(capture.capture_id, user_sub="user-b")
         # Still there for the real owner.
         self.assertEqual(len(self.list_pending.execute("user-a")), 1)
 
     def test_newest_first_order(self):
         c1 = self.create.execute(content=b"foto1", mime="image/jpeg", user_sub="user-a")
         c2 = self.create.execute(content=b"foto2", mime="image/jpeg", user_sub="user-a")
-        ids = [c.id_captura for c in self.list_pending.execute("user-a")]
-        self.assertEqual(ids, [c2.id_captura, c1.id_captura])
+        ids = [c.capture_id for c in self.list_pending.execute("user-a")]
+        self.assertEqual(ids, [c2.capture_id, c1.capture_id])
 
     def test_bytes_roundtrip_intact(self):
         capture = self.create.execute(content=b"contenido-binario", mime="image/png", user_sub="user-a")
-        content, mime = self.get_image.execute(capture.id_captura, user_sub="user-a")
+        content, mime = self.get_image.execute(capture.capture_id, user_sub="user-a")
         self.assertEqual(content, b"contenido-binario")
         self.assertEqual(mime, "image/png")
 
@@ -111,7 +111,7 @@ class TestPerUserCap(unittest.TestCase):
 
         pending = list_pending.execute("user-a")
         self.assertEqual(len(pending), MAX_CAPTURES_PER_USER)
-        self.assertNotIn(first.id_captura, [c.id_captura for c in pending])
+        self.assertNotIn(first.capture_id, [c.capture_id for c in pending])
 
 
 class TestTTL(unittest.TestCase):
@@ -123,10 +123,10 @@ class TestTTL(unittest.TestCase):
         capture = create.execute(content=b"foto", mime="image/jpeg", user_sub="user-a")
         self.assertEqual(len(list_pending.execute("user-a")), 1)
 
-        # Simulate 31 minutes elapsed by rewinding fecha_creacion on the row,
+        # Simulate 31 minutes elapsed by rewinding created_at on the row,
         # instead of mocking datetime.now() globally (simpler and less brittle).
-        row = store._db.query(CaptureModel).filter_by(id_captura=capture.id_captura).first()
-        row.fecha_creacion -= timedelta(minutes=31)
+        row = store._db.query(CaptureModel).filter_by(capture_id=capture.capture_id).first()
+        row.created_at -= timedelta(minutes=31)
         store._db.commit()
 
         self.assertEqual(list_pending.execute("user-a"), [])

@@ -37,12 +37,11 @@ router = APIRouter(tags=["Resoluciones"])
 
 
 def _to_list_item(r: Resolution) -> ResolutionListItem:
-    # Out schemas keep Spanish JSON keys for frontend compatibility.
     return ResolutionListItem(
         resolution_id=r.resolution_id,
-        nombre=r.name,
+        name=r.name,
         resolution_number=r.resolution_number,
-        estado=r.status,
+        status=r.status,
         total_pages=r.total_pages,
         created_at=r.created_at,
     )
@@ -51,13 +50,13 @@ def _to_list_item(r: Resolution) -> ResolutionListItem:
 def _to_detail(r: Resolution) -> ResolutionDetail:
     return ResolutionDetail(
         resolution_id=r.resolution_id,
-        nombre=r.name,
+        name=r.name,
         resolution_number=r.resolution_number,
-        estado=r.status,
+        status=r.status,
         total_pages=r.total_pages,
         created_at=r.created_at,
-        paginas=[PageOut(orden=p.order_index) for p in r.pages],
-        tabla=r.table_data,
+        pages=[PageOut(order_index=p.order_index) for p in r.pages],
+        table_data=r.table_data,
     )
 
 
@@ -72,18 +71,18 @@ def list_resolutions(
 
 @router.post("", response_model=ResolutionDetail, status_code=status.HTTP_201_CREATED)
 async def create_resolution(
-    nombre: str = Form(...),
+    name: str = Form(...),
     resolution_number: str = Form(...),
-    paginas: List[UploadFile] = File(...),
+    pages: List[UploadFile] = File(...),
     use_case: CreateResolutionUseCase = Depends(get_create_resolution_use_case),
     manager: ResolutionsConnectionManager = Depends(get_connection_manager),
     user: UserProfile = Depends(get_current_user),
 ):
-    """Register a newly scanned resolution (from the mobile app) together with
-    its page photos, in upload order. Form field names stay Spanish for the front."""
-    contents = [((await page.read()), page.content_type or "image/jpeg") for page in paginas]
+    """Register a newly scanned resolution together with its page photos, in
+    upload order."""
+    contents = [((await page.read()), page.content_type or "image/jpeg") for page in pages]
     resolution = use_case.execute(
-        name=nombre, resolution_number=resolution_number, pages=contents, user_sub=user.sub
+        name=name, resolution_number=resolution_number, pages=contents, user_sub=user.sub
     )
     await manager.notify_change()
     return _to_detail(resolution)
@@ -99,16 +98,16 @@ def get_resolution(
     return _to_detail(use_case.execute(resolution_id, user.sub))
 
 
-@router.get("/{resolution_id}/pages/{orden}")
+@router.get("/{resolution_id}/pages/{order_index}")
 def get_page(
     resolution_id: str,
-    orden: int,
+    order_index: int,
     use_case: GetPageUseCase = Depends(get_page_use_case),
     user: UserProfile = Depends(get_current_user),
 ):
     """Image bytes of a page. Requires Bearer -> cannot be used as a direct
-    <img src>; the frontend downloads it as a Blob (see resolucionesApi.paginaBlob)."""
-    content, content_type = use_case.execute(resolution_id, orden, user.sub)
+    <img src>; the frontend downloads it as a Blob (see resolutionsApi.pageBlob)."""
+    content, content_type = use_case.execute(resolution_id, order_index, user.sub)
     return Response(content=content, media_type=content_type)
 
 
@@ -121,8 +120,8 @@ async def save_table(
     user: UserProfile = Depends(get_current_user),
 ):
     """Save the surface table (reviewed/edited) and the flow status —
-    'Guardar borrador' or 'Generar Excel' from ResolucionPage."""
-    resolution = use_case.execute(resolution_id, payload.tabla, payload.estado, user.sub)
+    'Guardar borrador' or 'Generar Excel' from ResolutionPage."""
+    resolution = use_case.execute(resolution_id, payload.table_data, payload.status, user.sub)
     await manager.notify_change()
     return _to_detail(resolution)
 

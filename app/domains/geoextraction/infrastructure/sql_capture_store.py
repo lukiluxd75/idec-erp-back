@@ -24,7 +24,7 @@ MAX_CAPTURES_PER_USER = 5
 
 
 def _to_entity(row: CaptureModel) -> Capture:
-    return Capture(id_captura=row.id_captura, mime=row.mime, fecha_creacion=row.fecha_creacion)
+    return Capture(capture_id=row.capture_id, mime=row.mime, created_at=row.created_at)
 
 
 class SqlCaptureStore(CaptureStorePort):
@@ -35,7 +35,7 @@ class SqlCaptureStore(CaptureStorePort):
         """Delete captures (any user) past the TTL. Called at the start of each
         public operation — no background task; lazy purge is enough for expected volume."""
         limit = datetime.now(timezone.utc) - TTL
-        self._db.query(CaptureModel).filter(CaptureModel.fecha_creacion < limit).delete(
+        self._db.query(CaptureModel).filter(CaptureModel.created_at < limit).delete(
             synchronize_session=False
         )
         self._db.commit()
@@ -46,18 +46,18 @@ class SqlCaptureStore(CaptureStorePort):
         pending = (
             self._db.query(CaptureModel)
             .filter(CaptureModel.user_sub == user_sub)
-            .order_by(CaptureModel.fecha_creacion.asc())
+            .order_by(CaptureModel.created_at.asc())
             .all()
         )
         while len(pending) >= MAX_CAPTURES_PER_USER:
             self._db.delete(pending.pop(0))  # discard oldest (FIFO)
 
         row = CaptureModel(
-            id_captura=str(uuid.uuid4()),
+            capture_id=str(uuid.uuid4()),
             user_sub=user_sub,
             mime=mime,
-            imagen=content,
-            fecha_creacion=datetime.now(timezone.utc),
+            image=content,
+            created_at=datetime.now(timezone.utc),
         )
         self._db.add(row)
         self._db.commit()
@@ -69,7 +69,7 @@ class SqlCaptureStore(CaptureStorePort):
         rows = (
             self._db.query(CaptureModel)
             .filter(CaptureModel.user_sub == user_sub)
-            .order_by(CaptureModel.fecha_creacion.desc())
+            .order_by(CaptureModel.created_at.desc())
             .all()
         )
         return [_to_entity(r) for r in rows]
@@ -78,18 +78,18 @@ class SqlCaptureStore(CaptureStorePort):
         self._purge_expired()
         row = (
             self._db.query(CaptureModel)
-            .filter(CaptureModel.id_captura == id_captura, CaptureModel.user_sub == user_sub)
+            .filter(CaptureModel.capture_id == id_captura, CaptureModel.user_sub == user_sub)
             .first()
         )
         if row is None:
             return None
-        return row.imagen, row.mime
+        return row.image, row.mime
 
     def discard(self, id_captura: str, user_sub: str) -> bool:
         self._purge_expired()
         row = (
             self._db.query(CaptureModel)
-            .filter(CaptureModel.id_captura == id_captura, CaptureModel.user_sub == user_sub)
+            .filter(CaptureModel.capture_id == id_captura, CaptureModel.user_sub == user_sub)
             .first()
         )
         if row is None:

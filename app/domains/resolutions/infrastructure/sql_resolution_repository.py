@@ -20,7 +20,7 @@ class SqlResolutionRepository(ResolutionRepositoryPort):
     def list(self, user_sub: str) -> List[Resolution]:
         models = (
             self._db.query(ResolutionModel)
-            .options(joinedload(ResolutionModel.pages))
+            .options(self._pages_without_image())
             .filter(ResolutionModel.user_sub == user_sub, ResolutionModel.deleted_at.is_(None))
             .order_by(ResolutionModel.created_at.desc())
             .all()
@@ -32,7 +32,18 @@ class SqlResolutionRepository(ResolutionRepositoryPort):
         return self._to_entity(model) if model else None
 
     def get_page(self, resolution_id: str, order_index: int, user_sub: str) -> Optional[Tuple[bytes, str]]:
-        if self._get_model(resolution_id, user_sub) is None:
+        # Ownership check without pulling every page's image (see _get_model):
+        # this only needs to know the resolution exists and belongs to user_sub.
+        owned = (
+            self._db.query(ResolutionModel.resolution_id)
+            .filter(
+                ResolutionModel.resolution_id == resolution_id,
+                ResolutionModel.user_sub == user_sub,
+                ResolutionModel.deleted_at.is_(None),
+            )
+            .first()
+        )
+        if owned is None:
             return None
 
         page = (
@@ -44,6 +55,17 @@ class SqlResolutionRepository(ResolutionRepositoryPort):
             .first()
         )
         return (page.image, page.mime) if page else None
+
+    @staticmethod
+    def _pages_without_image():
+        # list()/_get_model() only need order_index + mime (see _to_entity) — the
+        # `image` BLOB (avg ~550KB/page here) is only ever needed by get_page(),
+        # which queries it directly. Eager-loading it everywhere else meant every
+        # resolutions list/detail pulled every photo's full bytes across a DB link
+        # with ~120ms latency for nothing.
+        return joinedload(ResolutionModel.pages).load_only(
+            ResolutionPageModel.order_index, ResolutionPageModel.mime
+        )
 
     def create(
         self,
@@ -105,7 +127,7 @@ class SqlResolutionRepository(ResolutionRepositoryPort):
     def _get_model(self, resolution_id: str, user_sub: str) -> Optional[ResolutionModel]:
         return (
             self._db.query(ResolutionModel)
-            .options(joinedload(ResolutionModel.pages))
+            .options(self._pages_without_image())
             .filter(
                 ResolutionModel.resolution_id == resolution_id,
                 ResolutionModel.user_sub == user_sub,
