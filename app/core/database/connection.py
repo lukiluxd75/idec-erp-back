@@ -1,6 +1,7 @@
 from typing import Generator
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
+from sqlalchemy.schema import CreateSchema
 from app.core.config import settings
 
 # PostgreSQL / SQLite connection engine
@@ -43,6 +44,14 @@ def init_db_tables() -> bool:
         # already exists with real data from the mobile app — see
         # app/domains/resolutions/infrastructure/models.py.
         from app.domains.geoextraction.infrastructure import models  # noqa: F401
+        from app.domains.chatbot.infrastructure import models as chatbot_models  # noqa: F401
+
+        if not db_uri.startswith("sqlite"):
+            # create_all() only creates tables, never the Postgres schema itself.
+            # Unlike 'resolutions'/'detection', 'chatbot' owns its schema outright
+            # (nothing external creates it), so it has to happen here for local dev.
+            with engine.begin() as conn:
+                conn.execute(CreateSchema(chatbot_models.SCHEMA, if_not_exists=True))
         Base.metadata.create_all(bind=engine)
         return True
     except Exception as exc:

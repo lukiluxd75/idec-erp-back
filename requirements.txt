@@ -14,3 +14,8 @@ python-multipart>=0.0.9
 geopandas>=0.14
 shapely>=2.0
 pandas>=2.0
+
+# chatbot domain
+pytesseract>=0.3.10
+opencv-python-headless>=4.9
+numpy>=1.26
