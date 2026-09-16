@@ -13,7 +13,12 @@ if db_uri.startswith("sqlite"):
 else:
     engine = create_engine(
         db_uri,
-        pool_pre_ping=True,
+        # No pool_pre_ping: the DB (172.16.66.103) is ~120ms away, and pre_ping
+        # adds a full round trip to EVERY checkout from the pool -- i.e. to every
+        # single DB-touching request, all the time. pool_recycle already discards
+        # connections older than an hour, which is enough given how often this
+        # app hits the DB (polling every 10s on some pages) to keep connections
+        # from going stale between uses.
         pool_recycle=3600,
     )
 

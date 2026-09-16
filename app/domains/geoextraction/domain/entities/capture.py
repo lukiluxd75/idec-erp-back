@@ -10,6 +10,6 @@ class Capture:
     in this entity — they are fetched separately, like ResolutionPage in the
     resolutions domain."""
 
-    id_captura: str
+    capture_id: str
     mime: str
-    fecha_creacion: datetime
+    created_at: datetime

@@ -8,7 +8,7 @@ class CaptureStorePort(ABC):
     """
     Port that Geoextraction infrastructure must implement (see CLAUDE.md §3).
     application/ only knows this interface, never how/where the photo is actually
-    stored (today: Postgres — see SqlCaptureStore, table `geoextraccion_capturas`;
+    stored (today: Postgres — see SqlCaptureStore, table `geoextraction_captures`;
     if that needs to change, write another adapter here without touching use cases).
     It started as an in-process memory store, but that broke with multiple workers:
     each process had its own memory, so a capture saved by the worker that handled
