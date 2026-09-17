@@ -23,10 +23,18 @@ class InactiveUserException(DomainException):
     http_status = 403
 
 
+class RoleInUseException(DomainException):
+    """Raised when deleting an internal role that still has users assigned
+    (user_role_areas). Deleting it would violate the role_id FK; caught before
+    the DB round-trip so the user gets a clear message instead of a raw 500."""
+    http_status = 409
+
+
 __all__ = [
     "DomainException",
     "InvalidDomainException",
     "InactiveUserException",
+    "RoleInUseException",
     "InvalidCredentialsException",
     "TokenVerificationException",
     "TokenExpiredException",
