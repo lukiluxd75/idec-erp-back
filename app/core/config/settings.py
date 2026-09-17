@@ -54,6 +54,15 @@ class Settings(BaseSettings):
     DETECTION_ENGINE_API_KEY: str = ""
     DETECTION_ENGINE_TIMEOUT_SECONDS: float = 120.0
 
+    # Appraisal-review domain — read-mostly connection to catastro_operativo, the
+    # external Avalúos system's own DB (never idec_erp; separate server/login)
+    AVALUOS_DB_HOST: str = "localhost"
+    AVALUOS_DB_PORT: str = "5432"
+    AVALUOS_DB_USER: str = "postgres"
+    AVALUOS_DB_PASSWORD: str = "postgres"
+    AVALUOS_DB_NAME: str = "catastro_operativo"
+    AVALUOS_DATABASE_URL: Optional[str] = None
+
     # Chatbot domain — external Ollama host (not this server; empty means "not
     # configured yet", which the chat engine turns into a 503 instead of trying
     # to connect anywhere)
@@ -76,6 +85,16 @@ class Settings(BaseSettings):
         if self.DATABASE_URL:
             return self.DATABASE_URL
         return f"postgresql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+
+    @computed_field
+    @property
+    def AVALUOS_SQLALCHEMY_DATABASE_URI(self) -> str:
+        if self.AVALUOS_DATABASE_URL:
+            return self.AVALUOS_DATABASE_URL
+        return (
+            f"postgresql://{self.AVALUOS_DB_USER}:{self.AVALUOS_DB_PASSWORD}"
+            f"@{self.AVALUOS_DB_HOST}:{self.AVALUOS_DB_PORT}/{self.AVALUOS_DB_NAME}"
+        )
 
     @computed_field
     @property
