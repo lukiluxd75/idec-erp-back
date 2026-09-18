@@ -4,6 +4,7 @@ from typing import List
 from fastapi import APIRouter, Depends, File, Response, UploadFile, WebSocket, WebSocketDisconnect, status
 
 from app.core.errors.exceptions import DomainException
+from app.core.utils.user_agent import is_mobile_user_agent
 from app.domains.geoextraction.application.use_cases import (
     CreateCaptureUseCase,
     DiscardCaptureUseCase,
@@ -98,7 +99,7 @@ async def captures_ws(
     """
     token = websocket.query_params.get("token")
     try:
-        verify_token(token or "")
+        user = verify_token(token or "")
     except DomainException:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
@@ -107,7 +108,8 @@ async def captures_ws(
         await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
         return
 
-    await manager.connect(websocket)
+    is_mobile = is_mobile_user_agent(websocket.headers.get("user-agent", ""))
+    await manager.connect(websocket, user.sub, is_mobile)
     try:
         while True:
             # Client sends nothing on this socket: only used for server -> browser
@@ -115,4 +117,4 @@ async def captures_ws(
             # without busy-waiting.
             await websocket.receive_text()
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
+        await manager.disconnect(websocket)
