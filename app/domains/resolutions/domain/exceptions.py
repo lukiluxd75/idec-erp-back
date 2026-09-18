@@ -21,9 +21,27 @@ class ResolutionWithoutPagesException(DomainException):
     http_status = 400
 
 
+class PlanPageNotFoundException(DomainException):
+    """The resolution exists but has no PLAN page with that order index."""
+    http_status = 404
+
+
+class InvalidPlantaException(DomainException):
+    """The received 'planta' for a plan page is not one of PLANTAS_RESUMEN."""
+    http_status = 400
+
+
+class NoPlanPagesException(DomainException):
+    """Attempted to add plan pages without attaching any image."""
+    http_status = 400
+
+
 __all__ = [
     "ResolutionNotFoundException",
     "PageNotFoundException",
     "InvalidStatusException",
     "ResolutionWithoutPagesException",
+    "PlanPageNotFoundException",
+    "InvalidPlantaException",
+    "NoPlanPagesException",
 ]

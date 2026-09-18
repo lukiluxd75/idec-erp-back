@@ -4,9 +4,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session, joinedload
 
-from app.domains.resolutions.domain.entities.resolution import ResolutionPage, Resolution
+from app.domains.resolutions.domain.entities.resolution import PlanPage, ResolutionPage, Resolution
 from app.domains.resolutions.domain.ports.resolution_repository_port import ResolutionRepositoryPort
 from app.domains.resolutions.infrastructure.models import ResolutionModel, ResolutionPageModel
+from app.domains.resolutions.infrastructure.plan_page_models import ResolutionPlanPageModel
 
 
 class SqlResolutionRepository(ResolutionRepositoryPort):
@@ -124,6 +125,83 @@ class SqlResolutionRepository(ResolutionRepositoryPort):
         self._db.commit()
         return True
 
+    def add_plan_pages(
+        self,
+        resolution_id: str,
+        pages: List[Tuple[bytes, str, str]],
+        source: str,
+        user_sub: str,
+    ) -> Optional[Resolution]:
+        model = self._get_model(resolution_id, user_sub)
+        if model is None:
+            return None
+
+        siguiente = (
+            self._db.query(ResolutionPlanPageModel.order_index)
+            .filter(ResolutionPlanPageModel.resolution_id == resolution_id)
+            .order_by(ResolutionPlanPageModel.order_index.desc())
+            .first()
+        )
+        inicio = (siguiente[0] + 1) if siguiente else 1
+        for i, (content, mime, planta) in enumerate(pages):
+            self._db.add(
+                ResolutionPlanPageModel(
+                    plan_page_id=str(uuid.uuid4()),
+                    resolution_id=resolution_id,
+                    order_index=inicio + i,
+                    planta=planta,
+                    image=content,
+                    mime=mime,
+                    file_name=f"plano_{inicio + i}.jpg",
+                    source=source,
+                )
+            )
+        self._db.commit()
+        return self._to_entity(model)
+
+    def get_plan_page(self, resolution_id: str, order_index: int, user_sub: str) -> Optional[Tuple[bytes, str]]:
+        owned = (
+            self._db.query(ResolutionModel.resolution_id)
+            .filter(
+                ResolutionModel.resolution_id == resolution_id,
+                ResolutionModel.user_sub == user_sub,
+                ResolutionModel.deleted_at.is_(None),
+            )
+            .first()
+        )
+        if owned is None:
+            return None
+
+        page = (
+            self._db.query(ResolutionPlanPageModel)
+            .filter(
+                ResolutionPlanPageModel.resolution_id == resolution_id,
+                ResolutionPlanPageModel.order_index == order_index,
+            )
+            .first()
+        )
+        return (page.image, page.mime) if page else None
+
+    def delete_plan_page(self, resolution_id: str, order_index: int, user_sub: str) -> Optional[Resolution]:
+        model = self._get_model(resolution_id, user_sub)
+        if model is None:
+            return None
+
+        page = (
+            self._db.query(ResolutionPlanPageModel)
+            .filter(
+                ResolutionPlanPageModel.resolution_id == resolution_id,
+                ResolutionPlanPageModel.order_index == order_index,
+            )
+            .first()
+        )
+        if page is None:
+            return None
+
+        self._db.delete(page)
+        self._db.commit()
+        return self._to_entity(model)
+
     def _get_model(self, resolution_id: str, user_sub: str) -> Optional[ResolutionModel]:
         return (
             self._db.query(ResolutionModel)
@@ -136,8 +214,19 @@ class SqlResolutionRepository(ResolutionRepositoryPort):
             .first()
         )
 
-    @staticmethod
-    def _to_entity(model: ResolutionModel) -> Resolution:
+    def _get_plan_pages(self, resolution_id: str) -> List[PlanPage]:
+        rows = (
+            self._db.query(ResolutionPlanPageModel)
+            .filter(ResolutionPlanPageModel.resolution_id == resolution_id)
+            .order_by(ResolutionPlanPageModel.order_index)
+            .all()
+        )
+        return [
+            PlanPage(order_index=p.order_index, content_type=p.mime, planta=p.planta, source=p.source)
+            for p in rows
+        ]
+
+    def _to_entity(self, model: ResolutionModel) -> Resolution:
         return Resolution(
             resolution_id=model.resolution_id,
             name=model.name,
@@ -148,5 +237,6 @@ class SqlResolutionRepository(ResolutionRepositoryPort):
                 ResolutionPage(order_index=p.order_index, content_type=p.mime)
                 for p in sorted(model.pages, key=lambda p: p.order_index)
             ],
+            plan_pages=self._get_plan_pages(model.resolution_id),
             table_data=model.table_data,
         )
