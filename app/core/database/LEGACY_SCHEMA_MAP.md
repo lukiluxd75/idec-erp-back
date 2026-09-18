@@ -25,6 +25,15 @@ ORM attributes and `__tablename__` / column names now match the live database.
 Timestamps: `created_at` / `updated_at` (was `fecha_creacion` / `fecha_actualizacion`).
 Flags: `is_active` (was `activo`).
 
+### Legacy Spanish duplicates (removed 2026-09-18)
+
+Dropped from `public` after confirming the ERP ORM uses only English names and no
+external FKs pointed at the Spanish copies:
+
+`sistema`, `subsistema`, `recurso`, `permiso`, `rol_interno`, `rol_permiso`,
+`usuario`, `usuario_rol_area`, `area`, `auditoria_acceso`, `auditoria_geoocr`,
+and unused empty `system_roles`.
+
 ## GIS module
 
 | Schema | Was |

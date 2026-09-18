@@ -71,7 +71,7 @@ def private_route(
         logging.getLogger("uvicorn.error").warning(f"Aviso al sincronizar con la base de datos: {exc}")
 
     return PrivateProfileResponse(
-        message="¡Accediste a un endpoint protegido de Keycloak!",
+        message="Ha accedido a un endpoint protegido de Keycloak.",
         usuario=current_user.username,
         email=current_user.email,
         roles=current_user.roles,

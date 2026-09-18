@@ -48,7 +48,7 @@ class SyncUserRbacUseCase:
         existing_user = self._user_repository.get_by_keycloak_sub(clean_sub)
         if existing_user and not existing_user.is_active:
             raise InactiveUserException(
-                "Tu usuario está inactivo. Contactá a un administrador."
+                "Su usuario está inactivo. Contacte a un administrador."
             )
 
         user_entity = self._user_repository.ensure_user_exists(

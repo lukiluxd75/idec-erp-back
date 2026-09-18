@@ -135,7 +135,7 @@ def get_current_user(
         if usuario and not usuario.is_active:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Tu usuario está inactivo. Contactá a un administrador.",
+                detail="Su usuario está inactivo. Contacte a un administrador.",
             )
 
     return profile
@@ -235,7 +235,7 @@ def require_permission(codigo: str):
         if codigo not in permisos:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"No tenés el permiso '{codigo}' para realizar esta acción.",
+                detail=f"No tiene el permiso '{codigo}' para realizar esta acción.",
             )
         return current_user
 
