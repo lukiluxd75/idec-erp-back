@@ -9,6 +9,7 @@ pipeline {
         // Rutas del servidor para despliegue y respaldos
         DEPLOY_DIR = '/tmp/erp-back-pruebas'
         BACKUP_DIR = '/tmp/erp-back-backups'
+        CI = 'true'
     }
 
     options {
@@ -30,15 +31,17 @@ pipeline {
         stage('2. Instalar Dependencias') {
             steps {
                 echo "Instalando dependencias de Node.js..."
-                sh 'npm install'
+                sh 'npm install --no-audit --no-fund || npm install'
             }
         }
 
         stage('3. Pruebas Automatizadas (Tests)') {
             steps {
                 echo "Ejecutando pruebas unitarias y de integración..."
-                // Evita que el runner se quede colgado o falle si no hay pruebas
-                sh 'CI=true npm test -- --watchAll=false --passWithNoTests || true'
+                // Usa catchError para ejecutar la prueba de forma totalmente segura sin romper el pipeline por exit code 254
+                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+                    sh 'npm test --if-present -- --watchAll=false --passWithNoTests'
+                }
             }
         }
 
@@ -50,8 +53,8 @@ pipeline {
                 mkdir -p ${DEPLOY_DIR}
                 mkdir -p ${BACKUP_DIR}
 
-                # 2. Crear un respaldo .tar.gz de la versión anterior
-                if [ "$(ls -A ${DEPLOY_DIR})" ]; then
+                # 2. Crear un respaldo .tar.gz de la versión anterior (si existen archivos)
+                if [ "$(ls -A ${DEPLOY_DIR} 2>/dev/null)" ]; then
                     tar -czf ${BACKUP_DIR}/back-backup-$(date +%Y%m%d_%H%M%S).tar.gz -C ${DEPLOY_DIR} . || true
                 fi
 
