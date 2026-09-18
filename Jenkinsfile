@@ -1,82 +1,61 @@
 pipeline {
-    agent {
-        node {
-            label 'principal'
-        }
-    }
-
-    environment {
-        DEPLOY_DIR = '/tmp/erp-back-pruebas'
-        BACKUP_DIR = '/tmp/erp-back-backups'
-        CI = 'true'
-    }
-
-    options {
-        buildDiscarder(logRotator(numToKeepStr: '10'))
-        timeout(time: 15, unit: 'MINUTES')
-        disableConcurrentBuilds()
-    }
+    agent any
 
     stages {
         stage('1. Preparación del Entorno') {
             steps {
-                echo "Iniciando pipeline del Backend..."
-                sh 'node -v || true'
-                sh 'npm -v || true'
+                echo 'Limpiando entorno de trabajo...'
+                cleanWs()
             }
         }
 
         stage('2. Instalar Dependencias') {
             steps {
-                echo "Instalando dependencias de Node.js..."
-                sh '''
-                npm install --no-audit --no-fund || npm install || true
-                '''
+                echo 'Instalando dependencias del Backend...'
+                sh 'npm ci --prefer-offline || npm install'
             }
         }
 
-        stage('3. Pruebas Automatizadas (Tests)') {
+        stage('3. Pruebas Automatizadas') {
             steps {
-                echo "Ejecutando pruebas unitarias y de integración..."
-                sh '''
-                # Ejecuta npm test de forma segura en Bash
-                npm test --if-present -- --watchAll=false --passWithNoTests || true
-                echo "Etapa de pruebas finalizada sin interrupciones."
-                '''
+                echo 'Ejecutando pruebas del Backend...'
+                // Genera reporte de pruebas en formato JUnit para la gráfica
+                sh 'npm run test -- --reporter=junit --outputFile=test-report.xml || true'
             }
         }
 
-        stage('4. Despliegue en Servidor') {
+        stage('4. Respaldos y Mantenimiento') {
             steps {
-                echo "Desplegando la rama ${BRANCH_NAME} en ${DEPLOY_DIR}..."
-                sh '''
-                # 1. Crear directorios necesarios
-                mkdir -p ${DEPLOY_DIR}
-                mkdir -p ${BACKUP_DIR}
+                echo 'Creando copia de respaldo previa al despliegue...'
+                sh 'tar -czf backup-backend-$(date +%Y%m%d_%H%M%S).tar.gz /var/www/html/idec-erp-back || true'
+            }
+        }
 
-                # 2. Respaldar versión anterior
-                if [ "$(ls -A ${DEPLOY_DIR} 2>/dev/null)" ]; then
-                    tar -czf ${BACKUP_DIR}/back-backup-$(date +%Y%m%d_%H%M%S).tar.gz -C ${DEPLOY_DIR} . || true
-                fi
-
-                # 3. Sincronizar archivos del repositorio
-                rsync -avz --exclude='.git' --exclude='.env' ./ ${DEPLOY_DIR}/
-
-                echo "Despliegue del Backend completado con éxito."
-                '''
+        stage('5. Despliegue en Servidor') {
+            steps {
+                echo 'Sincronizando archivos del Backend...'
+                sh 'rsync -avz --exclude="node_modules" --exclude=".git" ./ /var/www/html/idec-erp-back/'
+                
+                echo 'Reiniciando el servicio de backend (PM2 / Node)...'
+                sh 'pm2 restart idec-erp-back || true'
             }
         }
     }
 
     post {
+        always {
+            echo 'Publicando resultados de las pruebas...'
+            // Genera y actualiza la gráfica de tendencias
+            junit allowEmptyResults: true, testResults: '**/test-report.xml'
+            
+            echo 'Limpiando espacio de trabajo...'
+            cleanWs()
+        }
         success {
-            echo "✅ El pipeline del Backend finalizó con ÉXITO."
+            echo '¡El despliegue del Backend se completó con éxito!'
         }
         failure {
-            echo "❌ El pipeline falló en un punto crítico."
-        }
-        always {
-            cleanWs()
+            echo 'El pipeline del Backend ha fallado.'
         }
     }
 }
