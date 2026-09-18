@@ -34,6 +34,9 @@ class FeedbackResponse(BaseModel):
     message: str = "Retroalimentación registrada correctamente."
 
 
+class LearnRuleRequest(BaseModel):
+    rule_text: str
+
 class FeedbackListItem(BaseModel):
     id: str
     conversation_id: str
@@ -43,3 +46,4 @@ class FeedbackListItem(BaseModel):
     match_score: Optional[float] = None
     feedback: Optional[str] = None
     feedback_comment: Optional[str] = None
+    user_message: Optional[str] = None

@@ -105,6 +105,7 @@ def list_feedback(
             match_score=m.match_score,
             feedback=m.feedback,
             feedback_comment=m.feedback_comment,
+            user_message=m.user_message,
         )
         for m in use_case.execute()
     ]
@@ -117,3 +118,16 @@ def reindex_embeddings(
 ):
     count = use_case.execute()
     return ReindexResponse(reindexed_count=count)
+
+from app.domains.chatbot.presentation.schemas.chat_schema import LearnRuleRequest, FeedbackResponse
+from app.domains.chatbot.presentation.deps import get_learn_from_feedback_use_case
+from app.domains.chatbot.application.use_cases.learn_from_feedback_use_case import LearnFromFeedbackUseCase
+
+@router.post("/feedback/learn", response_model=FeedbackResponse)
+def learn_from_feedback(
+    payload: LearnRuleRequest,
+    use_case: LearnFromFeedbackUseCase = Depends(get_learn_from_feedback_use_case),
+    user: UserProfile = Depends(require_permission("chatbot.feedback")),
+):
+    use_case.execute(payload.rule_text, user.sub)
+    return FeedbackResponse(message="Regla aprendida exitosamente. El asistente la usará en futuros chats.")

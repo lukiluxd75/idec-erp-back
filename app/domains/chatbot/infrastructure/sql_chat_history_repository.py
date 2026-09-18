@@ -90,4 +90,20 @@ class SqlChatHistoryRepository(ChatHistoryRepositoryPort):
             .order_by(ChatMessageModel.created_at.desc())
             .all()
         )
-        return [_to_entity(m) for m in models]
+        results = []
+        for m in models:
+            entity = _to_entity(m)
+            prev_user_msg = (
+                self._db.query(ChatMessageModel)
+                .filter(
+                    ChatMessageModel.conversation_id == m.conversation_id,
+                    ChatMessageModel.role == "user",
+                    ChatMessageModel.created_at < m.created_at
+                )
+                .order_by(ChatMessageModel.created_at.desc())
+                .first()
+            )
+            if prev_user_msg:
+                entity.user_message = prev_user_msg.content
+            results.append(entity)
+        return results

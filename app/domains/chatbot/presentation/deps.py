@@ -110,3 +110,7 @@ def get_reindex_embeddings_use_case(
     return ReindexEmbeddingsUseCase(
         procedure_repository=procedures, chat_engine=engine, embedding_model=settings.CHATBOT_EMBEDDING_MODEL
     )
+
+def get_learn_from_feedback_use_case(db: Session = Depends(get_db)):
+    from app.domains.chatbot.application.use_cases.learn_from_feedback_use_case import LearnFromFeedbackUseCase
+    return LearnFromFeedbackUseCase(db)

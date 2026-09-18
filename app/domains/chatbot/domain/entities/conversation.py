@@ -15,6 +15,7 @@ class ChatMessage:
     is_unanswered: bool = False
     feedback: Optional[str] = None
     feedback_comment: Optional[str] = None
+    user_message: Optional[str] = None
     created_at: Optional[datetime] = None
 
 
