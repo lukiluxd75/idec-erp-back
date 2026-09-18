@@ -8,6 +8,7 @@ from app.domains.security.domain.entities.rbac import (
     RoleEntity,
     UserAssignmentEntity,
 )
+from app.domains.security.domain.exceptions import RoleInUseException
 from app.domains.security.domain.ports.rbac_admin_repository_port import RbacAdminRepositoryPort
 from app.domains.security.infrastructure.models import (
     AreaModel,
@@ -85,6 +86,14 @@ class SqlRbacAdminRepository(RbacAdminRepositoryPort):
         if not role:
             return
         role_name = role.name
+        has_assigned_users = (
+            self._db.query(UserRoleAreaModel).filter(UserRoleAreaModel.role_id == role_id).first()
+            is not None
+        )
+        if has_assigned_users:
+            raise RoleInUseException(
+                f"No se puede eliminar el rol '{role_name}' porque tiene usuarios asignados."
+            )
         self._db.delete(role)
         self._db.commit()
         self._audit(actor_user_id, "rol.eliminar", f"Rol '{role_name}' eliminado.")

@@ -9,8 +9,13 @@ sqlalchemy>=2.0.30
 psycopg2-binary>=2.9.9
 ldap3==2.9.1
 
-# Dominio geoextraccion
+# geoextraction domain
 python-multipart>=0.0.9
 geopandas>=0.14
 shapely>=2.0
 pandas>=2.0
+
+# chatbot domain
+pytesseract>=0.3.10
+opencv-python-headless>=4.9
+numpy>=1.26

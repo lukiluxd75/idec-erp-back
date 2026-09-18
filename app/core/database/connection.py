@@ -1,6 +1,7 @@
 from typing import Generator
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
+from sqlalchemy.schema import CreateSchema
 from app.core.config import settings
 
 # PostgreSQL / SQLite connection engine
@@ -13,7 +14,12 @@ if db_uri.startswith("sqlite"):
 else:
     engine = create_engine(
         db_uri,
-        pool_pre_ping=True,
+        # No pool_pre_ping: the DB (172.16.66.103) is ~120ms away, and pre_ping
+        # adds a full round trip to EVERY checkout from the pool -- i.e. to every
+        # single DB-touching request, all the time. pool_recycle already discards
+        # connections older than an hour, which is enough given how often this
+        # app hits the DB (polling every 10s on some pages) to keep connections
+        # from going stale between uses.
         pool_recycle=3600,
     )
 
@@ -38,6 +44,14 @@ def init_db_tables() -> bool:
         # already exists with real data from the mobile app — see
         # app/domains/resolutions/infrastructure/models.py.
         from app.domains.geoextraction.infrastructure import models  # noqa: F401
+        from app.domains.chatbot.infrastructure import models as chatbot_models  # noqa: F401
+
+        if not db_uri.startswith("sqlite"):
+            # create_all() only creates tables, never the Postgres schema itself.
+            # Unlike 'resolutions'/'detection', 'chatbot' owns its schema outright
+            # (nothing external creates it), so it has to happen here for local dev.
+            with engine.begin() as conn:
+                conn.execute(CreateSchema(chatbot_models.SCHEMA, if_not_exists=True))
         Base.metadata.create_all(bind=engine)
         return True
     except Exception as exc:

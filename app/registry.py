@@ -34,3 +34,15 @@ try:
     api_router.include_router(resolutions_router)
 except Exception as exc:
     logger.warning("Could not load domain 'resolutions': %s", exc)
+
+try:
+    from app.domains.chatbot.presentation.router import router as chatbot_router
+    api_router.include_router(chatbot_router)
+except Exception as exc:
+    logger.warning("Could not load domain 'chatbot': %s", exc)
+
+try:
+    from app.domains.appraisal_review.presentation.router import router as appraisal_review_router
+    api_router.include_router(appraisal_review_router, prefix="/appraisal-review")
+except Exception as exc:
+    logger.warning("Could not load domain 'appraisal_review': %s", exc)
