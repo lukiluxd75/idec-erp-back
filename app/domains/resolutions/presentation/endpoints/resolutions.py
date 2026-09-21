@@ -89,6 +89,24 @@ async def create_resolution(
     return _to_detail(resolution)
 
 
+@router.get("/presence")
+def get_presence(
+    manager: ResolutionsConnectionManager = Depends(get_connection_manager),
+    user: UserProfile = Depends(get_current_user),
+):
+    """Polled every few seconds by useResolutionsUpdates.js to keep
+    PhoneConnectedBadge accurate without touching the long-lived WS: the push
+    on /ws only reaches sockets already registered on the SAME worker, so a
+    REST call (naturally load-balanced across workers per request) is the
+    reliable way to catch up when the phone's socket landed elsewhere.
+
+    Declared before GET /{resolution_id} on purpose: routes are matched in
+    registration order, so "presence" would otherwise be swallowed as a
+    resolution_id by that path-param route instead of reaching this one.
+    """
+    return {"mobile_connected": manager.is_mobile_connected(user.sub)}
+
+
 @router.get("/{resolution_id}", response_model=ResolutionDetail)
 def get_resolution(
     resolution_id: str,

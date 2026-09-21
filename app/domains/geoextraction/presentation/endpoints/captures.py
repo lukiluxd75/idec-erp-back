@@ -4,7 +4,6 @@ from typing import List
 from fastapi import APIRouter, Depends, File, Response, UploadFile, WebSocket, WebSocketDisconnect, status
 
 from app.core.errors.exceptions import DomainException
-from app.core.utils.user_agent import is_mobile_user_agent
 from app.domains.geoextraction.application.use_cases import (
     CreateCaptureUseCase,
     DiscardCaptureUseCase,
@@ -12,7 +11,10 @@ from app.domains.geoextraction.application.use_cases import (
     GetCaptureImageUseCase,
 )
 from app.domains.geoextraction.domain.entities.capture import Capture
-from app.domains.geoextraction.infrastructure.ws_connection_manager import CapturesConnectionManager
+from app.domains.geoextraction.infrastructure.ws_connection_manager import (
+    CapturesConnectionManager,
+    is_digid_app_user_agent,
+)
 from app.domains.geoextraction.presentation.deps import (
     get_connection_manager,
     get_create_capture_use_case,
@@ -83,6 +85,19 @@ async def discard_capture(
     await manager.notify_change()
 
 
+@router.get("/presence")
+def get_presence(
+    manager: CapturesConnectionManager = Depends(get_connection_manager),
+    user: UserProfile = Depends(get_current_user),
+):
+    """Polled every few seconds by useCapturasUpdates.js to keep
+    PhoneConnectedBadge accurate without touching the long-lived WS: the push
+    on /ws only reaches sockets already registered on the SAME worker, so a
+    REST call (naturally load-balanced across workers per request) is the
+    reliable way to catch up when the phone's socket landed elsewhere."""
+    return {"mobile_connected": manager.is_mobile_connected(user.sub)}
+
+
 @router.websocket("/ws")
 async def captures_ws(
     websocket: WebSocket,
@@ -108,7 +123,7 @@ async def captures_ws(
         await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
         return
 
-    is_mobile = is_mobile_user_agent(websocket.headers.get("user-agent", ""))
+    is_mobile = is_digid_app_user_agent(websocket.headers.get("user-agent", ""))
     await manager.connect(websocket, user.sub, is_mobile)
     try:
         while True:
