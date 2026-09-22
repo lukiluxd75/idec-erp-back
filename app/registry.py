@@ -46,3 +46,9 @@ try:
     api_router.include_router(appraisal_review_router, prefix="/appraisal-review")
 except Exception as exc:
     logger.warning("Could not load domain 'appraisal_review': %s", exc)
+
+try:
+    from app.domains.templates.presentation.router import router as templates_router
+    api_router.include_router(templates_router)
+except Exception as exc:
+    logger.warning("Could not load domain 'templates': %s", exc)
