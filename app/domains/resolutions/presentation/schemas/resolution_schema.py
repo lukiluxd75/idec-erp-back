@@ -12,6 +12,14 @@ class PageOut(BaseModel):
     order_index: int
 
 
+class PlanPageOut(BaseModel):
+    """Metadata for one floor-plan page (see .../plan-pages). The image is
+    fetched separately as a blob, same as PageOut."""
+    order_index: int
+    planta: str
+    source: str
+
+
 class ResolutionListItem(BaseModel):
     """One row of the 'Mis resoluciones' list."""
     resolution_id: str
@@ -27,6 +35,7 @@ class ResolutionDetail(ResolutionListItem):
     pages + building general data — the backend does not inspect it; see
     ResolutionPage.jsx on the frontend)."""
     pages: List[PageOut] = Field(default_factory=list)
+    plan_pages: List[PlanPageOut] = Field(default_factory=list)
     table_data: Optional[Dict[str, Any]] = None
 
 

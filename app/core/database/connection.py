@@ -40,9 +40,13 @@ def init_db_tables() -> bool:
     """
     try:
         from app.domains.security.infrastructure import models  # noqa: F401
-        # The 'resolutions' domain is NOT registered here: its schema (`resolutions`)
-        # already exists with real data from the mobile app — see
-        # app/domains/resolutions/infrastructure/models.py.
+        # The 'resolutions' domain's MIRRORED models (resolutions/resolution_pages,
+        # owned by the mobile app) are deliberately NOT imported here — see
+        # app/domains/resolutions/infrastructure/models.py. `plan_page_models` is
+        # different: it's a table the ERP itself owns (added 2026-09, floor-plan
+        # photos for colindancias), living in the same already-existing
+        # `resolutions` schema, so it IS registered for create_all() below.
+        from app.domains.resolutions.infrastructure import plan_page_models  # noqa: F401
         from app.domains.geoextraction.infrastructure import models  # noqa: F401
         from app.domains.chatbot.infrastructure import models as chatbot_models  # noqa: F401
 

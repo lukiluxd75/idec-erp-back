@@ -16,6 +16,15 @@ from app.domains.resolutions.application.use_cases.delete_resolution_use_case im
 from app.domains.resolutions.application.use_cases.create_resolution_use_case import (
     CreateResolutionUseCase,
 )
+from app.domains.resolutions.application.use_cases.add_plan_pages_use_case import (
+    AddPlanPagesUseCase,
+)
+from app.domains.resolutions.application.use_cases.get_plan_page_use_case import (
+    GetPlanPageUseCase,
+)
+from app.domains.resolutions.application.use_cases.delete_plan_page_use_case import (
+    DeletePlanPageUseCase,
+)
 
 __all__ = [
     "ListResolutionsUseCase",
@@ -24,4 +33,7 @@ __all__ = [
     "SaveTableUseCase",
     "DeleteResolutionUseCase",
     "CreateResolutionUseCase",
+    "AddPlanPagesUseCase",
+    "GetPlanPageUseCase",
+    "DeletePlanPageUseCase",
 ]
