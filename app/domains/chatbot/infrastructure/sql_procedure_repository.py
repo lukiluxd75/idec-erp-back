@@ -275,3 +275,73 @@ class SqlProcedureRepository(ProcedureRepositoryPort):
             ProcedureEmbeddingModel.vector,
         ).all()
         return [(str(procedure_id), source_text, vector) for procedure_id, source_text, vector in rows]
+
+    def save_feedback_rule(self, rule_text: str, actor_user_sub: str) -> None:
+        """Persist a human-corrected rule as an InstitutionalContext entry.
+        Uses a unique code prefix to avoid colliding with manually-seeded entries."""
+        import uuid as _uuid
+        new_rule = InstitutionalContextModel(
+            code=f"feedback_rule_{_uuid.uuid4().hex[:8]}",
+            category="feedback_rule",
+            title="Regla aprendida de retroalimentación",
+            content=rule_text,
+        )
+        self._db.add(new_rule)
+        self._db.commit()
+        self._audit(actor_user_sub, "feedback.learn", "Agregada nueva regla a partir de retroalimentación.")
+
+    def upsert_from_json(
+        self,
+        id_tramite: str,
+        nombre_tramite: str,
+        descripcion_busqueda: str,
+        costo: str,
+        leyes_asociadas: List[str],
+        requisitos: List[dict],
+        actor_user_sub: str,
+    ) -> "Procedure":
+        """Create or update a procedure from a tramites_data.json entry.
+
+        `id_tramite` is used as the canonical `code` (e.g. "REG-ART30") so
+        re-running the import is always idempotent.  Requirements fully replace
+        whatever the procedure had before, matching the behaviour of
+        upsert_from_ingest.
+        """
+        legal_basis = ", ".join(leyes_asociadas) if leyes_asociadas else None
+
+        m = self._db.query(ProcedureModel).filter(ProcedureModel.code == id_tramite).first()
+        if m is None:
+            m = ProcedureModel(code=id_tramite)
+            self._db.add(m)
+
+        m.name = nombre_tramite
+        m.search_description = descripcion_busqueda
+        m.cost_note = costo or None
+        m.legal_basis = legal_basis
+        self._db.flush()  # need m.id before touching requirements
+
+        self._db.query(ProcedureRequirementModel).filter(
+            ProcedureRequirementModel.procedure_id == m.id
+        ).delete()
+        for order, req in enumerate(requisitos):
+            description = req.get("nombre", "") if isinstance(req, dict) else str(req)
+            is_mandatory = req.get("obligatorio", True) if isinstance(req, dict) else True
+            detail = req.get("condicion") if isinstance(req, dict) else None
+            self._db.add(
+                ProcedureRequirementModel(
+                    procedure_id=m.id,
+                    description=description,
+                    is_mandatory=is_mandatory,
+                    detail=detail,
+                    display_order=order,
+                )
+            )
+
+        self._db.commit()
+        self._db.refresh(m)
+        self._audit(
+            actor_user_sub,
+            "procedure.json_ingest",
+            f"Trámite '{id_tramite}' cargado/actualizado desde tramites_data.json.",
+        )
+        return self.get_by_id(str(m.id))

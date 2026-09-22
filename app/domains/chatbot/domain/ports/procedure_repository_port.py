@@ -71,6 +71,28 @@ class ProcedureRepositoryPort(ABC):
         """Active institutional-context entries, in display order."""
 
     @abstractmethod
+    def save_feedback_rule(self, rule_text: str, actor_user_sub: str) -> None:
+        """Persist a human-corrected rule as an InstitutionalContext entry so the
+        prompt builder picks it up automatically on every future chat turn.
+        Also writes a chatbot_audits row (CLAUDE.md §9)."""
+
+    @abstractmethod
+    def upsert_from_json(
+        self,
+        id_tramite: str,
+        nombre_tramite: str,
+        descripcion_busqueda: str,
+        costo: str,
+        leyes_asociadas: List[str],
+        requisitos: List[dict],
+        actor_user_sub: str,
+    ) -> Procedure:
+        """Create or update a procedure from a structured JSON entry
+        (tramites_data.json). Uses `id_tramite` as the canonical `code` so
+        re-running the import is always idempotent. Requirements fully replace
+        whatever the procedure had before. Also audited (CLAUDE.md §9)."""
+
+    @abstractmethod
     def save_embeddings(self, procedure_id: str, model: str, entries: List[Tuple[str, str, List[float]]]) -> None:
         """Replaces every embedding row of `procedure_id` with `entries`
         (source_kind, source_text, vector), in the same transaction as the write
