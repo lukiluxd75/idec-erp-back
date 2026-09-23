@@ -9,7 +9,17 @@ from app.domains.folios.domain.ports.page_image_port import PageImagePort, Rect,
 # Long side cap: phone scans come at ~2-4k px; bigger adds OCR upload time and
 # nothing readable (the OCR service downsizes anyway -- that is why we crop).
 MAX_SIDE = 3500
-JPEG_QUALITY = 90
+# Every step re-encodes (normalize -> rotate -> crop); high quality keeps small
+# letters from degrading generation after generation.
+JPEG_QUALITY = 95
+
+# angle (CCW, degrees) -> (cv2.rotate code, source->rotated matrix builder for a
+# w x h source). Same mapping as cv2.rotate, so OCR boxes carried over match.
+_QUARTER_TURNS = {
+    90: (cv2.ROTATE_90_COUNTERCLOCKWISE, lambda w, h: ((0.0, 1.0, 0.0), (-1.0, 0.0, float(w - 1)))),
+    270: (cv2.ROTATE_90_CLOCKWISE, lambda w, h: ((0.0, -1.0, float(h - 1)), (1.0, 0.0, 0.0))),
+    180: (cv2.ROTATE_180, lambda w, h: ((-1.0, 0.0, float(w - 1)), (0.0, -1.0, float(h - 1)))),
+}
 
 
 def _decode(content: bytes) -> np.ndarray:
@@ -40,6 +50,12 @@ class OpenCvPageImage(PageImagePort):
     def rotate(self, content: bytes, angle_ccw_deg: float) -> RotatedImage:
         img = _decode(content)
         h, w = img.shape[:2]
+        quarter = _QUARTER_TURNS.get(round(angle_ccw_deg, 6) % 360)
+        if quarter is not None:
+            # Exact quarter turn: pixels are moved, not interpolated (no blur).
+            code, matrix_for = quarter
+            out = cv2.rotate(img, code)
+            return RotatedImage(content=_encode(out), width=out.shape[1], height=out.shape[0], matrix=matrix_for(w, h))
         m = cv2.getRotationMatrix2D((w / 2, h / 2), angle_ccw_deg, 1.0)
         cos, sin = abs(m[0, 0]), abs(m[0, 1])
         new_w, new_h = int(round(h * sin + w * cos)), int(round(h * cos + w * sin))

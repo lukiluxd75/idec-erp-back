@@ -182,6 +182,40 @@ class TestTitularidadParser(unittest.TestCase):
         self.assertTrue(r["asientos"][0]["numero_inferido"])
         self.assertNotIn("numero_inferido", r["asientos"][1])
 
+    def test_low_resolution_ocr_variants(self):
+        # What the OCR returned for a ~1000 px wide photo of the sample folio
+        # (names anonymized): digits of 'Asiento Numero' lost, glued words,
+        # 'Vendedor(es):' without colon, the 'CI' of the CI line lost.
+        r = parse_titularidad(self._lines(
+            "Asiento-Numeco:",
+            "Vendedorles",
+            "PEREZLOPEZMARIA",
+            "Asiento Numero:",
+            "ROJASVARGASJUAN",
+            "ol..c/11234567",
+            "CompraVente",
+            "Escrit.Priv.de techa 12/10/1992",
+            "NOt.PUD.PEDROGOMEZ",
+            "Present.-No89304de27/10/2014.-Hrs.112456-",
+            "-utamo-Fstento.Meo.",
+            proportions={2: "1/1", 4: "1/1"},
+        ))
+        a0, a1 = r["asientos"]
+        self.assertEqual((a0["numero"], a1["numero"]), (0, 1))
+        self.assertTrue(a0["numero_inferido"] and a1["numero_inferido"])
+        self.assertEqual(a0["personas"][0]["rol"], "vendedor")
+        self.assertEqual(a1["personas"][0]["ci"], "1234567")
+        self.assertEqual(a1["acto"], "CompraVente")
+        self.assertEqual(a1["documento"]["fecha"], "12/10/1992")
+        self.assertEqual(a1["presentacion"], {"numero": "89304", "fecha": "27/10/2014", "hora": "11:24:56"})
+
+    def test_numbers_counted_back_from_last_declared(self):
+        r = parse_titularidad(self._lines(
+            "Asiento Numero:", "ROJAS VARGAS JUAN", "Asiento Numero:", "QUISPE MAMANI ROSA",
+            "Ultimo Asiento Nro. 5",
+        ))
+        self.assertEqual([a["numero"] for a in r["asientos"]], [4, 5])
+
     def test_several_owners_with_nationality(self):
         r = parse_titularidad(self._lines(
             "Asiento Numero: 2",
