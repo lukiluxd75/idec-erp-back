@@ -23,8 +23,8 @@ pipeline {
             steps {
                 echo 'Instalando dependencias de Python para el Backend...'
                 bat '''
-                    "C:\\Program Files\\Python311\\python.exe" -m pip install --upgrade pip
-                    "C:\\Program Files\\Python311\\python.exe" -m pip install -r requirements.txt
+                    "C:\\Users\\asavatierra\\AppData\\Local\\Programs\\Python\\Python311\\python.exe" -m pip install --upgrade pip
+                    "C:\\Users\\asavatierra\\AppData\\Local\\Programs\\Python\\Python311\\python.exe" -m pip install -r requirements.txt
                 '''
             }
         }
@@ -34,7 +34,7 @@ pipeline {
                 echo 'Verificando/Ejecutando el proyecto Backend...'
                 // Cambia 'main.py' por el archivo principal con el que arranca tu backend si tiene otro nombre
                 bat '''
-                    "C:\\Program Files\\Python311\\python.exe" main.py
+                    "C:\\Users\\asavatierra\\AppData\\Local\\Programs\\Python\\Python311\\python.exe" main.py
                 '''
             }
         }
