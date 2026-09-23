@@ -20,6 +20,7 @@ pipeline {
                 bat '''
                     set NODE_SKIP_PLATFORM_CHECK=1
                     set PATH=C:\\Program Files\\nodejs;%PATH%
+                    cd ruta_a_tu_carpeta_backend
                     "C:\\Program Files\\nodejs\\npm.cmd" install
                 '''
             }
@@ -31,6 +32,7 @@ pipeline {
                 bat '''
                     set NODE_SKIP_PLATFORM_CHECK=1
                     set PATH=C:\\Program Files\\nodejs;%PATH%
+                    cd ruta_a_tu_carpeta_backend
                     "C:\\Program Files\\nodejs\\npm.cmd" run build || echo "Si no hay script de build, continuando..."
                 '''
             }
@@ -42,7 +44,6 @@ pipeline {
                     if (params.EJECUTAR_AUTOMATICO == true) {
                         echo 'Modo automático activado: Despliegue del Backend completado con éxito.'
                     } else {
-                        // Timeout de seguridad por si la interfaz web se pone lenta en la demo
                         try {
                             timeout(time: 1, unit: 'MINUTES') {
                                 input message: '¿Desea aprobar el despliegue del Backend al servidor?', ok: 'Aprobar'
