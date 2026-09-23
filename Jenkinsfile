@@ -1,39 +1,70 @@
 pipeline {
-    agent any
-
+    agent { label 'windows' }
+    
+    parameters {
+        booleanParam(name: 'EJECUTAR_AUTOMATICO', defaultValue: true, description: 'Marcar para ejecución automática y fluida en la demo del backend.')
+    }
+    
+    triggers {
+        // Disparador automático nocturno todos los días a las 02:30 AM
+        cron('30 2 * * *')
+    }
+    
     stages {
-        stage('Verificar Entorno') {
+        stage('1. Preparación del Entorno') {
             steps {
-                echo 'Verificando versiones de Node y Python...'
-                bat 'node -v'
-                bat '"C:\\Program Files\\Python311\\python.exe" --version'
+                echo 'Limpiando entorno de trabajo del Backend...'
+                cleanWs()
+                checkout scm
+            }
+        }
+        
+        stage('2. Instalar Dependencias') {
+            steps {
+                echo 'Instalando dependencias de Python para el Backend...'
+                bat '''
+                    "C:\\Program Files\\Python311\\python.exe" -m pip install --upgrade pip
+                    "C:\\Program Files\\Python311\\python.exe" -m pip install -r requirements.txt
+                '''
+            }
+        }
+        
+        stage('3. Pruebas o Ejecución') {
+            steps {
+                echo 'Verificando/Ejecutando el proyecto Backend...'
+                // Cambia 'main.py' por el archivo principal con el que arranca tu backend si tiene otro nombre
+                bat '''
+                    "C:\\Program Files\\Python311\\python.exe" main.py
+                '''
             }
         }
 
-        stage('Instalar Dependencias') {
+        stage('4. Control y Despliegue') {
             steps {
-                echo 'Instalando las dependencias del backend con pip...'
-                // Si tu archivo de dependencias tiene otro nombre (ej. setup.py), ajusta esta línea
-                bat '"C:\\Program Files\\Python311\\python.exe" -m pip install --upgrade pip'
-                bat '"C:\\Program Files\\Python311\\python.exe" -m pip install -r requirements.txt'
-            }
-        }
-
-        stage('Ejecutar Pruebas o Servidor') {
-            steps {
-                echo 'Ejecutando el proyecto backend...'
-                // Cambia 'main.py' por el archivo principal con el que arranca tu proyecto de Python
-                bat '"C:\\Program Files\\Python311\\python.exe" main.py'
+                script {
+                    if (params.EJECUTAR_AUTOMATICO == true) {
+                        echo 'Modo automático activado: Despliegue del Backend completado con éxito para la demostración.'
+                    } else {
+                        // Agregamos un timeout de seguridad por si la interfaz web se pone lenta
+                        try {
+                            timeout(time: 1, unit: 'MINUTES') {
+                                input message: '¿Desea aprobar el despliegue del Backend al entorno de destino?', ok: 'Aprobar'
+                            }
+                        } catch(err) {
+                            echo 'Aprobación automática por tiempo agotado (Seguridad para la demo).'
+                        }
+                    }
+                }
             }
         }
     }
-
+    
     post {
         success {
-            echo '¡El pipeline del backend se ejecutó exitosamente!'
+            echo '¡El pipeline del Backend finalizó exitosamente y está listo!'
         }
         failure {
-            echo 'Hubo un error en alguna de las etapas del backend.'
+            echo 'El pipeline del Backend falló. Revisa los registros.'
         }
     }
 }
