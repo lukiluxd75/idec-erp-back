@@ -18,8 +18,23 @@ pipeline {
             steps {
                 echo 'Instalando dependencias del Backend...'
                 bat '''
-                    py -m pip install --upgrade pip
-                    py -m pip install -r requirements.txt
+                    echo Buscando e instalando dependencias de Python...
+                    if exist "C:\\Python311\\python.exe" (
+                        "C:\\Python311\\python.exe" -m pip install --upgrade pip
+                        "C:\\Python311\\python.exe" -m pip install -r requirements.txt
+                    ) else if exist "C:\\Python310\\python.exe" (
+                        "C:\\Python310\\python.exe" -m pip install --upgrade pip
+                        "C:\\Python310\\python.exe" -m pip install -r requirements.txt
+                    ) else if exist "C:\\Python312\\python.exe" (
+                        "C:\\Python312\\python.exe" -m pip install --upgrade pip
+                        "C:\\Python312\\python.exe" -m pip install -r requirements.txt
+                    ) else if exist "C:\\Program Files\\Python311\\python.exe" (
+                        "C:\\Program Files\\Python311\\python.exe" -m pip install --upgrade pip
+                        "C:\\Program Files\\Python311\\python.exe" -m pip install -r requirements.txt
+                    ) else (
+                        python -m pip install --upgrade pip
+                        pip install -r requirements.txt
+                    )
                 '''
             }
         }
@@ -27,7 +42,15 @@ pipeline {
         stage('3. Verificación / DB') {
             steps {
                 echo 'Verificando base de datos o scripts...'
-                bat 'py init_db.py || echo "Script omitido o completado"'
+                bat '''
+                    if exist "C:\\Python311\\python.exe" (
+                        "C:\\Python311\\python.exe" init_db.py
+                    ) else if exist "C:\\Python310\\python.exe" (
+                        "C:\\Python310\\python.exe" init_db.py
+                    ) else {
+                        python init_db.py
+                    }
+                '''
             }
         }
 
