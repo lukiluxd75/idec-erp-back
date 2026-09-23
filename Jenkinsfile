@@ -14,27 +14,20 @@ pipeline {
             }
         }
         
-        stage('2. Instalar Dependencias (Back)') {
+        stage('2. Instalar Dependencias (Python)') {
             steps {
                 echo 'Instalando dependencias del Backend...'
                 bat '''
-                    set NODE_SKIP_PLATFORM_CHECK=1
-                    set PATH=C:\\Program Files\\nodejs;%PATH%
-                    cd ruta_a_tu_carpeta_backend
-                    "C:\\Program Files\\nodejs\\npm.cmd" install
+                    python -m pip install --upgrade pip
+                    pip install -r requirements.txt
                 '''
             }
         }
         
-        stage('3. Pruebas o Build (Back)') {
+        stage('3. Verificación / DB') {
             steps {
-                echo 'Ejecutando pruebas / preparación del Backend...'
-                bat '''
-                    set NODE_SKIP_PLATFORM_CHECK=1
-                    set PATH=C:\\Program Files\\nodejs;%PATH%
-                    cd ruta_a_tu_carpeta_backend
-                    "C:\\Program Files\\nodejs\\npm.cmd" run build || echo "Si no hay script de build, continuando..."
-                '''
+                echo 'Verificando base de datos o scripts...'
+                bat 'python init_db.py || echo "Script omitido o completado"'
             }
         }
 
@@ -49,7 +42,7 @@ pipeline {
                                 input message: '¿Desea aprobar el despliegue del Backend al servidor?', ok: 'Aprobar'
                             }
                         } catch(err) {
-                            echo 'Aprobación automática por tiempo agotado (Seguridad para la demo del Back).'
+                            echo 'Aprobación automática por tiempo agotado (Seguridad para la demo).'
                         }
                     }
                 }
