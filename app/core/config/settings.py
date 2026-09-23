@@ -79,6 +79,17 @@ class Settings(BaseSettings):
     CHATBOT_TESSERACT_CMD: str = ""
     CHATBOT_TESSERACT_LANG: str = "spa"
 
+    # Folios domain — GAMC OCR service (the same one the browser calls for
+    # resolutions/geoextraction, here called server-side) and an optional Ollama
+    # host that only fills gaps in column A asientos (empty = rule-based only)
+    FOLIOS_OCR_API_URL: str = "https://ocr.catastrocbba.com"
+    FOLIOS_OCR_TIMEOUT_SECONDS: float = 90.0
+    FOLIOS_OCR_POLL_INTERVAL_SECONDS: float = 1.5
+    FOLIOS_CONFIDENCE_THRESHOLD: float = 0.85
+    FOLIOS_OLLAMA_URL: str = ""
+    FOLIOS_LLM_MODEL: str = "gemma4:e4b"
+    FOLIOS_LLM_TIMEOUT_SECONDS: float = 120.0
+
     @computed_field
     @property
     def SQLALCHEMY_DATABASE_URI(self) -> str:
