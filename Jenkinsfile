@@ -16,24 +16,29 @@ pipeline {
         
         stage('2. Instalar Dependencias (Python)') {
             steps {
-                echo 'Instalando dependencias del Backend...'
+                echo 'Buscando Python en el sistema e instalando dependencias...'
                 bat '''
-                    echo Buscando e instalando dependencias de Python...
-                    if exist "C:\\Python311\\python.exe" (
-                        "C:\\Python311\\python.exe" -m pip install --upgrade pip
-                        "C:\\Python311\\python.exe" -m pip install -r requirements.txt
-                    ) else if exist "C:\\Python310\\python.exe" (
-                        "C:\\Python310\\python.exe" -m pip install --upgrade pip
-                        "C:\\Python310\\python.exe" -m pip install -r requirements.txt
-                    ) else if exist "C:\\Python312\\python.exe" (
-                        "C:\\Python312\\python.exe" -m pip install --upgrade pip
-                        "C:\\Python312\\python.exe" -m pip install -r requirements.txt
-                    ) else if exist "C:\\Program Files\\Python311\\python.exe" (
-                        "C:\\Program Files\\Python311\\python.exe" -m pip install --upgrade pip
-                        "C:\\Program Files\\Python311\\python.exe" -m pip install -r requirements.txt
+                    :: Buscar la ruta de Python dinámicamente en el equipo
+                    for /f "delims=" %%i in ('where python 2^>nul') do set "PYTHON_CMD=%%i"
+                    
+                    if not defined PYTHON_CMD (
+                        if exist "C:\\Python39\\python.exe" set "PYTHON_CMD=C:\\Python39\\python.exe"
+                    )
+                    if not defined PYTHON_CMD (
+                        if exist "C:\\Users\\Administrator\\AppData\\Local\\Programs\\Python\\Python311\\python.exe" set "PYTHON_CMD=C:\\Users\\Administrator\\AppData\\Local\\Programs\\Python\\Python311\\python.exe"
+                    )
+                    if not defined PYTHON_CMD (
+                        if exist "C:\\Users\\asalvatierra\\AppData\\Local\\Programs\\Python\\Python311\\python.exe" set "PYTHON_CMD=C:\\Users\\asalvatierra\\AppData\\Local\\Programs\\Python\\Python311\\python.exe"
+                    )
+                    
+                    :: Si aún no se encuentra, mostrar mensaje de error explicativo
+                    if not defined PYTHON_CMD (
+                        echo ERROR CRITICO: No se pudo localizar python.exe en el servidor.
+                        exit /b 1
                     ) else (
-                        python -m pip install --upgrade pip
-                        pip install -r requirements.txt
+                        echo Python encontrado en: %PYTHON_CMD%
+                        "%PYTHON_CMD%" -m pip install --upgrade pip
+                        "%PYTHON_CMD%" -m pip install -r requirements.txt
                     )
                 '''
             }
@@ -43,13 +48,14 @@ pipeline {
             steps {
                 echo 'Verificando base de datos o scripts...'
                 bat '''
-                    if exist "C:\\Python311\\python.exe" (
-                        "C:\\Python311\\python.exe" init_db.py
-                    ) else if exist "C:\\Python310\\python.exe" (
-                        "C:\\Python310\\python.exe" init_db.py
-                    ) else {
-                        python init_db.py
-                    }
+                    for /f "delims=" %%i in ('where python 2^>nul') do set "PYTHON_CMD=%%i"
+                    if not defined PYTHON_CMD set "PYTHON_CMD=C:\\Python311\\python.exe"
+                    
+                    if exist init_db.py (
+                        "%PYTHON_CMD%" init_db.py
+                    ) else (
+                        echo No se requiere script init_db.py, continuando...
+                    )
                 '''
             }
         }
