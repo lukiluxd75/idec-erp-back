@@ -30,9 +30,9 @@ pipeline {
         
         stage('3. Pruebas o Ejecución') {
             steps {
-                echo 'Verificando/Ejecutando el proyecto Backend...'
+                echo 'Iniciando el servidor de la aplicación FastAPI...'
                 bat '''
-                    "C:\\Program Files\\Python311\\python.exe" main.py
+                    "C:\\Program Files\\Python311\\Scripts\\uvicorn.exe" app.main:app --host 0.0.0.0 --port 8000
                 '''
             }
         }
