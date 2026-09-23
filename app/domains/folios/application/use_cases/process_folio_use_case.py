@@ -39,6 +39,7 @@ logger = logging.getLogger("uvicorn.error")
 
 EXTRACTION_VERSION = 1
 _IDENTITY = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0))
+SNAP_DEG = 3.0  # see ProcessFolioUseCase._rotate
 _PROPORTION_RE = re.compile(r"^\d{1,3}/\d{1,3}$|^\d{1,3}([.,]\d+)?%$")
 
 
@@ -110,15 +111,28 @@ class ProcessFolioUseCase:
 
     # ------------------------------------------------------------------ page
 
+    def _rotate(self, jpeg: bytes, width: int, height: int, blocks: List[OcrBlock], angle: float):
+        """Rotate the page by `angle`, snapped to the nearest quarter turn when
+        it is within SNAP_DEG of one: a quarter turn is lossless, while an
+        arbitrary angle interpolates pixels -- on a low-resolution photo (tested:
+        1000 px wide, ~6 px letters) that blur alone made column A unreadable,
+        and a skew of a couple of degrees does not bother the OCR at all."""
+        quarter = round(angle / 90) * 90
+        if abs(angle - quarter) <= SNAP_DEG:
+            angle = float(quarter % 360)
+            if angle > 180:
+                angle -= 360
+        if angle == 0:
+            return RotatedImage(jpeg, width, height, _IDENTITY), blocks, 0.0
+        upright = self._images.rotate(jpeg, angle)
+        return upright, transform_blocks(blocks, upright.matrix), angle
+
     def _orient(self, jpeg: bytes, width: int, height: int, blocks: List[OcrBlock]):
         """(RotatedImage, blocks in its frame, angle) -- or angle None if the
         column titles could not be found in any orientation."""
         angle = detect_rotation(blocks)
         if angle is not None:
-            if abs(angle) < 0.3:
-                return RotatedImage(jpeg, width, height, _IDENTITY), blocks, 0.0
-            upright = self._images.rotate(jpeg, angle)
-            return upright, transform_blocks(blocks, upright.matrix), angle
+            return self._rotate(jpeg, width, height, blocks, angle)
 
         # Titles not found on the raw photo: try the other 3 orientations.
         for fallback in (90.0, -90.0, 180.0):
@@ -127,10 +141,10 @@ class ProcessFolioUseCase:
             residual = detect_rotation(turned_blocks)
             if residual is None:
                 continue
-            if abs(residual) < 0.3:
-                return turned, turned_blocks, fallback
-            upright = self._images.rotate(turned.content, residual)
-            return upright, transform_blocks(turned_blocks, upright.matrix), fallback + residual
+            upright, upright_blocks, extra = self._rotate(
+                turned.content, turned.width, turned.height, turned_blocks, residual
+            )
+            return upright, upright_blocks, fallback + extra
         return RotatedImage(jpeg, width, height, _IDENTITY), blocks, None
 
     def _process_page(self, page_index: int, content: bytes) -> PageOutcome:

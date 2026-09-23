@@ -45,6 +45,11 @@ _ASIENTO_RE = re.compile(r"^A?S?IENTO(?:NUMERO|NRO|N)?([0-9LIOSBZ]{1,3})$")
 _ULTIMO_RE = re.compile(r"ULTIMOASIENTO(?:NRO|NUMERO|N)?([0-9LIOSBZ]{1,3})")
 _CI_RE = re.compile(r"(?:C\s*/\s*\.?\s*)?C\s*\.?\s*I\s*\.?\s*:?\s*(\d[\d\s]{3,11}\d)\s*-?\s*([A-Z]{2,3})?\b")
 _DATE_RE = re.compile(r"(\d{1,2})\s*/\s*([\dLIO]{1,2})\s*/\s*(\d{4})")
+# Low-resolution photos lose the 'CI' ('ol..c/14482143'): 'c/' + a digit run,
+# where a leading 1 is usually the 'I' misread.
+_CI_LOOSE_RE = re.compile(r"C\s*/\s*\.?\s*[I1L]?\s*\.?\s*(\d{5,10})\s*([A-Z]{2,3})?")
+_SECTION_WORDS = ("VENDEDOR", "COMPRADOR", "DONANTE", "DONATARIO", "HEREDERO", "CAUSANTE",
+                  "TRANSFERENTE", "ADQUIRENTE", "CEDENTE", "CESIONARIO")
 _NATIONALITY_RE = re.compile(r"^(NACIONALIDAD\b|BOLIVIAN|[A-Z]{4,}[OA]\s*\(\s*[AO]\s*\)$)")
 _CIVIL = {"SOL": "soltero(a)", "CAS": "casado(a)", "VIU": "viudo(a)", "DIV": "divorciado(a)"}
 _DOC_PREFIXES = ("ESCRIT", "TESTIM", "MINUTA", "RESOL", "AUTO", "SENTEN", "DOCUMENTO", "FORMULARIO",
@@ -89,7 +94,22 @@ def _asiento_number(line: str) -> Optional[int]:
 def _is_act(norm: str) -> bool:
     flat = norm.replace(".", " ").replace("-", " ")
     flat = re.sub(r"\s+", " ", flat)
-    return any(flat.startswith(a) or a in flat for a in _KNOWN_ACTS)
+    if any(flat.startswith(a) or a in flat for a in _KNOWN_ACTS):
+        return True
+    # One or two wrong letters ('CompraVente'): fuzzy on the compacted start.
+    c = compact(norm)
+    return any(len(a) >= 8 and similar(c[: len(compact(a))], compact(a)) >= 0.85 for a in _KNOWN_ACTS)
+
+
+def _section_role(norm: str) -> Optional[str]:
+    """'Vendedor(es):' and its OCR variants ('Vendedorles', no colon) -> 'vendedor'."""
+    c = compact(norm)
+    if len(c) > 16:
+        return None
+    for word in _SECTION_WORDS:
+        if c.startswith(word) or (len(c) >= len(word) and similar(c[: len(word)], word) >= 0.85):
+            return word.lower()
+    return None
 
 
 def _civil_status(norm: str) -> Optional[str]:
@@ -100,7 +120,7 @@ def _civil_status(norm: str) -> Optional[str]:
 def _parse_ci(norm: str) -> Optional[Dict[str, Optional[str]]]:
     # Works on glued OCR too ('SO1.C/CI4482143CBA'); the civil-status token's
     # digit lookalikes are handled separately in _civil_status.
-    m = _CI_RE.search(norm)
+    m = _CI_RE.search(norm) or _CI_LOOSE_RE.search(norm)
     if not m:
         return None
     return {"ci": re.sub(r"\s+", "", m.group(1)), "expedido": m.group(2)}
@@ -182,9 +202,12 @@ def parse_titularidad(lines: Sequence[ColumnLine]) -> Dict[str, Any]:
         stage = current["_stage"]
 
         # Section headings inside an asiento: 'Vendedor(es):', 'Comprador(es):'...
-        if re.fullmatch(r"[A-Z]+(\(?ES\)?|\(?S\)?)?\s*:", norm.replace(" ", "")):
+        role = _section_role(norm)
+        if role is None and re.fullmatch(r"[A-Z]+(\(?ES\)?|\(?S\)?)?\s*:", norm.replace(" ", "")):
             word = norm.split("(")[0].split(":")[0].strip().lower()
-            current["_role"] = word[:-2] if word.endswith("es") and word[:-2].endswith("or") else word
+            role = word[:-2] if word.endswith("es") and word[:-2].endswith("or") else word
+        if role is not None:
+            current["_role"] = role
             current["_stage"] = "people"
             continue
 
@@ -223,7 +246,13 @@ def parse_titularidad(lines: Sequence[ColumnLine]) -> Dict[str, Any]:
             })
             continue
 
-        if stage in ("people", "act") and current["acto"] is None and (_is_act(norm) or current["personas"]):
+        # An act never carries digits (those lines are CI / dates the rules
+        # could not read -- they stay in `texto`).
+        if (
+            stage in ("people", "act")
+            and current["acto"] is None
+            and (_is_act(norm) or (current["personas"] and not any(ch.isdigit() for ch in norm)))
+        ):
             current["acto"] = raw
             current["_stage"] = "act"
             continue
@@ -234,7 +263,7 @@ def parse_titularidad(lines: Sequence[ColumnLine]) -> Dict[str, Any]:
             continue
         # Anything else stays only in `texto`.
 
-    _infer_missing_numbers(asientos)
+    _infer_missing_numbers(asientos, last_declared)
     for a in asientos:
         conf = a.pop("_conf")
         a.pop("_stage")
@@ -250,21 +279,33 @@ def parse_titularidad(lines: Sequence[ColumnLine]) -> Dict[str, Any]:
     }
 
 
-def _infer_missing_numbers(asientos: List[Dict[str, Any]]) -> None:
-    """OCR sometimes drops the digit ('Asiento Numero:'). Asientos are numbered
-    consecutively, so take it from a neighbour and flag it as inferred."""
-    for i, a in enumerate(asientos):
-        if a["numero"] is not None:
-            continue
-        prev_n = asientos[i - 1]["numero"] if i > 0 else None
-        next_n = asientos[i + 1]["numero"] if i + 1 < len(asientos) else None
-        if prev_n is not None:
-            a["numero"] = prev_n + 1
-        elif next_n is not None and next_n > 0:
-            a["numero"] = next_n - 1
-        elif len(asientos) == 1 or i == 0:
-            a["numero"] = 0 if a["_role"] == "vendedor" else None
-        if a["numero"] is not None:
+def _infer_missing_numbers(asientos: List[Dict[str, Any]], last_declared: Optional[int]) -> None:
+    """OCR sometimes drops the digit entirely ('Asiento Numero:' -- seen on
+    low-resolution photos). Asientos are numbered consecutively, so: take it
+    from a neighbour (repeat until nothing changes); if none was read at all,
+    count backwards from 'Ultimo Asiento Nro. N', else forward from 0 (column
+    A starts with the antecedent, asiento 0). Always flagged as inferred."""
+    changed = True
+    while changed:
+        changed = False
+        for i, a in enumerate(asientos):
+            if a["numero"] is not None:
+                continue
+            prev_n = asientos[i - 1]["numero"] if i > 0 else None
+            next_n = asientos[i + 1]["numero"] if i + 1 < len(asientos) else None
+            if prev_n is not None:
+                a["numero"] = prev_n + 1
+            elif next_n is not None and next_n > 0:
+                a["numero"] = next_n - 1
+            else:
+                continue
+            a["numero_inferido"] = True
+            changed = True
+
+    if asientos and all(a["numero"] is None for a in asientos):
+        start = last_declared - len(asientos) + 1 if last_declared is not None else 0
+        for i, a in enumerate(asientos):
+            a["numero"] = max(start, 0) + i
             a["numero_inferido"] = True
 
 
