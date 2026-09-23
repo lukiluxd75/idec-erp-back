@@ -18,8 +18,8 @@ pipeline {
             steps {
                 echo 'Instalando dependencias del Backend...'
                 bat '''
-                    python -m pip install --upgrade pip
-                    pip install -r requirements.txt
+                    py -m pip install --upgrade pip
+                    py -m pip install -r requirements.txt
                 '''
             }
         }
@@ -27,7 +27,7 @@ pipeline {
         stage('3. Verificación / DB') {
             steps {
                 echo 'Verificando base de datos o scripts...'
-                bat 'python init_db.py || echo "Script omitido o completado"'
+                bat 'py init_db.py || echo "Script omitido o completado"'
             }
         }
 
