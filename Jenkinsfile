@@ -32,7 +32,8 @@ pipeline {
             steps {
                 echo 'Verificando que la aplicación FastAPI cargue correctamente...'
                 bat '''
-                    "C:\\Program Files\\Python311\\python.exe" -c "import app.main; print('¡La app del backend cargó con éxito!')"
+                    set PYTHONIOENCODING=utf-8
+                    "C:\\Program Files\\Python311\\python.exe" -X utf8 -c "import app.main; print('¡La app del backend cargo con exito!')"
                 '''
             }
         }
