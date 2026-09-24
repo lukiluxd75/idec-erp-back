@@ -148,3 +148,21 @@ corresponda del catálogo cargado) en vez de responder con el mensaje genérico 
 | `503`, mensaje "no se pudo conectar" | Firewall (paso 1.4) o Ollama todavía escuchando solo en `127.0.0.1` (paso 1.3) — probar el `curl` del paso 1.5 primero, aislado del backend |
 | El chat responde pero nunca identifica ningún trámite | Falta correr `scripts/seed_chatbot_procedures.py` (carga los trámites) y/o el reindexado de embeddings nunca corrió — ver README del script |
 | Ollama devuelve error de modelo no encontrado | El nombre en `CHATBOT_CHAT_MODEL`/`CHATBOT_VISION_MODEL`/`CHATBOT_EMBEDDING_MODEL` no coincide exactamente con lo que muestra `ollama list` en la máquina externa |
+
+---
+
+## 5. Reusar la misma máquina para el dominio `folios`
+
+"Detección de Folios" usa Ollama solo como ayuda opcional: completa los asientos de
+la columna A que las reglas no pudieron leer del todo, y solo acepta valores que
+aparecen literalmente en el texto OCR. Tiene su propia variable, independiente de
+`CHATBOT_OLLAMA_URL`:
+
+```bash
+FOLIOS_OLLAMA_URL="http://<IP_MAQUINA_OLLAMA>:11434"
+FOLIOS_LLM_MODEL="gemma4:e4b"   # el mismo modelo de chat del paso 1.2
+```
+
+Vacía = solo reglas (el folio se procesa igual). Si el host no responde, el folio no
+falla: queda en "Revisar" con la observación "No se pudo usar IA para completar
+asientos". Cuenten ~15-20 s por asiento completado con IA (medido con `gemma4:e4b`).

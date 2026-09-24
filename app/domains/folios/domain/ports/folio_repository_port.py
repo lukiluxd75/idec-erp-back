@@ -35,6 +35,11 @@ class FolioRepositoryPort(ABC):
         """Raw per-page OCR/layout diagnostics saved by the pipeline."""
 
     @abstractmethod
+    def get_fill_log(self, folio_id: str, user_sub: str) -> Optional[Dict[str, Any]]:
+        """Fill log of the last extraction; None if the folio is missing, {} if
+        it has none (not processed yet, or processed before logs existed)."""
+
+    @abstractmethod
     def save_review(
         self, folio_id: str, user_sub: str, data: Dict[str, Any], confirm: bool
     ) -> Folio:
@@ -56,7 +61,7 @@ class FolioRepositoryPort(ABC):
 
     @abstractmethod
     def mark_processing(self, folio_id: str) -> None:
-        """Status PROCESSING; clears the previous error and any unconfirmed review."""
+        """Status PROCESSING; clears the previous error, fill log and any unconfirmed review."""
 
     @abstractmethod
     def save_page_result(
@@ -71,8 +76,16 @@ class FolioRepositoryPort(ABC):
         """Per-page output of the pipeline."""
 
     @abstractmethod
-    def save_extraction(self, folio_id: str, data: Dict[str, Any], status: str, matricula: Optional[str]) -> None:
-        """Final extracted JSON + READY/NEEDS_REVIEW (stamps processed_at)."""
+    def save_extraction(
+        self,
+        folio_id: str,
+        data: Dict[str, Any],
+        status: str,
+        matricula: Optional[str],
+        fill_log: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Final extracted JSON + READY/NEEDS_REVIEW (stamps processed_at), and
+        the log of how it was filled."""
 
     @abstractmethod
     def mark_failed(self, folio_id: str, message: str) -> None:

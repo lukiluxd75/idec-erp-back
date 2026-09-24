@@ -15,6 +15,7 @@ from sqlalchemy.orm import sessionmaker
 from app.core.database.connection import Base
 from app.domains.folios.application.use_cases import (
     DeleteFolioUseCase,
+    GetFolioFillLogUseCase,
     GetFolioUseCase,
     ListFoliosUseCase,
     ProcessFolioUseCase,
@@ -233,6 +234,29 @@ class TestPipeline(unittest.TestCase):
         self._run([b"page-1", b"page-2"], structurer)
         self.assertEqual(structurer.calls, 0)
 
+    def test_fill_log_traces_every_value(self):
+        folio = self._run([b"page-2", b"page-1"])
+        log = GetFolioFillLogUseCase(self.repo).execute(folio.id, "user-a")
+        self.assertEqual(log["orden_fotos"], [2, 1])
+        self.assertEqual(log["cabecera"]["foto"], 2)
+        fields = {f["campo"]: f for f in log["cabecera"]["campos"]}
+        self.assertEqual(fields["matricula.numero"]["valor"], "3.01.1.01.0012345")
+        self.assertTrue(fields["matricula.numero"]["texto_ocr"])
+        self.assertEqual(fields["linderos.oeste"]["valor"], "CON LOS LOTES N° 1 Y 2")
+        self.assertTrue(fields["linderos.oeste"]["texto_ocr"])
+        self.assertTrue(log["cabecera"]["lineas_ocr"])
+        classified = {(line["clasificacion"], line["asiento"]) for line in log["columna_a"]["lineas"]}
+        self.assertIn(("inicio_asiento", 0), classified)
+        self.assertIn(("persona:vendedor", 0), classified)
+        self.assertIn(("persona:titular", 1), classified)
+        self.assertEqual(log["ia"], [])
+
+        with self.assertRaises(FolioNotFoundException):
+            GetFolioFillLogUseCase(self.repo).execute(folio.id, "user-b")
+        # Reprocessing starts a new log.
+        RequestReprocessUseCase(self.repo).execute(folio.id, "user-a")
+        self.assertEqual(GetFolioFillLogUseCase(self.repo).execute(folio.id, "user-a"), {})
+
     def test_diagnostics_and_upright_image_are_saved(self):
         folio = self._run([b"page-1"])
         diagnostics = self.repo.get_diagnostics(folio.id, "user-a")
@@ -245,15 +269,28 @@ class TestLlmGapFilling(unittest.TestCase):
     """Asiento whose rules found no people/act: the LLM may fill them, but only
     with values that appear in the asiento's own text."""
 
-    def _process(self, structurer):
+    def _process(self, structurer, log=None):
         uc = ProcessFolioUseCase(_new_repo(), FakeOcr({}), FakeImages({}), structurer, 0.85)
         asientos = [{
             "numero": 3, "personas": [], "acto": None, "documento": None, "autoridad": None,
             "texto": "Asiento Numero: 3\nA FAVOR DE ROJAS VARGAS JUAN c/CI 1234567 CBA por Donacion\nTestimonio 55/2001",
         }]
         observations = []
-        uc._fill_gaps_with_llm(asientos, observations)
+        uc._fill_gaps_with_llm(asientos, observations, log)
         return asientos[0], observations
+
+    def test_log_keeps_proposal_and_what_was_discarded(self):
+        log = []
+        self._process(FakeStructurer({
+            "personas": [{"nombre": "PERSONA INVENTADA"}],
+            "acto": "Donacion",
+            "autoridad": "Notario inventado",
+        }), log)
+        [entry] = log
+        self.assertEqual(entry["asiento"], 3)
+        self.assertEqual(entry["aceptado"], ["acto"])
+        self.assertEqual(len(entry["descartado"]), 2)
+        self.assertEqual(entry["propuesta"]["autoridad"], "Notario inventado")
 
     def test_accepts_values_present_in_text_and_drops_invented_ones(self):
         asiento, _ = self._process(FakeStructurer({

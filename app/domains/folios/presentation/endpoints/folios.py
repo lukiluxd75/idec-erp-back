@@ -20,6 +20,7 @@ from app.core.errors.exceptions import DomainException
 from app.domains.folios.application.use_cases import (
     DeleteFolioUseCase,
     GetFolioDiagnosticsUseCase,
+    GetFolioFillLogUseCase,
     GetFolioPageImageUseCase,
     GetFolioUseCase,
     ListFoliosUseCase,
@@ -33,6 +34,7 @@ from app.domains.folios.presentation.deps import (
     get_connection_manager,
     get_delete_folio_use_case,
     get_folio_diagnostics_use_case,
+    get_folio_fill_log_use_case,
     get_folio_page_image_use_case,
     get_folio_use_case,
     get_list_folios_use_case,
@@ -157,6 +159,18 @@ def get_diagnostics(
 ):
     """Raw OCR blocks, detected rotation, ruling lines and crop rectangles per
     page -- to understand why a field came out empty or wrong."""
+    return use_case.execute(folio_id, user.sub)
+
+
+@router.get("/{folio_id}/fill-log", response_model=Dict[str, Any])
+def get_fill_log(
+    folio_id: str,
+    use_case: GetFolioFillLogUseCase = Depends(get_folio_fill_log_use_case),
+    user: UserProfile = Depends(get_current_user),
+):
+    """How each field was filled by the last extraction: OCR text behind every
+    header value, how every column A line was classified, what the LLM
+    proposed and what was kept. {} if the folio has no log yet."""
     return use_case.execute(folio_id, user.sub)
 
 

@@ -38,6 +38,24 @@ from app.domains.folios.domain.services.titularidad_parser import ColumnLine, cu
 logger = logging.getLogger("uvicorn.error")
 
 EXTRACTION_VERSION = 1
+FILL_LOG_VERSION = 1
+# Header fields in the fill log: dotted key (same as `confianza`) -> path in the data.
+_HEADER_FIELDS = (
+    ("matricula.numero", ("matricula", "numero")),
+    ("matricula.estado", ("matricula", "estado")),
+    ("matricula.zona", ("matricula", "zona")),
+    ("tipo_inmueble", ("tipo_inmueble",)),
+    ("ubicacion", ("ubicacion",)),
+    ("designacion_s_tit", ("designacion_s_tit",)),
+    ("superficie", ("superficie",)),
+    ("medidas", ("medidas",)),
+    ("linderos.norte", ("linderos", "norte")),
+    ("linderos.sud", ("linderos", "sud")),
+    ("linderos.este", ("linderos", "este")),
+    ("linderos.oeste", ("linderos", "oeste")),
+    ("propiedad", ("propiedad",)),
+    ("antecedente_dominial", ("titularidad_dominio", "antecedente_dominial")),
+)
 _IDENTITY = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0))
 SNAP_DEG = 3.0  # see ProcessFolioUseCase._rotate
 _PROPORTION_RE = re.compile(r"^\d{1,3}/\d{1,3}$|^\d{1,3}([.,]\d+)?%$")
@@ -53,6 +71,14 @@ class PageOutcome:
     column_lines: List[ColumnLine] = field(default_factory=list)
     observations: List[str] = field(default_factory=list)
     diagnostics: Dict[str, Any] = field(default_factory=dict)
+
+
+def _get_path(data: Dict[str, Any], path: Sequence[str]) -> Any:
+    for key in path:
+        if not isinstance(data, dict):
+            return None
+        data = data.get(key)
+    return data
 
 
 def _fuzzy_in(needle: str, haystack: str, min_ratio: float = 0.88) -> bool:
@@ -100,8 +126,8 @@ class ProcessFolioUseCase:
                     diagnostics=outcome.diagnostics,
                 )
                 outcomes.append(outcome)
-            data, status = self._assemble(outcomes)
-            self._repo.save_extraction(folio_id, data, status, (data["matricula"] or {}).get("numero"))
+            data, status, fill_log = self._assemble(outcomes)
+            self._repo.save_extraction(folio_id, data, status, (data["matricula"] or {}).get("numero"), fill_log)
         except DomainException as exc:
             logger.warning("Folio %s: procesamiento fallido: %s", folio_id, exc.message)
             self._repo.mark_failed(folio_id, exc.message)
@@ -234,7 +260,10 @@ class ProcessFolioUseCase:
 
     # ------------------------------------------------------------- assemble
 
-    def _assemble(self, outcomes: List[PageOutcome]) -> Tuple[Dict[str, Any], str]:
+    def _assemble(self, outcomes: List[PageOutcome]) -> Tuple[Dict[str, Any], str, Dict[str, Any]]:
+        """(data, status, fill log). The fill log records where every value came
+        from (OCR text per header field, classification per column A line, what
+        the LLM proposed) so a wrong fill can be traced back to its rule."""
         observations: List[str] = []
         for o in outcomes:
             observations.extend(o.observations)
@@ -253,6 +282,7 @@ class ProcessFolioUseCase:
             observations.append(f"Faltan páginas: el folio tiene {declared_total} y se escanearon {len(outcomes)}.")
 
         header_pages = [o for o in ordered if o.header_blocks]
+        first: Optional[PageOutcome] = None
         if not header_pages:
             observations.append("No se encontró la página con la cabecera (matrícula, superficie, linderos).")
             header = HeaderResult(data={}, confidence={}, observations=[])
@@ -264,12 +294,14 @@ class ProcessFolioUseCase:
             observations.extend(header.observations)
 
         lines = [line for o in ordered for line in o.column_lines]
-        titularidad = parse_titularidad(lines)
+        line_trace: List[Dict[str, Any]] = []
+        titularidad = parse_titularidad(lines, line_trace)
         confidence: Dict[str, Optional[float]] = dict(header.confidence)
         for i, asiento in enumerate(titularidad["asientos"]):
             confidence[f"titularidad_dominio.asientos.{i}"] = asiento.get("confianza")
 
-        self._fill_gaps_with_llm(titularidad["asientos"], observations)
+        llm_log: List[Dict[str, Any]] = []
+        self._fill_gaps_with_llm(titularidad["asientos"], observations, llm_log)
 
         asientos = titularidad["asientos"]
         if not asientos:
@@ -311,12 +343,57 @@ class ProcessFolioUseCase:
             "campos_baja_confianza": low,
             "observaciones": observations,
         }
-        return data, (FolioStatus.NEEDS_REVIEW if observations else FolioStatus.READY)
+        fill_log = {
+            "version": FILL_LOG_VERSION,
+            "version_extraccion": EXTRACTION_VERSION,
+            "umbral_confianza": self._threshold,
+            "ia_configurada": bool(self._structurer is not None and self._structurer.is_configured()),
+            "fotos": [
+                {
+                    "foto": o.page_index + 1,
+                    "pagina_impresa": o.layout.page_number if o.layout else None,
+                    "total_impreso": o.layout.page_total if o.layout else None,
+                    "rotacion_deg": o.rotation_deg,
+                    "lineas_verticales": len(o.diagnostics.get("vertical_lines") or []),
+                    "cabecera_recortada": bool(o.layout and o.layout.header_rect),
+                    "columna_a_recortada": bool(o.layout and o.layout.titularidad_rect),
+                    "lineas_columna_a": len(o.column_lines),
+                    "observaciones": o.observations,
+                }
+                for o in outcomes
+            ],
+            "orden_fotos": [o.page_index + 1 for o in ordered],
+            "cabecera": {
+                "foto": first.page_index + 1 if first else None,
+                "rotulos_encontrados": header.labels,
+                "lineas_ocr": [join_text(line) for line in group_lines(first.header_blocks)] if first else [],
+                "campos": [
+                    {
+                        "campo": key,
+                        "valor": _get_path(data, path),
+                        "confianza": confidence.get(key),
+                        "texto_ocr": header.sources.get(key, []),
+                    }
+                    for key, path in _HEADER_FIELDS
+                ],
+            },
+            "columna_a": {"ultimo_asiento_declarado": declared_last, "lineas": line_trace},
+            "ia": llm_log,
+            "observaciones": observations,
+        }
+        return data, (FolioStatus.NEEDS_REVIEW if observations else FolioStatus.READY), fill_log
 
-    def _fill_gaps_with_llm(self, asientos: Sequence[Dict[str, Any]], observations: List[str]) -> None:
+    def _fill_gaps_with_llm(
+        self,
+        asientos: Sequence[Dict[str, Any]],
+        observations: List[str],
+        log: Optional[List[Dict[str, Any]]] = None,
+    ) -> None:
         """Only for asientos past the antecedent (numero > 0) missing people or
         act, and only values that literally appear in the asiento's OCR text are
-        accepted -- the LLM may restructure, never invent."""
+        accepted -- the LLM may restructure, never invent. `log` (fill log) gets
+        each call: what was sent, the raw proposal and what was kept."""
+        log = log if log is not None else []
         if self._structurer is None or not self._structurer.is_configured():
             return
         for asiento in asientos:
@@ -327,12 +404,16 @@ class ProcessFolioUseCase:
                 proposal = self._structurer.structure(text)
             except AsientoStructurerUnavailableException as exc:
                 observations.append(f"No se pudo usar IA para completar asientos: {exc.message}")
+                log.append({"asiento": asiento.get("numero"), "texto_enviado": text, "error": exc.message})
                 return
             filled = []
+            discarded: List[str] = []
             if not asiento["personas"]:
                 for p in proposal.get("personas") or []:
                     name = str((p or {}).get("nombre") or "").strip()
                     if not name or not _fuzzy_in(name, text):
+                        if name:
+                            discarded.append(f"persona '{name}' (no está en el texto)")
                         continue
                     ci = str(p.get("ci") or "").strip() or None
                     asiento["personas"].append({
@@ -350,9 +431,20 @@ class ProcessFolioUseCase:
                 if not asiento.get(key) and value and _fuzzy_in(value, text):
                     asiento[key] = value
                     filled.append(key)
+                elif not asiento.get(key) and value:
+                    discarded.append(f"{key} '{value}' (no está en el texto)")
             doc = str(proposal.get("documento") or "").strip()
             if not asiento.get("documento") and doc and _fuzzy_in(doc, text):
                 asiento["documento"] = {"descripcion": doc, "fecha": None}
                 filled.append("documento")
+            elif not asiento.get("documento") and doc:
+                discarded.append(f"documento '{doc}' (no está en el texto)")
+            log.append({
+                "asiento": asiento.get("numero"),
+                "texto_enviado": text,
+                "propuesta": proposal,
+                "aceptado": filled,
+                "descartado": discarded,
+            })
             if filled:
                 asiento["completado_por_ia"] = filled

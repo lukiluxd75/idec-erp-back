@@ -45,6 +45,10 @@ class HeaderResult:
     data: Dict[str, Any]
     confidence: Dict[str, Optional[float]] = field(default_factory=dict)
     observations: List[str] = field(default_factory=list)
+    # For the fill log only: OCR text each field was taken from (same dotted
+    # keys as `confidence`) and the printed label found for each rótulo.
+    sources: Dict[str, List[str]] = field(default_factory=dict)
+    labels: Dict[str, Optional[str]] = field(default_factory=dict)
 
 
 def _tidy(text: str) -> str:
@@ -116,6 +120,7 @@ def parse_header(blocks: Sequence[OcrBlock], width: float) -> HeaderResult:
     data: Dict[str, Any] = {}
     conf: Dict[str, Optional[float]] = {}
     obs: List[str] = []
+    src: Dict[str, List[str]] = {}
 
     # ---- Matrícula: number + status on one row, registry zone just above.
     number_block = None
@@ -128,6 +133,7 @@ def parse_header(blocks: Sequence[OcrBlock], width: float) -> HeaderResult:
     if number_block is not None:
         matricula["numero"] = number
         conf["matricula.numero"] = round(number_block.confidence, 4)
+        src["matricula.numero"] = [number_block.text]
         status = next(
             (
                 b for b in blocks
@@ -139,6 +145,7 @@ def parse_header(blocks: Sequence[OcrBlock], width: float) -> HeaderResult:
         if status is not None:
             matricula["estado"] = normalize(status.text)
             conf["matricula.estado"] = round(status.confidence, 4)
+            src["matricula.estado"] = [status.text]
         zone = min(
             (
                 b for b in blocks
@@ -151,6 +158,7 @@ def parse_header(blocks: Sequence[OcrBlock], width: float) -> HeaderResult:
         if zone is not None:
             matricula["zona"] = _tidy(zone.text)
             conf["matricula.zona"] = round(zone.confidence, 4)
+            src["matricula.zona"] = [zone.text]
     else:
         obs.append("No se encontró el número de matrícula.")
     data["matricula"] = matricula
@@ -167,6 +175,7 @@ def parse_header(blocks: Sequence[OcrBlock], width: float) -> HeaderResult:
     data["tipo_inmueble"] = strip_filler(kind.text)[1:-1].strip() if kind is not None else None
     if kind is not None:
         conf["tipo_inmueble"] = round(kind.confidence, 4)
+        src["tipo_inmueble"] = [kind.text]
 
     # ---- Simple "LABEL: value" rows of the left column.
     used: List[OcrBlock] = list(label_blocks) + [x for x in (number_block, kind) if x is not None]
@@ -185,6 +194,7 @@ def parse_header(blocks: Sequence[OcrBlock], width: float) -> HeaderResult:
         used.extend(values)
         data[key] = _tidy(join_text(values)) or None
         conf[key] = min_confidence(values)
+        src["superficie" if key == "superficie_texto" else key] = [b.text for b in values]
 
     surface_text = data.pop("superficie_texto")
     if surface_text:
@@ -198,7 +208,7 @@ def parse_header(blocks: Sequence[OcrBlock], width: float) -> HeaderResult:
         obs.append("No se pudo leer el valor numérico de la superficie.")
 
     # ---- Linderos: 'N.:CON ...' blocks from the LINDEROS row down (S/O are on the right half).
-    data["linderos"], lconf = _parse_linderos(blocks, labels["linderos"], used)
+    data["linderos"], lconf = _parse_linderos(blocks, labels["linderos"], used, src)
     conf.update(lconf)
     missing = [k for k, v in data["linderos"].items() if not v]
     if missing:
@@ -224,20 +234,31 @@ def parse_header(blocks: Sequence[OcrBlock], width: float) -> HeaderResult:
     data["propiedad"] = _tidy(prop.text) if prop is not None else None
     if prop is not None:
         conf["propiedad"] = round(prop.confidence, 4)
+        src["propiedad"] = [prop.text]
 
     # ---- Antecedente dominial (sometimes printed right above the columns).
     ante = next((b for b in blocks if "ANTECEDENTE" in compact(b.text) or "DOMINIAL" in compact(b.text)), None)
     if ante is not None:
         text = ante.text.split(":", 1)[1] if ":" in ante.text else ""
         data["antecedente_dominial"] = _tidy(text) or None
+        src["antecedente_dominial"] = [ante.text]
     else:
         data["antecedente_dominial"] = None
 
-    return HeaderResult(data=data, confidence=conf, observations=obs)
+    return HeaderResult(
+        data=data,
+        confidence=conf,
+        observations=obs,
+        sources=src,
+        labels={k: (b.text if b is not None else None) for k, b in labels.items()},
+    )
 
 
 def _parse_linderos(
-    blocks: Sequence[OcrBlock], label: Optional[OcrBlock], used: Sequence[OcrBlock]
+    blocks: Sequence[OcrBlock],
+    label: Optional[OcrBlock],
+    used: Sequence[OcrBlock],
+    sources: Optional[Dict[str, List[str]]] = None,
 ) -> Tuple[Dict[str, Optional[str]], Dict[str, Optional[float]]]:
     result: Dict[str, Optional[str]] = {"norte": None, "sud": None, "este": None, "oeste": None}
     conf: Dict[str, Optional[float]] = {}
@@ -278,4 +299,6 @@ def _parse_linderos(
         text = " ".join([head[prefix_len:]] + [b.text.strip() for b in blks[1:]])
         result[direction] = _tidy(text) or None
         conf[f"linderos.{direction}"] = min_confidence(blks)
+        if sources is not None:
+            sources[f"linderos.{direction}"] = [b.text for b in blks]
     return result, conf
