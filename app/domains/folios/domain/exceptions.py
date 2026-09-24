@@ -30,10 +30,21 @@ class AsientoStructurerUnavailableException(DomainException):
     http_status = 503
 
 
+class AsientoStructurerStoppedException(AsientoStructurerUnavailableException):
+    """Someone stopped that PC from the digitization monitor while it was writing
+    this answer. A subclass because the pipeline handles it the same way, and not
+    a `requests` error on purpose: no other PC should be tried after a person
+    asked for the work to stop."""
+
+    def __init__(self, message: str = "La consulta se detuvo desde el monitor de computadoras."):
+        super().__init__(message)
+
+
 __all__ = [
     "FolioNotFoundException",
     "InvalidFolioUploadException",
     "FolioNotEditableException",
     "OcrUnavailableException",
     "AsientoStructurerUnavailableException",
+    "AsientoStructurerStoppedException",
 ]

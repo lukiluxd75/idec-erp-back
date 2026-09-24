@@ -25,6 +25,7 @@ from app.domains.chatbot.infrastructure.ocr.tesseract_document_reader import Tes
 from app.domains.chatbot.infrastructure.ollama.ollama_chat_engine import OllamaChatEngine
 from app.domains.chatbot.infrastructure.sql_chat_history_repository import SqlChatHistoryRepository
 from app.domains.chatbot.infrastructure.sql_procedure_repository import SqlProcedureRepository
+from app.domains.digitization.contracts import get_borrow_host
 
 
 def get_procedure_repository(db: Session = Depends(get_db)) -> ProcedureRepositoryPort:
@@ -37,7 +38,9 @@ def get_chat_history_repository(db: Session = Depends(get_db)) -> ChatHistoryRep
 
 @lru_cache()
 def get_chat_engine() -> ChatEnginePort:
-    return OllamaChatEngine()
+    """Reports its calls to digitization (public contract) so the PCs monitor
+    shows this host as working while the assistant is answering."""
+    return OllamaChatEngine(borrow=get_borrow_host("chatbot").execute)
 
 
 @lru_cache()

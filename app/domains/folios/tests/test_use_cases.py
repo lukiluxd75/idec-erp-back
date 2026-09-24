@@ -5,10 +5,13 @@ OCR captured from a real folio (tests/fixtures, anonymized).
 """
 import json
 import unittest
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List
+from unittest.mock import MagicMock, patch
 
+import requests
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -26,6 +29,7 @@ from app.domains.folios.application.use_cases import (
 from app.domains.folios.domain.entities.folio import FolioStatus
 from app.domains.folios.domain.entities.ocr_block import OcrBlock
 from app.domains.folios.domain.exceptions import (
+    AsientoStructurerStoppedException,
     AsientoStructurerUnavailableException,
     FolioNotEditableException,
     FolioNotFoundException,
@@ -36,6 +40,7 @@ from app.domains.folios.domain.ports.asiento_structurer_port import AsientoStruc
 from app.domains.folios.domain.ports.ocr_port import OcrPort
 from app.domains.folios.domain.ports.page_image_port import PageImagePort, RotatedImage
 from app.domains.folios.infrastructure.models import FolioModel, FolioPageModel
+from app.domains.folios.infrastructure.ollama_asiento_structurer import OllamaAsientoStructurer
 from app.domains.folios.infrastructure.sql_folio_repository import STALE_AFTER, STALE_MESSAGE, SqlFolioRepository
 
 FIXTURE = Path(__file__).parent / "fixtures" / "folio_2_paginas_ocr.json"
@@ -349,6 +354,65 @@ class TestReview(unittest.TestCase):
         self.assertEqual((folio.status, folio.confirmed_by_sub), (FolioStatus.CONFIRMED, "user-a"))
         with self.assertRaises(FolioNotEditableException):
             RequestReprocessUseCase(self.repo).execute(self.folio.id, "user-a")
+
+
+class TestOllamaAsientoStructurerFailover(unittest.TestCase):
+    """The pass runs on whichever architect PC is up (digitization pool), with
+    FOLIOS_OLLAMA_URL as the last resort."""
+
+    def _structurer(self, hosts):
+        return OllamaAsientoStructurer(
+            base_url="http://fallback:11434", model="gemma4:e4b", host_provider=lambda _model: hosts
+        )
+
+    def _answer(self, payload):
+        """Ollama's answer as it streams: the JSON arrives split in fragments."""
+        content = json.dumps(payload)
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.iter_lines.return_value = iter([
+            json.dumps({"message": {"content": content[:3]}}),
+            json.dumps({"message": {"content": content[3:]}}),
+            json.dumps({"message": {"content": ""}, "done": True}),
+        ])
+        return response
+
+    def test_pool_hosts_come_before_the_fallback(self):
+        hosts = self._structurer(["http://pc1:11434"]).hosts()
+        self.assertEqual(hosts, ["http://pc1:11434", "http://fallback:11434"])
+
+    @patch("app.domains.folios.infrastructure.ollama_asiento_structurer.requests.post")
+    def test_moves_to_the_next_pc_when_one_fails(self, post):
+        post.side_effect = [requests.ConnectionError("apagada"), self._answer({"acto": "Compra Venta"})]
+        result = self._structurer(["http://pc1:11434", "http://pc2:11434"]).structure("texto")
+        self.assertEqual(result["acto"], "Compra Venta")
+        self.assertEqual([c.args[0] for c in post.call_args_list],
+                         ["http://pc1:11434/api/chat", "http://pc2:11434/api/chat"])
+
+    @patch("app.domains.folios.infrastructure.ollama_asiento_structurer.requests.post")
+    def test_unavailable_only_after_every_pc_failed(self, post):
+        post.side_effect = requests.ConnectionError("apagada")
+        with self.assertRaises(AsientoStructurerUnavailableException):
+            self._structurer(["http://pc1:11434"]).structure("texto")
+        self.assertEqual(post.call_count, 2)
+
+    @patch("app.domains.folios.infrastructure.ollama_asiento_structurer.requests.post")
+    def test_a_stop_from_the_monitor_drops_the_pass_without_trying_the_next_pc(self, post):
+        post.return_value = self._answer({"acto": "Compra Venta"})
+        structurer = OllamaAsientoStructurer(
+            base_url="",
+            model="gemma4:e4b",
+            host_provider=lambda _model: ["http://pc1:11434", "http://pc2:11434"],
+            borrow=lambda _host, _seconds: nullcontext(lambda: True),
+        )
+        with self.assertRaises(AsientoStructurerStoppedException):
+            structurer.structure("texto")
+        self.assertEqual(post.call_count, 1)
+
+    def test_no_pc_with_the_model_and_no_fallback_is_unavailable(self):
+        structurer = OllamaAsientoStructurer(base_url="", model="gemma4:e4b", host_provider=lambda _model: [])
+        with self.assertRaises(AsientoStructurerUnavailableException):
+            structurer.structure("texto")
 
 
 if __name__ == "__main__":

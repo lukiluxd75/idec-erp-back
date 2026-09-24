@@ -9,15 +9,44 @@ reads the job status; the queue, the PCs and the model stay hidden behind this.
                           requested_by=user.sub, instructions="...", output_template={...},
                           source="folder_analysis")
     views = get_jobs(db, [job_id])   # {job_id: JobView}
+
+It also lends the architects' PCs to other domains that run their own Ollama
+work on them (see get_worker_host_picker / get_borrow_host).
 """
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from functools import lru_cache
+from typing import Any, Dict, List, Optional, Set
 
 from sqlalchemy.orm import Session
 
-from app.domains.digitization.application.use_cases import GetJobsUseCase, SubmitDocumentUseCase
+from app.core.database.connection import SessionLocal
+from app.domains.digitization.application.use_cases import (
+    BorrowHostUseCase,
+    GetJobsUseCase,
+    PickWorkerHostsUseCase,
+    SubmitDocumentUseCase,
+)
 from app.domains.digitization.domain.entities import JobStatus
-from app.domains.digitization.presentation.deps import build_job_repository, get_max_upload_bytes, get_preprocessor
+from app.domains.digitization.infrastructure.config import get_digitization_settings
+from app.domains.digitization.infrastructure.sql_job_repository import SqlJobRepository
+from app.domains.digitization.presentation.deps import (
+    build_job_repository,
+    get_host_usage,
+    get_max_upload_bytes,
+    get_preprocessor,
+    get_vision_worker,
+)
+
+__all__ = [
+    "BorrowHostUseCase",
+    "JobStatus",
+    "JobView",
+    "PickWorkerHostsUseCase",
+    "get_borrow_host",
+    "get_jobs",
+    "get_worker_host_picker",
+    "submit_image",
+]
 
 
 @dataclass(frozen=True)
@@ -62,4 +91,23 @@ def get_jobs(db: Session, job_ids: List[str]) -> Dict[str, JobView]:
     }
 
 
-__all__ = ["JobStatus", "JobView", "get_jobs", "submit_image"]
+def _busy_hosts() -> Set[str]:
+    with SessionLocal() as db:
+        jobs = {job.worker_host for job in SqlJobRepository(db).list_processing() if job.worker_host}
+    return jobs | set(get_host_usage().active())
+
+
+@lru_cache()
+def get_worker_host_picker() -> PickWorkerHostsUseCase:
+    """Lets another domain send its own Ollama work to the same architects' PCs.
+    `execute(model)` returns [] when DIGITIZATION_WORKER_URLS is empty or no PC has
+    that model, so the caller keeps whatever fallback it had."""
+    settings = get_digitization_settings()
+    return PickWorkerHostsUseCase(get_vision_worker(), settings.worker_hosts, _busy_hosts)
+
+
+@lru_cache()
+def get_borrow_host(used_by: str) -> BorrowHostUseCase:
+    """`execute(host, seconds)` is a context manager: while it is open the monitor
+    screen shows that PC as working, labelled with `used_by` (the domain name)."""
+    return BorrowHostUseCase(get_host_usage(), used_by)

@@ -106,6 +106,15 @@ class SqlJobRepository(JobRepositoryPort):
         rows = self._db.execute(select(Job).where(Job.status == JobStatus.PROCESSING)).scalars()
         return [_to_entity(row) for row in rows]
 
+    def find_processing_on(self, worker_host: str) -> Optional[DigitizationJob]:
+        row = self._db.execute(
+            select(Job)
+            .where(Job.status == JobStatus.PROCESSING, Job.worker_host == worker_host)
+            .order_by(Job.started_at.desc())
+            .limit(1)
+        ).scalars().first()
+        return _to_entity(row) if row else None
+
     def has_pending(self) -> bool:
         return self._db.execute(
             select(Job.id).where(Job.status == JobStatus.PENDING).limit(1)
@@ -124,6 +133,8 @@ class SqlJobRepository(JobRepositoryPort):
             self._db.rollback()
             return None
         row.status = JobStatus.PROCESSING
+        # A flag left over from an earlier run would stop this one on its first token.
+        row.stop_requested = False
         row.worker_host = worker_host
         row.attempts = row.attempts + 1
         row.started_at = _now()
@@ -140,6 +151,22 @@ class SqlJobRepository(JobRepositoryPort):
     def mark_failed(self, job_id: str, error: str) -> None:
         self._update(job_id, status=JobStatus.FAILED, error=error, finished_at=_now())
 
+    def request_stop(self, job_id: str) -> None:
+        self._update(job_id, stop_requested=True)
+
+    def stop_requested(self, job_id: str) -> bool:
+        parsed = _parse_id(job_id)
+        if parsed is None:
+            return False
+        # A plain column read: the flag is written by another process, so the
+        # session's cached copy of the row must not be consulted.
+        return bool(self._db.execute(select(Job.stop_requested).where(Job.id == parsed)).scalar_one_or_none())
+
+    def mark_stopped(self, job_id: str, error: str) -> None:
+        self._update(
+            job_id, status=JobStatus.STOPPED, error=error, finished_at=_now(), stop_requested=False
+        )
+
     def requeue_orphaned(self, except_hosts: List[str]) -> int:
         statement = update(Job).where(Job.status == JobStatus.PROCESSING)
         if except_hosts:
@@ -154,9 +181,9 @@ class SqlJobRepository(JobRepositoryPort):
             return None
         result = self._db.execute(
             update(Job)
-            .where(Job.id == parsed, Job.status == JobStatus.FAILED)
+            .where(Job.id == parsed, Job.status.in_([JobStatus.FAILED, JobStatus.STOPPED]))
             .values(
-                status=JobStatus.PENDING, attempts=0, error=None,
+                status=JobStatus.PENDING, attempts=0, error=None, stop_requested=False,
                 worker_host=None, started_at=None, finished_at=None,
             )
         )

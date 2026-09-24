@@ -40,11 +40,27 @@ class JobDetail(JobSummary):
         return cls(**JobSummary.from_entity(job).model_dump(), result=job.result)
 
 
+class StopWorkerRequest(BaseModel):
+    """The PC to stop, as the monitor lists it ("http://172.16.0.11:11434").
+    It travels in the body because a URL does not fit in a path segment."""
+
+    host: str
+
+
+class StopWorkerResponse(BaseModel):
+    """What was actually asked to stop on that PC."""
+
+    host: str
+    used_by: str
+    job_id: Optional[str] = None
+
+
 class WorkerStatusResponse(BaseModel):
     host: str
     reachable: bool
     model_available: bool
     current_job_id: Optional[str] = None
+    used_by: Optional[str] = None
 
     @classmethod
     def from_entity(cls, status: WorkerStatus) -> "WorkerStatusResponse":
@@ -53,4 +69,5 @@ class WorkerStatusResponse(BaseModel):
             reachable=status.reachable,
             model_available=status.model_available,
             current_job_id=status.current_job_id,
+            used_by=status.used_by,
         )

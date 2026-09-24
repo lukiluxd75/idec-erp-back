@@ -27,6 +27,9 @@ logger = logging.getLogger("uvicorn.error")
 # Arbitrary constant identifying this dispatcher's advisory lock in idec_erp.
 _LEADER_LOCK_KEY = 820_260_923_001
 _FOLLOWER_RETRY_SECONDS = 15.0
+# How often a running job re-reads its stop flag. The vision worker asks between
+# tokens, several times a second, so without this the database would be hammered.
+_STOP_POLL_SECONDS = 2.0
 
 
 class JobDispatcher:
@@ -136,7 +139,9 @@ class JobDispatcher:
     def _process(self, job: DigitizationJob, host: str) -> None:
         try:
             with self._session_factory() as db:
-                ProcessJobUseCase(self._repository_factory(db), self._worker, self._max_attempts).execute(job, host)
+                ProcessJobUseCase(self._repository_factory(db), self._worker, self._max_attempts).execute(
+                    job, host, should_stop=self._stop_watcher(job.id)
+                )
         except WorkerUnavailableException:
             logger.warning("digitization: PC %s failed on job %s; resting it", host, job.id)
             self._rest(host)
@@ -150,3 +155,23 @@ class JobDispatcher:
         finally:
             with self._lock:
                 self._busy.discard(host)
+
+    def _stop_watcher(self, job_id: str) -> Callable[[], bool]:
+        """Reads this job's stop flag, at most once every _STOP_POLL_SECONDS and on
+        its own session: the flag is written by whichever process served the
+        request, which is usually not this one."""
+        state = {"asked_at": 0.0, "stop": False}
+
+        def watcher() -> bool:
+            now = time.monotonic()
+            if not state["stop"] and now - state["asked_at"] >= _STOP_POLL_SECONDS:
+                state["asked_at"] = now
+                try:
+                    with self._session_factory() as db:
+                        state["stop"] = self._repository_factory(db).stop_requested(job_id)
+                except Exception:
+                    # A hiccup reading the flag must not lose the digitization.
+                    logger.exception("digitization: could not read the stop flag of job %s", job_id)
+            return bool(state["stop"])
+
+        return watcher

@@ -8,6 +8,9 @@ class JobStatus:
     PROCESSING = "processing"
     DONE = "done"
     FAILED = "failed"
+    # Aborted mid-run from the PC monitor. A dead end like FAILED, but it was a
+    # person's decision, not a fault: shown and worded differently.
+    STOPPED = "stopped"
 
 
 @dataclass
