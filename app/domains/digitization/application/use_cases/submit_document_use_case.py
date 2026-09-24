@@ -1,3 +1,5 @@
+from typing import Any, Dict, Optional
+
 from app.domains.digitization.domain.entities import DigitizationJob
 from app.domains.digitization.domain.exceptions import InvalidDocumentException
 from app.domains.digitization.domain.ports import ImagePreprocessorPort, JobRepositoryPort
@@ -12,7 +14,16 @@ class SubmitDocumentUseCase:
         self._preprocessor = preprocessor
         self._max_bytes = max_bytes
 
-    def execute(self, file_name: str, mime_type: str, content: bytes, requested_by: str) -> DigitizationJob:
+    def execute(
+        self,
+        file_name: str,
+        mime_type: str,
+        content: bytes,
+        requested_by: str,
+        instructions: Optional[str] = None,
+        output_template: Optional[Dict[str, Any]] = None,
+        source: Optional[str] = None,
+    ) -> DigitizationJob:
         if not content:
             raise InvalidDocumentException("El archivo está vacío.")
         if len(content) > self._max_bytes:
@@ -31,4 +42,7 @@ class SubmitDocumentUseCase:
             image=content,
             prepared_image=prepared,
             requested_by=requested_by,
+            instructions=instructions,
+            output_template=output_template,
+            source=source,
         )

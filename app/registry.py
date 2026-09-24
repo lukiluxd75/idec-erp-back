@@ -64,3 +64,9 @@ try:
     api_router.include_router(digitization_router, prefix="/digitization")
 except Exception as exc:
     logger.warning("Could not load domain 'digitization': %s", exc)
+
+try:
+    from app.domains.folder_analysis.presentation.router import router as folder_analysis_router
+    api_router.include_router(folder_analysis_router, prefix="/folder-analysis")
+except Exception as exc:
+    logger.warning("Could not load domain 'folder_analysis': %s", exc)

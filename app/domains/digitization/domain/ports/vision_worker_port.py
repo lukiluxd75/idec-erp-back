@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from app.domains.digitization.domain.entities import WorkerStatus
 
@@ -12,6 +12,13 @@ class VisionWorkerPort(ABC):
         """Quick health check. Never raises."""
 
     @abstractmethod
-    def extract(self, host: str, image: bytes) -> Dict[str, Any]:
-        """Structured digitization of one image. Raises WorkerUnavailableException
-        or WorkerOutputException."""
+    def extract(
+        self,
+        host: str,
+        image: bytes,
+        instructions: Optional[str] = None,
+        output_template: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Structured digitization of one image: generic when `instructions` is
+        None, otherwise shaped like `output_template`. Raises
+        WorkerUnavailableException or WorkerOutputException."""

@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select, update
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, undefer
 
 from app.domains.digitization.domain.entities import DigitizationJob, JobStatus
 from app.domains.digitization.domain.ports import JobRepositoryPort
@@ -21,8 +21,8 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _to_entity(row: Job) -> DigitizationJob:
-    return DigitizationJob(
+def _to_entity(row: Job, with_instructions: bool = False) -> DigitizationJob:
+    job = DigitizationJob(
         id=str(row.id),
         status=row.status,
         file_name=row.file_name,
@@ -36,7 +36,12 @@ def _to_entity(row: Job) -> DigitizationJob:
         error=row.error,
         started_at=row.started_at,
         finished_at=row.finished_at,
+        source=row.source,
     )
+    if with_instructions:
+        job.instructions = row.instructions
+        job.output_template = row.output_template
+    return job
 
 
 class SqlJobRepository(JobRepositoryPort):
@@ -44,7 +49,15 @@ class SqlJobRepository(JobRepositoryPort):
         self._db = db
 
     def create(
-        self, file_name: str, mime_type: str, image: bytes, prepared_image: bytes, requested_by: str
+        self,
+        file_name: str,
+        mime_type: str,
+        image: bytes,
+        prepared_image: bytes,
+        requested_by: str,
+        instructions: Optional[str] = None,
+        output_template: Optional[Dict[str, Any]] = None,
+        source: Optional[str] = None,
     ) -> DigitizationJob:
         row = Job(
             status=JobStatus.PENDING,
@@ -54,6 +67,9 @@ class SqlJobRepository(JobRepositoryPort):
             prepared_image=prepared_image,
             requested_by=requested_by,
             attempts=0,
+            instructions=instructions,
+            output_template=output_template,
+            source=source,
         )
         self._db.add(row)
         self._db.commit()
@@ -66,6 +82,13 @@ class SqlJobRepository(JobRepositoryPort):
             return None
         row = self._db.get(Job, parsed)
         return _to_entity(row) if row else None
+
+    def get_many(self, job_ids: List[str]) -> List[DigitizationJob]:
+        parsed = [p for p in (_parse_id(job_id) for job_id in job_ids) if p is not None]
+        if not parsed:
+            return []
+        rows = self._db.execute(select(Job).where(Job.id.in_(parsed))).scalars()
+        return [_to_entity(row) for row in rows]
 
     def get_prepared_image(self, job_id: str) -> Optional[bytes]:
         parsed = _parse_id(job_id)
@@ -95,6 +118,7 @@ class SqlJobRepository(JobRepositoryPort):
             .order_by(Job.created_at)
             .limit(1)
             .with_for_update(skip_locked=True)
+            .options(undefer(Job.instructions), undefer(Job.output_template))
         ).scalars().first()
         if row is None:
             self._db.rollback()
@@ -105,7 +129,7 @@ class SqlJobRepository(JobRepositoryPort):
         row.started_at = _now()
         self._db.commit()
         self._db.refresh(row)
-        return _to_entity(row)
+        return _to_entity(row, with_instructions=True)
 
     def mark_done(self, job_id: str, result: Dict[str, Any]) -> None:
         self._update(job_id, status=JobStatus.DONE, result=result, error=None, finished_at=_now())

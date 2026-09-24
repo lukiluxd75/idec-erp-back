@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import APIRouter, FastAPI
 
 from app.core.database.connection import engine
+from app.domains.digitization.infrastructure.config import get_digitization_settings
 from app.domains.digitization.infrastructure.models import create_schema_and_tables
 from app.domains.digitization.presentation.deps import build_dispatcher
 from app.domains.digitization.presentation.endpoints.jobs import router as jobs_router
@@ -24,6 +25,10 @@ async def lifespan(_app: FastAPI):
         create_schema_and_tables(engine)
     except Exception as exc:
         logger.warning("digitization: could not create schema/tables: %s", exc)
+    if not get_digitization_settings().dispatcher_enabled:
+        logger.info("digitization: dispatcher disabled (DIGITIZATION_DISPATCHER_ENABLED=false)")
+        yield
+        return
     dispatcher = build_dispatcher()
     dispatcher.start()
     try:

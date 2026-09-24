@@ -7,11 +7,22 @@ from app.domains.digitization.domain.entities import DigitizationJob
 class JobRepositoryPort(ABC):
     @abstractmethod
     def create(
-        self, file_name: str, mime_type: str, image: bytes, prepared_image: bytes, requested_by: str
+        self,
+        file_name: str,
+        mime_type: str,
+        image: bytes,
+        prepared_image: bytes,
+        requested_by: str,
+        instructions: Optional[str] = None,
+        output_template: Optional[Dict[str, Any]] = None,
+        source: Optional[str] = None,
     ) -> DigitizationJob: ...
 
     @abstractmethod
     def get(self, job_id: str) -> Optional[DigitizationJob]: ...
+
+    @abstractmethod
+    def get_many(self, job_ids: List[str]) -> List[DigitizationJob]: ...
 
     @abstractmethod
     def get_prepared_image(self, job_id: str) -> Optional[bytes]: ...

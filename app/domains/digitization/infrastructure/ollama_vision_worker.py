@@ -1,6 +1,7 @@
 import base64
 import json
-from typing import Any, Dict
+import re
+from typing import Any, Dict, Optional
 
 import requests
 
@@ -23,26 +24,38 @@ USER_PROMPT = (
     "as a list of rows, each row a list of cell texts)."
 )
 
-RESULT_SCHEMA: Dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "document_type": {"type": "string"},
-        "full_text": {"type": "string"},
-        "fields": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {"name": {"type": "string"}, "value": {"type": "string"}},
-                "required": ["name", "value"],
-            },
-        },
-        "tables": {
-            "type": "array",
-            "items": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}},
-        },
-    },
-    "required": ["document_type", "full_text", "fields", "tables"],
+GENERIC_TEMPLATE: Dict[str, Any] = {
+    "document_type": "",
+    "full_text": "",
+    "fields": [{"name": "", "value": ""}],
+    "tables": [[["cell"]]],
 }
+
+_THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL)
+
+
+def _answer_format(template: Dict[str, Any]) -> str:
+    # The prompt carries the shape instead of Ollama's `format`: with the reasoning
+    # model a strict schema makes it loop ("token repeat limit reached").
+    return (
+        "Answer with ONLY one JSON object, no explanations, with exactly these keys "
+        "(use null for values that are not on the document; lists may have any length):\n"
+        + json.dumps(template, ensure_ascii=False, indent=1)
+    )
+
+
+def parse_json_answer(content: str) -> Dict[str, Any]:
+    cleaned = _THINK_BLOCK.sub("", content or "")
+    start, end = cleaned.find("{"), cleaned.rfind("}")
+    if start == -1 or end <= start:
+        raise WorkerOutputException("la respuesta no contiene JSON")
+    try:
+        data = json.loads(cleaned[start : end + 1])
+    except ValueError as exc:
+        raise WorkerOutputException(f"respuesta no es JSON válido ({exc})") from exc
+    if not isinstance(data, dict):
+        raise WorkerOutputException("la respuesta no es un objeto JSON")
+    return data
 
 
 class OllamaVisionWorker(VisionWorkerPort):
@@ -53,11 +66,15 @@ class OllamaVisionWorker(VisionWorkerPort):
         connect_timeout: float,
         request_timeout: float,
         health_timeout: float,
+        num_ctx: int = 20480,
+        num_predict: int = 16000,
     ):
         self._model = model
         self._keep_alive = keep_alive
         self._timeout = (connect_timeout, request_timeout)
         self._health_timeout = health_timeout
+        self._num_ctx = num_ctx
+        self._num_predict = num_predict
 
     def check(self, host: str) -> WorkerStatus:
         try:
@@ -72,31 +89,48 @@ class OllamaVisionWorker(VisionWorkerPort):
         wanted = {self._model, f"{self._model}:latest"}
         return WorkerStatus(host=host, reachable=True, model_available=bool(names & wanted))
 
-    def extract(self, host: str, image: bytes) -> Dict[str, Any]:
+    def extract(
+        self,
+        host: str,
+        image: bytes,
+        instructions: Optional[str] = None,
+        output_template: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        if instructions:
+            prompt = f"{instructions}\n\n{_answer_format(output_template or {})}"
+        else:
+            prompt = f"{USER_PROMPT}\n\n{_answer_format(GENERIC_TEMPLATE)}"
         payload = {
             "model": self._model,
             "stream": False,
-            "format": RESULT_SCHEMA,
             "keep_alive": self._keep_alive,
-            "options": {"temperature": 0},
+            "options": {"temperature": 0, "num_ctx": self._num_ctx, "num_predict": self._num_predict},
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": USER_PROMPT, "images": [base64.b64encode(image).decode("ascii")]},
+                {"role": "user", "content": prompt, "images": [base64.b64encode(image).decode("ascii")]},
             ],
         }
         try:
             response = requests.post(f"{host}/api/chat", json=payload, timeout=self._timeout)
         except requests.RequestException as exc:
             raise WorkerUnavailableException(str(exc)) from exc
+        # "repeat limit" is the model looping on this image, not the PC failing.
+        if response.status_code >= 400 and "repeat limit" in response.text:
+            raise WorkerOutputException("el modelo entró en un ciclo repetitivo")
         if response.status_code >= 400:
             raise WorkerUnavailableException(f"HTTP {response.status_code}: {response.text[:300]}")
 
         try:
-            content = response.json()["message"]["content"]
-            data = json.loads(content)
-        except (ValueError, KeyError, TypeError) as exc:
-            raise WorkerOutputException(f"respuesta no es JSON válido ({exc})") from exc
-        return self._normalize(data)
+            body = response.json()
+            content = (body.get("message") or {}).get("content") or ""
+        except (ValueError, AttributeError) as exc:
+            raise WorkerOutputException(f"respuesta ilegible ({exc})") from exc
+        if not content.strip():
+            reason = "se agotó el límite de respuesta" if body.get("done_reason") == "length" else "respuesta vacía"
+            raise WorkerOutputException(reason)
+
+        data = parse_json_answer(content)
+        return data if instructions else self._normalize(data)
 
     @staticmethod
     def _normalize(data: Any) -> Dict[str, Any]:

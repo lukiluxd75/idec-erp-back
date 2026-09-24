@@ -28,6 +28,8 @@ def get_vision_worker() -> VisionWorkerPort:
         connect_timeout=settings.connect_timeout_seconds,
         request_timeout=settings.request_timeout_seconds,
         health_timeout=settings.health_timeout_seconds,
+        num_ctx=settings.num_ctx,
+        num_predict=settings.num_predict,
     )
 
 
@@ -50,8 +52,16 @@ def build_dispatcher() -> JobDispatcher:
     )
 
 
-def get_job_repository(db: Session = Depends(get_db)) -> JobRepositoryPort:
+def build_job_repository(db: Session) -> JobRepositoryPort:
     return SqlJobRepository(db)
+
+
+def get_max_upload_bytes() -> int:
+    return get_digitization_settings().max_upload_mb * 1024 * 1024
+
+
+def get_job_repository(db: Session = Depends(get_db)) -> JobRepositoryPort:
+    return build_job_repository(db)
 
 
 def get_submit_document_use_case(
@@ -60,7 +70,7 @@ def get_submit_document_use_case(
     return SubmitDocumentUseCase(
         repository=repository,
         preprocessor=get_preprocessor(),
-        max_bytes=get_digitization_settings().max_upload_mb * 1024 * 1024,
+        max_bytes=get_max_upload_bytes(),
     )
 
 
