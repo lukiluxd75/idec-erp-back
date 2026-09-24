@@ -1,0 +1,147 @@
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy import select, update
+from sqlalchemy.orm import Session
+
+from app.domains.digitization.domain.entities import DigitizationJob, JobStatus
+from app.domains.digitization.domain.ports import JobRepositoryPort
+from app.domains.digitization.infrastructure.models import DigitizationJobModel as Job
+
+
+def _parse_id(job_id: str) -> Optional[uuid.UUID]:
+    try:
+        return uuid.UUID(str(job_id))
+    except (ValueError, TypeError):
+        return None
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _to_entity(row: Job) -> DigitizationJob:
+    return DigitizationJob(
+        id=str(row.id),
+        status=row.status,
+        file_name=row.file_name,
+        mime_type=row.mime_type,
+        requested_by=row.requested_by,
+        attempts=row.attempts,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        worker_host=row.worker_host,
+        result=row.result,
+        error=row.error,
+        started_at=row.started_at,
+        finished_at=row.finished_at,
+    )
+
+
+class SqlJobRepository(JobRepositoryPort):
+    def __init__(self, db: Session):
+        self._db = db
+
+    def create(
+        self, file_name: str, mime_type: str, image: bytes, prepared_image: bytes, requested_by: str
+    ) -> DigitizationJob:
+        row = Job(
+            status=JobStatus.PENDING,
+            file_name=file_name,
+            mime_type=mime_type,
+            image=image,
+            prepared_image=prepared_image,
+            requested_by=requested_by,
+            attempts=0,
+        )
+        self._db.add(row)
+        self._db.commit()
+        self._db.refresh(row)
+        return _to_entity(row)
+
+    def get(self, job_id: str) -> Optional[DigitizationJob]:
+        parsed = _parse_id(job_id)
+        if parsed is None:
+            return None
+        row = self._db.get(Job, parsed)
+        return _to_entity(row) if row else None
+
+    def get_prepared_image(self, job_id: str) -> Optional[bytes]:
+        parsed = _parse_id(job_id)
+        if parsed is None:
+            return None
+        return self._db.execute(select(Job.prepared_image).where(Job.id == parsed)).scalar_one_or_none()
+
+    def list_by_requester(self, requested_by: str, limit: int) -> List[DigitizationJob]:
+        rows = self._db.execute(
+            select(Job).where(Job.requested_by == requested_by).order_by(Job.created_at.desc()).limit(limit)
+        ).scalars()
+        return [_to_entity(row) for row in rows]
+
+    def list_processing(self) -> List[DigitizationJob]:
+        rows = self._db.execute(select(Job).where(Job.status == JobStatus.PROCESSING)).scalars()
+        return [_to_entity(row) for row in rows]
+
+    def has_pending(self) -> bool:
+        return self._db.execute(
+            select(Job.id).where(Job.status == JobStatus.PENDING).limit(1)
+        ).first() is not None
+
+    def claim_next(self, worker_host: str) -> Optional[DigitizationJob]:
+        row = self._db.execute(
+            select(Job)
+            .where(Job.status == JobStatus.PENDING)
+            .order_by(Job.created_at)
+            .limit(1)
+            .with_for_update(skip_locked=True)
+        ).scalars().first()
+        if row is None:
+            self._db.rollback()
+            return None
+        row.status = JobStatus.PROCESSING
+        row.worker_host = worker_host
+        row.attempts = row.attempts + 1
+        row.started_at = _now()
+        self._db.commit()
+        self._db.refresh(row)
+        return _to_entity(row)
+
+    def mark_done(self, job_id: str, result: Dict[str, Any]) -> None:
+        self._update(job_id, status=JobStatus.DONE, result=result, error=None, finished_at=_now())
+
+    def release(self, job_id: str, error: str) -> None:
+        self._update(job_id, status=JobStatus.PENDING, error=error, worker_host=None, started_at=None)
+
+    def mark_failed(self, job_id: str, error: str) -> None:
+        self._update(job_id, status=JobStatus.FAILED, error=error, finished_at=_now())
+
+    def requeue_orphaned(self, except_hosts: List[str]) -> int:
+        statement = update(Job).where(Job.status == JobStatus.PROCESSING)
+        if except_hosts:
+            statement = statement.where(Job.worker_host.not_in(except_hosts))
+        result = self._db.execute(statement.values(status=JobStatus.PENDING, worker_host=None, started_at=None))
+        self._db.commit()
+        return result.rowcount or 0
+
+    def requeue_failed(self, job_id: str) -> Optional[DigitizationJob]:
+        parsed = _parse_id(job_id)
+        if parsed is None:
+            return None
+        result = self._db.execute(
+            update(Job)
+            .where(Job.id == parsed, Job.status == JobStatus.FAILED)
+            .values(
+                status=JobStatus.PENDING, attempts=0, error=None,
+                worker_host=None, started_at=None, finished_at=None,
+            )
+        )
+        self._db.commit()
+        return self.get(job_id) if result.rowcount else None
+
+    def _update(self, job_id: str, **values: Any) -> None:
+        parsed = _parse_id(job_id)
+        if parsed is None:
+            return
+        self._db.execute(update(Job).where(Job.id == parsed).values(**values))
+        self._db.commit()

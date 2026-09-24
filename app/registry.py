@@ -58,3 +58,9 @@ try:
     api_router.include_router(templates_router)
 except Exception as exc:
     logger.warning("Could not load domain 'templates': %s", exc)
+
+try:
+    from app.domains.digitization.presentation.router import router as digitization_router
+    api_router.include_router(digitization_router, prefix="/digitization")
+except Exception as exc:
+    logger.warning("Could not load domain 'digitization': %s", exc)
