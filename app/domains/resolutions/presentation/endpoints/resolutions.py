@@ -6,9 +6,12 @@ from fastapi import APIRouter, Depends, File, Form, Response, UploadFile, WebSoc
 from app.core.errors.exceptions import DomainException
 from app.core.utils.user_agent import is_mobile_user_agent
 from app.domains.resolutions.application.use_cases import (
+    AddPlanPagesUseCase,
     CreateResolutionUseCase,
+    DeletePlanPageUseCase,
     DeleteResolutionUseCase,
     SaveTableUseCase,
+    GetPlanPageUseCase,
     ListResolutionsUseCase,
     GetPageUseCase,
     GetResolutionUseCase,
@@ -16,10 +19,13 @@ from app.domains.resolutions.application.use_cases import (
 from app.domains.resolutions.domain.entities.resolution import Resolution
 from app.domains.resolutions.infrastructure.ws_connection_manager import ResolutionsConnectionManager
 from app.domains.resolutions.presentation.deps import (
+    get_add_plan_pages_use_case,
     get_connection_manager,
     get_create_resolution_use_case,
+    get_delete_plan_page_use_case,
     get_delete_resolution_use_case,
     get_save_table_use_case,
+    get_get_plan_page_use_case,
     get_list_resolutions_use_case,
     get_page_use_case,
     get_resolution_use_case,
@@ -27,6 +33,7 @@ from app.domains.resolutions.presentation.deps import (
 from app.domains.resolutions.presentation.schemas.resolution_schema import (
     SaveTableRequest,
     PageOut,
+    PlanPageOut,
     ResolutionDetail,
     ResolutionListItem,
 )
@@ -57,6 +64,9 @@ def _to_detail(r: Resolution) -> ResolutionDetail:
         total_pages=r.total_pages,
         created_at=r.created_at,
         pages=[PageOut(order_index=p.order_index) for p in r.pages],
+        plan_pages=[
+            PlanPageOut(order_index=p.order_index, planta=p.planta, source=p.source) for p in r.plan_pages
+        ],
         table_data=r.table_data,
     )
 
@@ -128,6 +138,56 @@ def get_page(
     <img src>; the frontend downloads it as a Blob (see resolutionsApi.pageBlob)."""
     content, content_type = use_case.execute(resolution_id, order_index, user.sub)
     return Response(content=content, media_type=content_type)
+
+
+@router.post("/{resolution_id}/plan-pages", response_model=ResolutionDetail, status_code=status.HTTP_201_CREATED)
+async def add_plan_pages(
+    resolution_id: str,
+    pages: List[UploadFile] = File(...),
+    plantas: List[str] = Form(...),
+    source: str = Form("app"),
+    use_case: AddPlanPagesUseCase = Depends(get_add_plan_pages_use_case),
+    manager: ResolutionsConnectionManager = Depends(get_connection_manager),
+    user: UserProfile = Depends(get_current_user),
+):
+    """Attach floor-plan photos to a resolution, each tagged with its planta.
+    Same endpoint for the mobile app and the web upload (see `source`) — no
+    separate code path per channel, just metadata about who called it."""
+    if len(pages) != len(plantas):
+        raise DomainException(f"Se recibieron {len(pages)} fotos pero {len(plantas)} plantas.")
+    contents = [
+        ((await page.read()), page.content_type or "image/jpeg", planta)
+        for page, planta in zip(pages, plantas)
+    ]
+    resolution = use_case.execute(resolution_id=resolution_id, pages=contents, source=source, user_sub=user.sub)
+    await manager.notify_change()
+    return _to_detail(resolution)
+
+
+@router.get("/{resolution_id}/plan-pages/{order_index}")
+def get_plan_page(
+    resolution_id: str,
+    order_index: int,
+    use_case: GetPlanPageUseCase = Depends(get_get_plan_page_use_case),
+    user: UserProfile = Depends(get_current_user),
+):
+    """Image bytes of a floor-plan page — same Bearer-blob pattern as get_page."""
+    content, content_type = use_case.execute(resolution_id, order_index, user.sub)
+    return Response(content=content, media_type=content_type)
+
+
+@router.delete("/{resolution_id}/plan-pages/{order_index}", response_model=ResolutionDetail)
+async def delete_plan_page(
+    resolution_id: str,
+    order_index: int,
+    use_case: DeletePlanPageUseCase = Depends(get_delete_plan_page_use_case),
+    manager: ResolutionsConnectionManager = Depends(get_connection_manager),
+    user: UserProfile = Depends(get_current_user),
+):
+    """Remove one floor-plan page (e.g. wrong planta, bad photo) — mainly for the web."""
+    resolution = use_case.execute(resolution_id, order_index, user.sub)
+    await manager.notify_change()
+    return _to_detail(resolution)
 
 
 @router.put("/{resolution_id}/table", response_model=ResolutionDetail)

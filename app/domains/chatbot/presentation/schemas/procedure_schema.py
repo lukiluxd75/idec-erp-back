@@ -35,3 +35,10 @@ class IngestResponse(BaseModel):
 
 class ReindexResponse(BaseModel):
     reindexed_count: int
+
+
+class IngestJsonResponse(BaseModel):
+    success: bool = True
+    message: str
+    count: int
+

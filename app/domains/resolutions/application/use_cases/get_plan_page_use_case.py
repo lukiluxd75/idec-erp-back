@@ -1,0 +1,19 @@
+from typing import Tuple
+
+from app.domains.resolutions.domain.exceptions import PlanPageNotFoundException
+from app.domains.resolutions.domain.ports.resolution_repository_port import ResolutionRepositoryPort
+
+
+class GetPlanPageUseCase:
+    """Use case: get the image bytes of one floor-plan page."""
+
+    def __init__(self, repository: ResolutionRepositoryPort):
+        self._repository = repository
+
+    def execute(self, resolution_id: str, order_index: int, user_sub: str) -> Tuple[bytes, str]:
+        page = self._repository.get_plan_page(resolution_id, order_index, user_sub)
+        if page is None:
+            raise PlanPageNotFoundException(
+                f"La resolución '{resolution_id}' no tiene una página de plano N° {order_index}."
+            )
+        return page

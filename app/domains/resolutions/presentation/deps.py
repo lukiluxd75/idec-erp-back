@@ -5,9 +5,12 @@ from sqlalchemy.orm import Session
 
 from app.core.database.connection import get_db
 from app.domains.resolutions.application.use_cases import (
+    AddPlanPagesUseCase,
     CreateResolutionUseCase,
+    DeletePlanPageUseCase,
     DeleteResolutionUseCase,
     SaveTableUseCase,
+    GetPlanPageUseCase,
     ListResolutionsUseCase,
     GetPageUseCase,
     GetResolutionUseCase,
@@ -55,6 +58,24 @@ def get_create_resolution_use_case(
     repo: ResolutionRepositoryPort = Depends(get_resolution_repository),
 ) -> CreateResolutionUseCase:
     return CreateResolutionUseCase(repository=repo)
+
+
+def get_add_plan_pages_use_case(
+    repo: ResolutionRepositoryPort = Depends(get_resolution_repository),
+) -> AddPlanPagesUseCase:
+    return AddPlanPagesUseCase(repository=repo)
+
+
+def get_get_plan_page_use_case(
+    repo: ResolutionRepositoryPort = Depends(get_resolution_repository),
+) -> GetPlanPageUseCase:
+    return GetPlanPageUseCase(repository=repo)
+
+
+def get_delete_plan_page_use_case(
+    repo: ResolutionRepositoryPort = Depends(get_resolution_repository),
+) -> DeletePlanPageUseCase:
+    return DeletePlanPageUseCase(repository=repo)
 
 
 @lru_cache()

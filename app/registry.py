@@ -42,10 +42,22 @@ except Exception as exc:
     logger.warning("Could not load domain 'chatbot': %s", exc)
 
 try:
+    from app.domains.folios.presentation.router import router as folios_router
+    api_router.include_router(folios_router)
+except Exception as exc:
+    logger.warning("Could not load domain 'folios': %s", exc)
+
+try:
     from app.domains.appraisal_review.presentation.router import router as appraisal_review_router
     api_router.include_router(appraisal_review_router, prefix="/appraisal-review")
 except Exception as exc:
     logger.warning("Could not load domain 'appraisal_review': %s", exc)
+
+try:
+    from app.domains.templates.presentation.router import router as templates_router
+    api_router.include_router(templates_router)
+except Exception as exc:
+    logger.warning("Could not load domain 'templates': %s", exc)
 
 try:
     from app.domains.digitization.presentation.router import router as digitization_router

@@ -16,11 +16,17 @@ from app.domains.chatbot.application.use_cases.update_procedure_use_case import 
 from app.domains.chatbot.application.use_cases.ingest_procedure_use_case import (
     IngestProcedureUseCase,
 )
+from app.domains.chatbot.application.use_cases.ingest_json_procedures_use_case import (
+    IngestJsonProceduresUseCase,
+)
 from app.domains.chatbot.application.use_cases.list_feedback_use_case import (
     ListFeedbackUseCase,
 )
 from app.domains.chatbot.application.use_cases.reindex_embeddings_use_case import (
     ReindexEmbeddingsUseCase,
+)
+from app.domains.chatbot.application.use_cases.learn_from_feedback_use_case import (
+    LearnFromFeedbackUseCase,
 )
 
 __all__ = [
@@ -30,6 +36,9 @@ __all__ = [
     "ListProceduresUseCase",
     "UpdateProcedureUseCase",
     "IngestProcedureUseCase",
+    "IngestJsonProceduresUseCase",
     "ListFeedbackUseCase",
     "ReindexEmbeddingsUseCase",
+    "LearnFromFeedbackUseCase",
 ]
+

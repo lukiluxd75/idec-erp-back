@@ -8,7 +8,9 @@ from app.core.database.connection import get_db
 from app.domains.chatbot.application.use_cases import (
     AnalyzeImageUseCase,
     AnswerQuestionUseCase,
+    IngestJsonProceduresUseCase,
     IngestProcedureUseCase,
+    LearnFromFeedbackUseCase,
     ListFeedbackUseCase,
     ListProceduresUseCase,
     ReindexEmbeddingsUseCase,
@@ -97,6 +99,17 @@ def get_ingest_procedure_use_case(
     )
 
 
+def get_ingest_json_procedures_use_case(
+    procedures: ProcedureRepositoryPort = Depends(get_procedure_repository),
+    engine: ChatEnginePort = Depends(get_chat_engine),
+) -> IngestJsonProceduresUseCase:
+    return IngestJsonProceduresUseCase(
+        procedure_repository=procedures,
+        chat_engine=engine,
+        embedding_model=settings.CHATBOT_EMBEDDING_MODEL,
+    )
+
+
 def get_list_feedback_use_case(
     history: ChatHistoryRepositoryPort = Depends(get_chat_history_repository),
 ) -> ListFeedbackUseCase:
@@ -111,6 +124,8 @@ def get_reindex_embeddings_use_case(
         procedure_repository=procedures, chat_engine=engine, embedding_model=settings.CHATBOT_EMBEDDING_MODEL
     )
 
-def get_learn_from_feedback_use_case(db: Session = Depends(get_db)):
-    from app.domains.chatbot.application.use_cases.learn_from_feedback_use_case import LearnFromFeedbackUseCase
-    return LearnFromFeedbackUseCase(db)
+
+def get_learn_from_feedback_use_case(
+    procedures: ProcedureRepositoryPort = Depends(get_procedure_repository),
+) -> LearnFromFeedbackUseCase:
+    return LearnFromFeedbackUseCase(procedure_repository=procedures)

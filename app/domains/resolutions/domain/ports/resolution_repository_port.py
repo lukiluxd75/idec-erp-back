@@ -46,3 +46,22 @@ class ResolutionRepositoryPort(ABC):
     @abstractmethod
     def delete(self, resolution_id: str, user_sub: str) -> bool:
         """Soft-delete one of the user's resolutions. True if it existed and was theirs."""
+
+    @abstractmethod
+    def add_plan_pages(
+        self,
+        resolution_id: str,
+        pages: List[Tuple[bytes, str, str]],
+        source: str,
+        user_sub: str,
+    ) -> Optional[Resolution]:
+        """Append floor-plan photos (bytes, mime, planta) in order, tagged with
+        `source` ('app' o 'web'). None if the resolution is missing / not the user's."""
+
+    @abstractmethod
+    def get_plan_page(self, resolution_id: str, order_index: int, user_sub: str) -> Optional[Tuple[bytes, str]]:
+        """Image bytes + mime of a plan page, or None if missing / not the user's."""
+
+    @abstractmethod
+    def delete_plan_page(self, resolution_id: str, order_index: int, user_sub: str) -> Optional[Resolution]:
+        """Remove one plan page. None if the resolution or that page don't exist / aren't the user's."""

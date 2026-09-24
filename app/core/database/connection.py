@@ -40,18 +40,24 @@ def init_db_tables() -> bool:
     """
     try:
         from app.domains.security.infrastructure import models  # noqa: F401
-        # The 'resolutions' domain is NOT registered here: its schema (`resolutions`)
-        # already exists with real data from the mobile app — see
-        # app/domains/resolutions/infrastructure/models.py.
+        # The 'resolutions' domain's MIRRORED models (resolutions/resolution_pages,
+        # owned by the mobile app) are deliberately NOT imported here — see
+        # app/domains/resolutions/infrastructure/models.py. `plan_page_models` is
+        # different: it's a table the ERP itself owns (added 2026-09, floor-plan
+        # photos for colindancias), living in the same already-existing
+        # `resolutions` schema, so it IS registered for create_all() below.
+        from app.domains.resolutions.infrastructure import plan_page_models  # noqa: F401
         from app.domains.geoextraction.infrastructure import models  # noqa: F401
         from app.domains.chatbot.infrastructure import models as chatbot_models  # noqa: F401
+        from app.domains.folios.infrastructure import models as folios_models  # noqa: F401
 
         if not db_uri.startswith("sqlite"):
             # create_all() only creates tables, never the Postgres schema itself.
-            # Unlike 'resolutions'/'detection', 'chatbot' owns its schema outright
-            # (nothing external creates it), so it has to happen here for local dev.
+            # Unlike 'resolutions'/'detection', 'chatbot' and 'folios' own their
+            # schemas outright (nothing external creates them), so it has to happen here.
             with engine.begin() as conn:
                 conn.execute(CreateSchema(chatbot_models.SCHEMA, if_not_exists=True))
+                conn.execute(CreateSchema(folios_models.SCHEMA, if_not_exists=True))
         Base.metadata.create_all(bind=engine)
         return True
     except Exception as exc:

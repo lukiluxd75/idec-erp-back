@@ -1,9 +1,12 @@
+import json
 from typing import List
 
 from fastapi import APIRouter, Depends, File, UploadFile
 
 from app.domains.chatbot.application.use_cases import (
+    IngestJsonProceduresUseCase,
     IngestProcedureUseCase,
+    LearnFromFeedbackUseCase,
     ListFeedbackUseCase,
     ListProceduresUseCase,
     ReindexEmbeddingsUseCase,
@@ -11,14 +14,21 @@ from app.domains.chatbot.application.use_cases import (
 )
 from app.domains.chatbot.domain.entities.procedure import Procedure
 from app.domains.chatbot.presentation.deps import (
+    get_ingest_json_procedures_use_case,
     get_ingest_procedure_use_case,
+    get_learn_from_feedback_use_case,
     get_list_feedback_use_case,
     get_list_procedures_use_case,
     get_reindex_embeddings_use_case,
     get_update_procedure_use_case,
 )
-from app.domains.chatbot.presentation.schemas.chat_schema import FeedbackListItem
+from app.domains.chatbot.presentation.schemas.chat_schema import (
+    FeedbackListItem,
+    FeedbackResponse,
+    LearnRuleRequest,
+)
 from app.domains.chatbot.presentation.schemas.procedure_schema import (
+    IngestJsonResponse,
     IngestResponse,
     ProcedureListItem,
     ProcedureUpdateRequest,
@@ -87,6 +97,29 @@ async def ingest_procedure(
     )
 
 
+@router.post("/ingests/json", response_model=IngestJsonResponse)
+async def ingest_json_procedures(
+    file: UploadFile = File(...),
+    use_case: IngestJsonProceduresUseCase = Depends(get_ingest_json_procedures_use_case),
+    user: UserProfile = Depends(require_permission("chatbot.edit")),
+):
+    """Bulk-load procedures from a tramites_data.json file.
+
+    Each entry must include ``id_tramite``, ``nombre_tramite``,
+    ``descripcion_busqueda``, ``costo``, ``leyes_asociadas`` and
+    ``requisitos``.  The operation is fully idempotent: re-uploading the same
+    file produces the same DB state.
+    """
+    content = await file.read()
+    entries = json.loads(content)
+    count = use_case.execute(entries, user.sub)
+    return IngestJsonResponse(
+        success=True,
+        message=f"{count} trámite(s) cargado(s)/actualizados correctamente desde JSON.",
+        count=count,
+    )
+
+
 @router.get("/feedback", response_model=List[FeedbackListItem])
 def list_feedback(
     use_case: ListFeedbackUseCase = Depends(get_list_feedback_use_case),
@@ -119,9 +152,6 @@ def reindex_embeddings(
     count = use_case.execute()
     return ReindexResponse(reindexed_count=count)
 
-from app.domains.chatbot.presentation.schemas.chat_schema import LearnRuleRequest, FeedbackResponse
-from app.domains.chatbot.presentation.deps import get_learn_from_feedback_use_case
-from app.domains.chatbot.application.use_cases.learn_from_feedback_use_case import LearnFromFeedbackUseCase
 
 @router.post("/feedback/learn", response_model=FeedbackResponse)
 def learn_from_feedback(
