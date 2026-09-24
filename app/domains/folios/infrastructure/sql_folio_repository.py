@@ -145,6 +145,17 @@ class SqlFolioRepository(FolioRepositoryPort):
         )
         return [{"page_index": p.page_index, **(p.diagnostics or {})} for p in pages]
 
+    def get_fill_log(self, folio_id: str, user_sub: str) -> Optional[Dict[str, Any]]:
+        row = (
+            self._query(user_sub)
+            .options(undefer(FolioModel.fill_log))
+            .filter(FolioModel.id == folio_id)
+            .first()
+        )
+        if row is None:
+            return None
+        return row.fill_log or {}
+
     def save_review(self, folio_id: str, user_sub: str, data: Dict[str, Any], confirm: bool) -> Folio:
         row = self._require(folio_id, user_sub, with_data=True)
         now = _now()
@@ -191,6 +202,7 @@ class SqlFolioRepository(FolioRepositoryPort):
         # draft review would otherwise keep hiding it (confirmed folios are
         # never reprocessed -- see RequestReprocessUseCase).
         row.reviewed_data = None
+        row.fill_log = None
         row.updated_at = _now()
         self._db.commit()
 
@@ -217,10 +229,18 @@ class SqlFolioRepository(FolioRepositoryPort):
         page.folio.updated_at = _now()  # progress mark, see STALE_AFTER
         self._db.commit()
 
-    def save_extraction(self, folio_id: str, data: Dict[str, Any], status: str, matricula: Optional[str]) -> None:
+    def save_extraction(
+        self,
+        folio_id: str,
+        data: Dict[str, Any],
+        status: str,
+        matricula: Optional[str],
+        fill_log: Optional[Dict[str, Any]] = None,
+    ) -> None:
         row = self._require(folio_id, None)
         now = _now()
         row.extracted_data = data
+        row.fill_log = fill_log
         row.status = status
         row.matricula = matricula
         row.error_message = None

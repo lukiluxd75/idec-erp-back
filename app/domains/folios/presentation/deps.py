@@ -8,6 +8,7 @@ from app.core.database.connection import SessionLocal, get_db
 from app.domains.folios.application.use_cases import (
     DeleteFolioUseCase,
     GetFolioDiagnosticsUseCase,
+    GetFolioFillLogUseCase,
     GetFolioPageImageUseCase,
     GetFolioUseCase,
     ListFoliosUseCase,
@@ -91,6 +92,12 @@ def get_folio_diagnostics_use_case(
     repo: FolioRepositoryPort = Depends(get_folio_repository),
 ) -> GetFolioDiagnosticsUseCase:
     return GetFolioDiagnosticsUseCase(repository=repo)
+
+
+def get_folio_fill_log_use_case(
+    repo: FolioRepositoryPort = Depends(get_folio_repository),
+) -> GetFolioFillLogUseCase:
+    return GetFolioFillLogUseCase(repository=repo)
 
 
 def get_review_folio_use_case(repo: FolioRepositoryPort = Depends(get_folio_repository)) -> ReviewFolioUseCase:

@@ -163,9 +163,12 @@ def _new_asiento(number: Optional[int]) -> Dict[str, Any]:
     }
 
 
-def parse_titularidad(lines: Sequence[ColumnLine]) -> Dict[str, Any]:
+def parse_titularidad(lines: Sequence[ColumnLine], trace: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     """{'asientos': [...], 'ultimo_asiento': int|None, 'antecedente_dominial': str|None,
-    'lineas_sin_asiento': [...]} -- asientos in reading order across pages."""
+    'lineas_sin_asiento': [...]} -- asientos in reading order across pages.
+
+    `trace` (fill log): gets one entry per line with how it was classified and
+    the asiento it ended up in."""
     asientos: List[Dict[str, Any]] = []
     current: Optional[Dict[str, Any]] = None
     last_declared: Optional[int] = None
@@ -173,8 +176,20 @@ def parse_titularidad(lines: Sequence[ColumnLine]) -> Dict[str, Any]:
     orphans: List[str] = []
 
     for line in lines:
+        def note(kind: str) -> None:
+            if trace is not None:
+                trace.append({
+                    "foto": line.page + 1,
+                    "texto_ocr": line.text,
+                    "confianza": round(line.confidence, 4),
+                    "proporcion": line.proportion,
+                    "clasificacion": kind,
+                    "_asiento": current,
+                })
+
         raw = strip_filler(line.text)
         if not raw or is_filler(raw):
+            note("relleno")
             continue
         norm = normalize(raw)
         c = compact(raw)
@@ -182,9 +197,11 @@ def parse_titularidad(lines: Sequence[ColumnLine]) -> Dict[str, Any]:
         m = _ULTIMO_RE.search(c)
         if m:
             last_declared = _digits(m.group(1))
+            note("ultimo_asiento")
             continue
         if "ANTECEDENTE" in c or "DOMINIAL" in c:
             antecedent = raw.split(":", 1)[1].strip() if ":" in raw else antecedent
+            note("antecedente_dominial")
             continue
         number = _asiento_number(raw)
         if number is not None or c.startswith("ASIENTO"):
@@ -192,9 +209,11 @@ def parse_titularidad(lines: Sequence[ColumnLine]) -> Dict[str, Any]:
             asientos.append(current)
             current["texto"].append(raw)
             current["_conf"].append(line.confidence)
+            note("inicio_asiento")
             continue
         if current is None:
             orphans.append(raw)
+            note("sin_asiento")
             continue
 
         current["texto"].append(raw)
@@ -209,11 +228,13 @@ def parse_titularidad(lines: Sequence[ColumnLine]) -> Dict[str, Any]:
         if role is not None:
             current["_role"] = role
             current["_stage"] = "people"
+            note(f"seccion:{role}")
             continue
 
         if c.startswith("PRESENT"):
             current["presentacion"] = _presentation(norm)
             current["_stage"] = "done"
+            note("presentacion")
             continue
 
         ci = _parse_ci(norm)
@@ -224,15 +245,18 @@ def parse_titularidad(lines: Sequence[ColumnLine]) -> Dict[str, Any]:
             birth = re.search(r"NAC\.?\s*(\d{1,2}/\d{1,2}/\d{4})", norm)
             if birth:
                 person["fecha_nacimiento"] = birth.group(1)
+            note("ci_de_persona")
             continue
 
         if current["personas"] and stage == "people" and _NATIONALITY_RE.match(norm):
             current["personas"][-1]["nacionalidad"] = raw
+            note("nacionalidad")
             continue
 
         if stage in ("people", "act") and any(norm.startswith(p) for p in _DOC_PREFIXES):
             current["documento"] = {"descripcion": raw, "fecha": _date(raw)}
             current["_stage"] = "authority"
+            note("documento")
             continue
 
         if stage == "people" and _is_name(norm, raw):
@@ -244,6 +268,7 @@ def parse_titularidad(lines: Sequence[ColumnLine]) -> Dict[str, Any]:
                 "expedido": None,
                 "proporcion": line.proportion,
             })
+            note(f"persona:{current['_role']}")
             continue
 
         # An act never carries digits (those lines are CI / dates the rules
@@ -255,15 +280,21 @@ def parse_titularidad(lines: Sequence[ColumnLine]) -> Dict[str, Any]:
         ):
             current["acto"] = raw
             current["_stage"] = "act"
+            note("acto")
             continue
 
         if stage == "authority":
             raw = re.sub(r"(?<=[a-z])[.-]\s*(?=[A-Z])", ". ", raw)  # 'Not- Pub.FRANCISCO' -> 'Not. Pub. FRANCISCO'
             current["autoridad"] = f"{current['autoridad']} - {raw}" if current["autoridad"] else raw
+            note("autoridad")
             continue
         # Anything else stays only in `texto`.
+        note(f"sin_clasificar (etapa: {stage})")
 
     _infer_missing_numbers(asientos, last_declared)
+    for entry in trace or []:
+        owner = entry.pop("_asiento", None)
+        entry["asiento"] = owner["numero"] if owner is not None else None
     for a in asientos:
         conf = a.pop("_conf")
         a.pop("_stage")
