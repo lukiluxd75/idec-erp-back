@@ -111,6 +111,13 @@ class TestProcessJobUseCase(unittest.TestCase):
         self.use_case.execute(_job(), "http://pc1:11434")
         self.repository.mark_done.assert_called_once_with(_job().id, {"full_text": "x"})
 
+    def test_passes_the_job_instructions_to_the_pc(self):
+        job = _job()
+        job.instructions, job.output_template = "Read the FUR.", {"receipt_number": None}
+        self.worker.extract.return_value = {"receipt_number": "1"}
+        self.use_case.execute(job, "http://pc1:11434")
+        self.worker.extract.assert_called_once_with("http://pc1:11434", b"img", "Read the FUR.", {"receipt_number": None})
+
     def test_unavailable_pc_releases_job_and_reraises(self):
         self.worker.extract.side_effect = WorkerUnavailableException("timeout")
         with self.assertRaises(WorkerUnavailableException):
@@ -175,6 +182,39 @@ class TestOllamaVisionWorker(unittest.TestCase):
         post.return_value = MagicMock(status_code=500, text="out of memory")
         with self.assertRaises(WorkerUnavailableException):
             self.worker.extract("http://pc1:11434", b"img")
+
+    @patch("app.domains.digitization.infrastructure.ollama_vision_worker.requests.post")
+    def test_extract_ignores_reasoning_and_code_fences(self, post):
+        response = MagicMock(status_code=200, text="")
+        response.json.return_value = {"message": {"content": '<think>{"x": 1}</think>\n```json\n{"full_text": "ok"}\n```'}}
+        post.return_value = response
+        self.assertEqual(self.worker.extract("http://pc1:11434", b"img")["full_text"], "ok")
+
+    @patch("app.domains.digitization.infrastructure.ollama_vision_worker.requests.post")
+    def test_extract_empty_answer_after_reasoning_is_output_error(self, post):
+        response = MagicMock(status_code=200, text="")
+        response.json.return_value = {"message": {"content": "", "thinking": "..."}, "done_reason": "length"}
+        post.return_value = response
+        with self.assertRaises(WorkerOutputException):
+            self.worker.extract("http://pc1:11434", b"img")
+
+    @patch("app.domains.digitization.infrastructure.ollama_vision_worker.requests.post")
+    def test_repeat_loop_is_output_error_not_unavailable(self, post):
+        post.return_value = MagicMock(status_code=500, text='{"error":"prediction aborted, token repeat limit reached"}')
+        with self.assertRaises(WorkerOutputException):
+            self.worker.extract("http://pc1:11434", b"img")
+
+    @patch("app.domains.digitization.infrastructure.ollama_vision_worker.requests.post")
+    def test_custom_instructions_return_the_model_object_and_put_template_in_prompt(self, post):
+        response = MagicMock(status_code=200, text="")
+        response.json.return_value = {"message": {"content": '{"receipt_number": "59122836", "cashier": null}'}}
+        post.return_value = response
+        result = self.worker.extract("http://pc1:11434", b"img", "Read the FUR.", {"receipt_number": None, "cashier": None})
+        self.assertEqual(result, {"receipt_number": "59122836", "cashier": None})
+        payload = post.call_args.kwargs["json"]
+        self.assertNotIn("format", payload)
+        self.assertIn("receipt_number", payload["messages"][1]["content"])
+        self.assertIn("num_ctx", payload["options"])
 
     @patch("app.domains.digitization.infrastructure.ollama_vision_worker.requests.get")
     def test_check_reports_missing_model(self, get):

@@ -20,7 +20,7 @@ class ProcessJobUseCase:
             return
 
         try:
-            result = self._worker.extract(host, image)
+            result = self._worker.extract(host, image, job.instructions, job.output_template)
         except WorkerUnavailableException as exc:
             self._give_back(job, f"El equipo {host} no respondió: {exc}")
             raise

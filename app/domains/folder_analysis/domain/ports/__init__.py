@@ -1,0 +1,6 @@
+from app.domains.folder_analysis.domain.ports.capture_repository_port import CaptureRepositoryPort
+from app.domains.folder_analysis.domain.ports.document_repository_port import DocumentRepositoryPort
+from app.domains.folder_analysis.domain.ports.extraction_queue_port import ExtractionQueuePort
+from app.domains.folder_analysis.domain.ports.thumbnail_port import ThumbnailPort
+
+__all__ = ["CaptureRepositoryPort", "DocumentRepositoryPort", "ExtractionQueuePort", "ThumbnailPort"]

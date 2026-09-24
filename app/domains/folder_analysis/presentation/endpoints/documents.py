@@ -1,0 +1,130 @@
+import json
+from typing import List, Optional
+
+from fastapi import APIRouter, Body, Depends, Query, Response, status
+
+from app.domains.folder_analysis.application.use_cases import (
+    AnalyzeDocumentUseCase,
+    CreateDocumentUseCase,
+    DeleteDocumentUseCase,
+    GetDocumentUseCase,
+    ListDocumentsUseCase,
+    ReviewDocumentUseCase,
+    SetDocumentPagesUseCase,
+)
+from app.domains.folder_analysis.presentation.deps import (
+    get_analyze_document_use_case,
+    get_create_document_use_case,
+    get_delete_document_use_case,
+    get_get_document_use_case,
+    get_list_documents_use_case,
+    get_review_document_use_case,
+    get_set_pages_use_case,
+)
+from app.domains.folder_analysis.presentation.schemas.folder_analysis_schema import (
+    AnalyzeRequest,
+    CreateDocumentRequest,
+    DocType,
+    DocumentDetail,
+    DocumentSummary,
+    ReviewRequest,
+    SetPagesRequest,
+)
+from app.domains.security.contracts import UserProfile, require_permission
+
+router = APIRouter(prefix="/documents", tags=["Folder analysis · Documents"])
+
+
+@router.post("", response_model=DocumentDetail, status_code=status.HTTP_201_CREATED)
+def create_document(
+    body: CreateDocumentRequest,
+    use_case: CreateDocumentUseCase = Depends(get_create_document_use_case),
+    user: UserProfile = Depends(require_permission("folder-analysis.edit")),
+):
+    """Photos dropped onto a section (folio, tax_receipt or plan), in page order."""
+    return DocumentDetail.from_entity(use_case.execute(body.doc_type, body.capture_ids, user.sub))
+
+
+@router.get("", response_model=List[DocumentSummary])
+def list_documents(
+    doc_type: Optional[DocType] = Query(None),
+    use_case: ListDocumentsUseCase = Depends(get_list_documents_use_case),
+    user: UserProfile = Depends(require_permission("folder-analysis.view")),
+):
+    """The user's documents, newest first. Refreshes the ones being analyzed."""
+    return [DocumentSummary.from_entity(d) for d in use_case.execute(user.sub, doc_type)]
+
+
+@router.get("/{document_id}", response_model=DocumentDetail)
+def get_document(
+    document_id: str,
+    use_case: GetDocumentUseCase = Depends(get_get_document_use_case),
+    user: UserProfile = Depends(require_permission("folder-analysis.view")),
+):
+    return DocumentDetail.from_entity(use_case.execute(document_id, user.sub))
+
+
+@router.put("/{document_id}/pages", response_model=DocumentDetail)
+def set_pages(
+    document_id: str,
+    body: SetPagesRequest,
+    use_case: SetDocumentPagesUseCase = Depends(get_set_pages_use_case),
+    user: UserProfile = Depends(require_permission("folder-analysis.edit")),
+):
+    """New page list (add, remove, reorder). Discards any previous result."""
+    return DocumentDetail.from_entity(use_case.execute(document_id, body.capture_ids, user.sub))
+
+
+@router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_document(
+    document_id: str,
+    use_case: DeleteDocumentUseCase = Depends(get_delete_document_use_case),
+    user: UserProfile = Depends(require_permission("folder-analysis.edit")),
+):
+    """Deletes the document; its photos go back to the inbox."""
+    use_case.execute(document_id, user.sub)
+
+
+@router.post("/{document_id}/analyze", response_model=DocumentDetail, status_code=status.HTTP_202_ACCEPTED)
+def analyze_document(
+    document_id: str,
+    body: AnalyzeRequest = Body(default_factory=AnalyzeRequest),
+    use_case: AnalyzeDocumentUseCase = Depends(get_analyze_document_use_case),
+    user: UserProfile = Depends(require_permission("folder-analysis.edit")),
+):
+    """Sends every page to the architects' PCs. Returns right away; poll GET."""
+    return DocumentDetail.from_entity(use_case.execute(document_id, user.sub, body.force))
+
+
+@router.put("/{document_id}/review", response_model=DocumentDetail)
+def review_document(
+    document_id: str,
+    body: ReviewRequest,
+    use_case: ReviewDocumentUseCase = Depends(get_review_document_use_case),
+    user: UserProfile = Depends(require_permission("folder-analysis.edit")),
+):
+    """Saves the architect's corrected JSON."""
+    return DocumentDetail.from_entity(use_case.execute(document_id, user.sub, body.data))
+
+
+@router.get("/{document_id}/export")
+def export_document(
+    document_id: str,
+    use_case: GetDocumentUseCase = Depends(get_get_document_use_case),
+    user: UserProfile = Depends(require_permission("folder-analysis.view")),
+):
+    """The document's current data (reviewed if saved, otherwise extracted) as a .json file."""
+    document = use_case.execute(document_id, user.sub)
+    payload = {
+        "document_id": document.id,
+        "doc_type": document.doc_type,
+        "status": document.status,
+        "analyzed_at": document.analyzed_at.isoformat() if document.analyzed_at else None,
+        "reviewed_at": document.reviewed_at.isoformat() if document.reviewed_at else None,
+        "data": document.current_data,
+    }
+    return Response(
+        content=json.dumps(payload, ensure_ascii=False, indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{document.doc_type}-{document.id[:8]}.json"'},
+    )

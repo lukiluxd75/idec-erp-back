@@ -32,6 +32,9 @@ class DigitizationJobModel(DigitizationBase):
     worker_host = Column(String(255), nullable=True)
     result = Column(JSONB, nullable=True)
     error = Column(Text, nullable=True)
+    instructions = deferred(Column(Text, nullable=True))
+    output_template = deferred(Column(JSONB, nullable=True))
+    source = Column(String(40), nullable=True)
     started_at = Column(DateTime(timezone=True), nullable=True)
     finished_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
@@ -43,7 +46,19 @@ class DigitizationJobModel(DigitizationBase):
     )
 
 
+# create_all() never alters an existing table, so columns added after the first
+# deploy are added here. Only safe, idempotent ADD COLUMN IF NOT EXISTS.
+_ADDED_COLUMNS = (
+    "instructions TEXT",
+    "output_template JSONB",
+    "source VARCHAR(40)",
+)
+
+
 def create_schema_and_tables(engine: Engine) -> None:
     with engine.begin() as conn:
         conn.execute(CreateSchema(SCHEMA, if_not_exists=True))
     DigitizationBase.metadata.create_all(bind=engine)
+    with engine.begin() as conn:
+        for column in _ADDED_COLUMNS:
+            conn.execute(text(f"ALTER TABLE {SCHEMA}.jobs ADD COLUMN IF NOT EXISTS {column}"))
