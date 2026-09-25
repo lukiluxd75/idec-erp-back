@@ -8,6 +8,9 @@ _JOB_TO_PAGE = {
     "processing": PageStatus.PROCESSING,
     "done": PageStatus.DONE,
     "failed": PageStatus.FAILED,
+    # Someone stopped that page's digitization from the PC monitor. A dead end
+    # for the page, so the document can finish instead of waiting forever.
+    "stopped": PageStatus.FAILED,
 }
 
 

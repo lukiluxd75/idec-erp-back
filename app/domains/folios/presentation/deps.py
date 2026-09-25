@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config.settings import settings
 from app.core.database.connection import SessionLocal, get_db
+from app.domains.digitization.contracts import get_borrow_host, get_worker_host_picker
 from app.domains.folios.application.use_cases import (
     DeleteFolioUseCase,
     GetFolioDiagnosticsUseCase,
@@ -44,7 +45,12 @@ def get_page_images() -> PageImagePort:
 
 @lru_cache()
 def get_asiento_structurer() -> AsientoStructurerPort:
-    return OllamaAsientoStructurer()
+    """Borrows the architects' PCs from digitization (its public contract) instead
+    of pinning FOLIOS_OLLAMA_URL, which stays as the fallback."""
+    return OllamaAsientoStructurer(
+        host_provider=get_worker_host_picker().execute,
+        borrow=get_borrow_host("folios").execute,
+    )
 
 
 @lru_cache()

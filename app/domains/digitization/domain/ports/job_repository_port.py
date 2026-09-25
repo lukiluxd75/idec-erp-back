@@ -34,6 +34,10 @@ class JobRepositoryPort(ABC):
     def list_processing(self) -> List[DigitizationJob]: ...
 
     @abstractmethod
+    def find_processing_on(self, worker_host: str) -> Optional[DigitizationJob]:
+        """The job that PC is running right now, if any."""
+
+    @abstractmethod
     def has_pending(self) -> bool: ...
 
     @abstractmethod
@@ -52,10 +56,22 @@ class JobRepositoryPort(ABC):
     def mark_failed(self, job_id: str, error: str) -> None: ...
 
     @abstractmethod
+    def request_stop(self, job_id: str) -> None:
+        """Raise the flag that asks whoever is running this job to drop it. The
+        run may be in another backend process, so the database is the only channel."""
+
+    @abstractmethod
+    def stop_requested(self, job_id: str) -> bool: ...
+
+    @abstractmethod
+    def mark_stopped(self, job_id: str, error: str) -> None:
+        """The run was abandoned on request. Retryable by hand, never on its own."""
+
+    @abstractmethod
     def requeue_orphaned(self, except_hosts: List[str]) -> int:
         """Processing jobs left behind by a dispatcher that died go back to pending,
         except those still running on `except_hosts`."""
 
     @abstractmethod
     def requeue_failed(self, job_id: str) -> Optional[DigitizationJob]:
-        """Failed job back to pending with its attempts reset."""
+        """Failed or stopped job back to pending with its attempts reset."""

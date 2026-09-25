@@ -1,3 +1,4 @@
+import json
 import unittest
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
@@ -6,9 +7,13 @@ import cv2
 import numpy as np
 
 from app.domains.digitization.application.use_cases import (
+    BorrowHostUseCase,
+    CheckWorkersUseCase,
     GetJobUseCase,
+    PickWorkerHostsUseCase,
     ProcessJobUseCase,
     RetryJobUseCase,
+    StopWorkerUseCase,
     SubmitDocumentUseCase,
 )
 from app.domains.digitization.domain.entities import DigitizationJob, JobStatus
@@ -16,7 +21,11 @@ from app.domains.digitization.domain.exceptions import (
     InvalidDocumentException,
     JobNotFoundException,
     JobNotRetryableException,
+    JobStoppedException,
+    NoJobRunningException,
+    WorkerNotFoundException,
     WorkerOutputException,
+    WorkerTimeoutException,
     WorkerUnavailableException,
 )
 from app.domains.digitization.infrastructure.ollama_vision_worker import OllamaVisionWorker
@@ -35,6 +44,24 @@ def _job(attempts=1, status=JobStatus.PROCESSING, requested_by="user-1"):
         created_at=now,
         updated_at=now,
     )
+
+
+def _stream(*events, status_code=200, text=""):
+    """A mocked Ollama answer: one line of NDJSON per event, as it streams."""
+    response = MagicMock(status_code=status_code, text=text)
+    response.__enter__.return_value = response
+    response.iter_lines.return_value = iter([json.dumps(event) for event in events])
+    return response
+
+
+def _answer(content, done_reason="stop"):
+    """The content arriving in two fragments, then the closing line."""
+    half = len(content) // 2
+    return [
+        {"message": {"content": content[:half]}},
+        {"message": {"content": content[half:]}},
+        {"message": {"content": ""}, "done": True, "done_reason": done_reason},
+    ]
 
 
 def _document_image(width=2400, height=3200, angle=0.0) -> bytes:
@@ -116,7 +143,9 @@ class TestProcessJobUseCase(unittest.TestCase):
         job.instructions, job.output_template = "Read the FUR.", {"receipt_number": None}
         self.worker.extract.return_value = {"receipt_number": "1"}
         self.use_case.execute(job, "http://pc1:11434")
-        self.worker.extract.assert_called_once_with("http://pc1:11434", b"img", "Read the FUR.", {"receipt_number": None})
+        self.worker.extract.assert_called_once_with(
+            "http://pc1:11434", b"img", "Read the FUR.", {"receipt_number": None}, None
+        )
 
     def test_unavailable_pc_releases_job_and_reraises(self):
         self.worker.extract.side_effect = WorkerUnavailableException("timeout")
@@ -136,6 +165,25 @@ class TestProcessJobUseCase(unittest.TestCase):
         self.repository.mark_failed.assert_called_once()
         self.repository.release.assert_not_called()
 
+    def test_stopped_job_ends_stopped_and_is_not_queued_again(self):
+        self.worker.extract.side_effect = JobStoppedException()
+        self.use_case.execute(_job(attempts=1), "http://pc1:11434")
+        self.repository.mark_stopped.assert_called_once()
+        self.repository.release.assert_not_called()
+        self.repository.mark_failed.assert_not_called()
+
+    def test_timeout_fails_the_job_instead_of_spending_another_attempt(self):
+        self.worker.extract.side_effect = WorkerTimeoutException("el equipo no terminó en 300 segundos")
+        self.use_case.execute(_job(attempts=1), "http://pc1:11434")
+        self.repository.mark_failed.assert_called_once()
+        self.repository.release.assert_not_called()
+
+    def test_the_stop_watcher_reaches_the_pc(self):
+        watcher = MagicMock(return_value=False)
+        self.worker.extract.return_value = {"full_text": "x"}
+        self.use_case.execute(_job(), "http://pc1:11434", should_stop=watcher)
+        self.assertIs(self.worker.extract.call_args.args[4], watcher)
+
 
 class TestOwnership(unittest.TestCase):
     def test_other_users_job_is_not_found(self):
@@ -150,6 +198,12 @@ class TestOwnership(unittest.TestCase):
         with self.assertRaises(JobNotRetryableException):
             RetryJobUseCase(repository).execute(_job().id, "user-1")
 
+    def test_a_stopped_job_can_be_sent_again_by_hand(self):
+        repository = MagicMock()
+        repository.get.return_value = _job(status=JobStatus.STOPPED)
+        repository.requeue_failed.return_value = _job(status=JobStatus.PENDING)
+        self.assertEqual(RetryJobUseCase(repository).execute(_job().id, "user-1").status, JobStatus.PENDING)
+
 
 class TestOllamaVisionWorker(unittest.TestCase):
     def setUp(self):
@@ -157,13 +211,11 @@ class TestOllamaVisionWorker(unittest.TestCase):
 
     @patch("app.domains.digitization.infrastructure.ollama_vision_worker.requests.post")
     def test_extract_normalizes_model_json(self, post):
-        response = MagicMock(status_code=200)
-        response.json.return_value = {
-            "message": {"content": '{"document_type": " Plano ", "full_text": "abc", '
-                                   '"fields": [{"name": "Predio", "value": 12}, {"name": ""}], '
-                                   '"tables": [[["a", 1]]]}'}
-        }
-        post.return_value = response
+        post.return_value = _stream(*_answer(
+            '{"document_type": " Plano ", "full_text": "abc", '
+            '"fields": [{"name": "Predio", "value": 12}, {"name": ""}], '
+            '"tables": [[["a", 1]]]}'
+        ))
         result = self.worker.extract("http://pc1:11434", b"img")
         self.assertEqual(result["document_type"], "Plano")
         self.assertEqual(result["fields"], [{"name": "Predio", "value": "12"}])
@@ -171,50 +223,74 @@ class TestOllamaVisionWorker(unittest.TestCase):
 
     @patch("app.domains.digitization.infrastructure.ollama_vision_worker.requests.post")
     def test_extract_non_json_is_output_error(self, post):
-        response = MagicMock(status_code=200)
-        response.json.return_value = {"message": {"content": "no soy json"}}
-        post.return_value = response
+        post.return_value = _stream(*_answer("no soy json"))
         with self.assertRaises(WorkerOutputException):
             self.worker.extract("http://pc1:11434", b"img")
 
     @patch("app.domains.digitization.infrastructure.ollama_vision_worker.requests.post")
     def test_extract_http_error_means_unavailable(self, post):
-        post.return_value = MagicMock(status_code=500, text="out of memory")
+        post.return_value = _stream(status_code=500, text="out of memory")
         with self.assertRaises(WorkerUnavailableException):
             self.worker.extract("http://pc1:11434", b"img")
 
     @patch("app.domains.digitization.infrastructure.ollama_vision_worker.requests.post")
     def test_extract_ignores_reasoning_and_code_fences(self, post):
-        response = MagicMock(status_code=200, text="")
-        response.json.return_value = {"message": {"content": '<think>{"x": 1}</think>\n```json\n{"full_text": "ok"}\n```'}}
-        post.return_value = response
+        post.return_value = _stream(*_answer(
+            '<think>{"x": 1}</think>\n```json\n{"full_text": "ok"}\n```'
+        ))
         self.assertEqual(self.worker.extract("http://pc1:11434", b"img")["full_text"], "ok")
 
     @patch("app.domains.digitization.infrastructure.ollama_vision_worker.requests.post")
     def test_extract_empty_answer_after_reasoning_is_output_error(self, post):
-        response = MagicMock(status_code=200, text="")
-        response.json.return_value = {"message": {"content": "", "thinking": "..."}, "done_reason": "length"}
-        post.return_value = response
+        post.return_value = _stream(
+            {"message": {"content": "", "thinking": "..."}, "done": True, "done_reason": "length"}
+        )
         with self.assertRaises(WorkerOutputException):
             self.worker.extract("http://pc1:11434", b"img")
 
     @patch("app.domains.digitization.infrastructure.ollama_vision_worker.requests.post")
     def test_repeat_loop_is_output_error_not_unavailable(self, post):
-        post.return_value = MagicMock(status_code=500, text='{"error":"prediction aborted, token repeat limit reached"}')
+        post.return_value = _stream(
+            status_code=500, text='{"error":"prediction aborted, token repeat limit reached"}'
+        )
+        with self.assertRaises(WorkerOutputException):
+            self.worker.extract("http://pc1:11434", b"img")
+
+    @patch("app.domains.digitization.infrastructure.ollama_vision_worker.requests.post")
+    def test_repeat_loop_reported_mid_answer_is_output_error(self, post):
+        post.return_value = _stream(
+            {"message": {"content": "{"}}, {"error": "token repeat limit reached"}
+        )
         with self.assertRaises(WorkerOutputException):
             self.worker.extract("http://pc1:11434", b"img")
 
     @patch("app.domains.digitization.infrastructure.ollama_vision_worker.requests.post")
     def test_custom_instructions_return_the_model_object_and_put_template_in_prompt(self, post):
-        response = MagicMock(status_code=200, text="")
-        response.json.return_value = {"message": {"content": '{"receipt_number": "59122836", "cashier": null}'}}
-        post.return_value = response
-        result = self.worker.extract("http://pc1:11434", b"img", "Read the FUR.", {"receipt_number": None, "cashier": None})
+        post.return_value = _stream(*_answer('{"receipt_number": "59122836", "cashier": null}'))
+        result = self.worker.extract(
+            "http://pc1:11434", b"img", "Read the FUR.", {"receipt_number": None, "cashier": None}
+        )
         self.assertEqual(result, {"receipt_number": "59122836", "cashier": None})
         payload = post.call_args.kwargs["json"]
         self.assertNotIn("format", payload)
         self.assertIn("receipt_number", payload["messages"][1]["content"])
         self.assertIn("num_ctx", payload["options"])
+
+    @patch("app.domains.digitization.infrastructure.ollama_vision_worker.requests.post")
+    def test_stop_asked_mid_answer_drops_the_run_and_hangs_up(self, post):
+        response = _stream(*_answer('{"full_text": "abc"}'))
+        post.return_value = response
+        with self.assertRaises(JobStoppedException):
+            self.worker.extract("http://pc1:11434", b"img", should_stop=lambda: True)
+        # Leaving the block closes the socket: that is what stops the PC.
+        response.__exit__.assert_called_once()
+
+    @patch("app.domains.digitization.infrastructure.ollama_vision_worker.requests.post")
+    def test_answer_longer_than_the_timeout_is_cut(self, post):
+        worker = OllamaVisionWorker("qwen3-vl:4b", "2m", connect_timeout=1, request_timeout=0, health_timeout=1)
+        post.return_value = _stream(*_answer('{"full_text": "abc"}'))
+        with self.assertRaises(WorkerTimeoutException):
+            worker.extract("http://pc1:11434", b"img")
 
     @patch("app.domains.digitization.infrastructure.ollama_vision_worker.requests.get")
     def test_check_reports_missing_model(self, get):
@@ -222,6 +298,148 @@ class TestOllamaVisionWorker(unittest.TestCase):
         status = self.worker.check("http://pc1:11434")
         self.assertTrue(status.reachable)
         self.assertFalse(status.available)
+
+
+class TestStopWorkerUseCase(unittest.TestCase):
+    """The monitor's "Detener" button: it only raises a flag, because the run
+    itself lives in whichever process is dispatching the queue."""
+
+    def _use_case(self, running=None, borrowed=None, flagged=1):
+        repository = MagicMock()
+        repository.find_processing_on.return_value = running
+        usage = MagicMock()
+        usage.active.return_value = borrowed or {}
+        usage.request_stop.return_value = flagged
+        use_case = StopWorkerUseCase(repository, usage, ["http://pc1:11434", "http://pc2:11434"])
+        return use_case, repository, usage
+
+    def test_flags_the_job_that_pc_is_running(self):
+        use_case, repository, _usage = self._use_case(running=_job())
+        stopped = use_case.execute("http://pc1:11434")
+        self.assertEqual((stopped.used_by, stopped.job_id), ("digitization", _job().id))
+        repository.request_stop.assert_called_once_with(_job().id)
+
+    def test_stops_a_pc_another_module_borrowed(self):
+        """The usual case on the monitor: folios or the chatbot took the PC, so
+        there is no job of ours to flag, but the call can still be dropped."""
+        use_case, repository, usage = self._use_case(running=None, borrowed={"http://pc2:11434": "folios"})
+        stopped = use_case.execute("http://pc2:11434")
+        self.assertEqual((stopped.used_by, stopped.job_id), ("folios", None))
+        usage.request_stop.assert_called_once_with("http://pc2:11434")
+        repository.request_stop.assert_not_called()
+
+    def test_trailing_slash_is_still_the_same_pc(self):
+        use_case, repository, _usage = self._use_case(running=_job())
+        use_case.execute("http://pc1:11434/")
+        repository.find_processing_on.assert_called_once_with("http://pc1:11434")
+
+    def test_unknown_pc_is_rejected(self):
+        use_case, repository, usage = self._use_case(running=_job())
+        with self.assertRaises(WorkerNotFoundException):
+            use_case.execute("http://otra-pc:11434")
+        repository.request_stop.assert_not_called()
+        usage.request_stop.assert_not_called()
+
+    def test_nothing_to_stop_on_an_idle_pc(self):
+        use_case, repository, usage = self._use_case(running=None)
+        with self.assertRaises(NoJobRunningException):
+            use_case.execute("http://pc2:11434")
+        repository.request_stop.assert_not_called()
+        usage.request_stop.assert_not_called()
+
+    def test_a_usage_that_expired_between_the_two_reads_is_nothing_to_stop(self):
+        use_case, _repository, _usage = self._use_case(
+            running=None, borrowed={"http://pc2:11434": "folios"}, flagged=0
+        )
+        with self.assertRaises(NoJobRunningException):
+            use_case.execute("http://pc2:11434")
+
+
+class TestCheckWorkersUseCase(unittest.TestCase):
+    """The monitor must show a PC as working whoever started the work: a
+    digitization job, or another domain borrowing it (folios, chatbot)."""
+
+    def _statuses(self, processing, borrowed):
+        from app.domains.digitization.domain.entities import WorkerStatus
+
+        repository = MagicMock()
+        repository.list_processing.return_value = processing
+        worker = MagicMock()
+        worker.check.side_effect = lambda host: WorkerStatus(host, True, True)
+        usage = MagicMock()
+        usage.active.return_value = borrowed
+        use_case = CheckWorkersUseCase(repository, worker, ["pc1", "pc2"], usage)
+        return {s.host: s for s in use_case.execute()}
+
+    def test_digitization_job_shows_the_job_id(self):
+        job = _job()
+        job.worker_host = "pc1"
+        statuses = self._statuses([job], {})
+        self.assertEqual((statuses["pc1"].used_by, statuses["pc1"].current_job_id), ("digitization", job.id))
+        self.assertFalse(statuses["pc2"].busy)
+
+    def test_pc_borrowed_by_another_domain_is_busy_without_a_job(self):
+        statuses = self._statuses([], {"pc2": "chatbot"})
+        self.assertEqual(statuses["pc2"].used_by, "chatbot")
+        self.assertIsNone(statuses["pc2"].current_job_id)
+        self.assertFalse(statuses["pc1"].busy)
+
+
+class TestBorrowHostUseCase(unittest.TestCase):
+    def test_records_and_releases_the_pc(self):
+        usage = MagicMock()
+        usage.start.return_value = "usage-1"
+        with BorrowHostUseCase(usage, "folios").execute("pc1", 120):
+            usage.start.assert_called_once_with("pc1", "folios", 120)
+            usage.finish.assert_not_called()
+        usage.finish.assert_called_once_with("usage-1")
+
+    def test_bookkeeping_failure_does_not_break_the_caller(self):
+        usage = MagicMock()
+        usage.start.side_effect = RuntimeError("db caída")
+        with BorrowHostUseCase(usage, "folios").execute("pc1", 120) as should_stop:
+            self.assertFalse(should_stop())  # nothing was recorded, so nothing to stop
+        usage.finish.assert_not_called()
+
+    @patch("app.domains.digitization.application.use_cases.borrow_host_use_case.time.monotonic")
+    def test_the_borrower_is_told_when_the_monitor_asks_it_to_stop(self, monotonic):
+        usage = MagicMock()
+        usage.start.return_value = "usage-1"
+        usage.stop_requested.side_effect = [False, True]
+        with BorrowHostUseCase(usage, "folios").execute("pc1", 120) as should_stop:
+            monotonic.return_value = 100.0
+            self.assertFalse(should_stop())
+            monotonic.return_value = 100.5  # between tokens: the cached answer
+            self.assertFalse(should_stop())
+            self.assertEqual(usage.stop_requested.call_count, 1)
+
+            monotonic.return_value = 103.0  # past the poll interval
+            self.assertTrue(should_stop())
+
+    def test_a_flag_that_cannot_be_read_lets_the_call_carry_on(self):
+        usage = MagicMock()
+        usage.start.return_value = "usage-1"
+        usage.stop_requested.side_effect = RuntimeError("db caída")
+        with BorrowHostUseCase(usage, "folios").execute("pc1", 120) as should_stop:
+            self.assertFalse(should_stop())
+
+
+class TestPickWorkerHostsUseCase(unittest.TestCase):
+    def _use_case(self, installed, busy=()):
+        worker = MagicMock()
+        worker.models.side_effect = lambda host: installed[host]
+        return PickWorkerHostsUseCase(worker, list(installed), lambda: set(busy))
+
+    def test_only_pcs_that_have_the_model(self):
+        use_case = self._use_case({"pc1": {"gemma4:e4b"}, "pc2": {"qwen3-vl:4b"}, "pc3": None})
+        self.assertEqual(use_case.execute("gemma4:e4b"), ["pc1"])
+
+    def test_pc_digitizing_goes_last(self):
+        use_case = self._use_case({"pc1": {"gemma4:e4b"}, "pc2": {"gemma4:e4b"}}, busy=["pc1"])
+        self.assertEqual(use_case.execute("gemma4:e4b"), ["pc2", "pc1"])
+
+    def test_no_hosts_configured_returns_empty(self):
+        self.assertEqual(PickWorkerHostsUseCase(MagicMock(), [], set).execute("gemma4:e4b"), [])
 
 
 class TestJobDispatcherRound(unittest.TestCase):
@@ -253,6 +471,24 @@ class TestJobDispatcherRound(unittest.TestCase):
         # Busy PCs and the resting one are skipped on the next round.
         dispatcher._dispatch_round()
         self.assertEqual(repository.claim_next.call_count, 2)
+
+    @patch("app.domains.digitization.infrastructure.dispatcher.time.monotonic")
+    def test_stop_watcher_caches_between_tokens_and_latches_once_stopped(self, monotonic):
+        repository = MagicMock()
+        repository.stop_requested.side_effect = [False, True]
+        watcher = self._dispatcher(repository, MagicMock(), ["pc1"])._stop_watcher("job-1")
+
+        monotonic.return_value = 100.0
+        self.assertFalse(watcher())
+        monotonic.return_value = 100.5  # a few tokens later, still the cached answer
+        self.assertFalse(watcher())
+        self.assertEqual(repository.stop_requested.call_count, 1)
+
+        monotonic.return_value = 103.0  # past the poll interval: asks again
+        self.assertTrue(watcher())
+        monotonic.return_value = 200.0  # once stopped it never asks again
+        self.assertTrue(watcher())
+        self.assertEqual(repository.stop_requested.call_count, 2)
 
     def test_skips_health_checks_when_queue_is_empty(self):
         repository = MagicMock()

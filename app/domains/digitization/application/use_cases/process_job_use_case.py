@@ -1,5 +1,12 @@
+from typing import Callable, Optional
+
 from app.domains.digitization.domain.entities import DigitizationJob
-from app.domains.digitization.domain.exceptions import WorkerOutputException, WorkerUnavailableException
+from app.domains.digitization.domain.exceptions import (
+    JobStoppedException,
+    WorkerOutputException,
+    WorkerTimeoutException,
+    WorkerUnavailableException,
+)
 from app.domains.digitization.domain.ports import JobRepositoryPort, VisionWorkerPort
 
 
@@ -13,14 +20,27 @@ class ProcessJobUseCase:
         self._worker = worker
         self._max_attempts = max_attempts
 
-    def execute(self, job: DigitizationJob, host: str) -> None:
+    def execute(
+        self,
+        job: DigitizationJob,
+        host: str,
+        should_stop: Optional[Callable[[], bool]] = None,
+    ) -> None:
         image = self._repository.get_prepared_image(job.id)
         if image is None:
             self._repository.mark_failed(job.id, "No se encontró la imagen del documento.")
             return
 
         try:
-            result = self._worker.extract(host, image, job.instructions, job.output_template)
+            result = self._worker.extract(host, image, job.instructions, job.output_template, should_stop)
+        except JobStoppedException:
+            self._repository.mark_stopped(job.id, "Detenido desde el monitor de computadoras.")
+            return
+        except WorkerTimeoutException as exc:
+            # Not given back to the queue: the next PC would spend the same time
+            # on the same image. Whoever sent it decides whether to insist.
+            self._repository.mark_failed(job.id, f"Se cortó la digitalización porque {exc}.")
+            return
         except WorkerUnavailableException as exc:
             self._give_back(job, f"El equipo {host} no respondió: {exc}")
             raise

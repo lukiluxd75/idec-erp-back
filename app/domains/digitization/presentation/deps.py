@@ -9,13 +9,20 @@ from app.domains.digitization.application.use_cases import (
     GetJobUseCase,
     ListJobsUseCase,
     RetryJobUseCase,
+    StopWorkerUseCase,
     SubmitDocumentUseCase,
 )
-from app.domains.digitization.domain.ports import ImagePreprocessorPort, JobRepositoryPort, VisionWorkerPort
+from app.domains.digitization.domain.ports import (
+    HostUsagePort,
+    ImagePreprocessorPort,
+    JobRepositoryPort,
+    VisionWorkerPort,
+)
 from app.domains.digitization.infrastructure.config import get_digitization_settings
 from app.domains.digitization.infrastructure.dispatcher import JobDispatcher
 from app.domains.digitization.infrastructure.ollama_vision_worker import OllamaVisionWorker
 from app.domains.digitization.infrastructure.opencv_image_preprocessor import OpenCvImagePreprocessor
+from app.domains.digitization.infrastructure.sql_host_usage_repository import SqlHostUsageRepository
 from app.domains.digitization.infrastructure.sql_job_repository import SqlJobRepository
 
 
@@ -31,6 +38,11 @@ def get_vision_worker() -> VisionWorkerPort:
         num_ctx=settings.num_ctx,
         num_predict=settings.num_predict,
     )
+
+
+@lru_cache()
+def get_host_usage() -> HostUsagePort:
+    return SqlHostUsageRepository(SessionLocal)
 
 
 @lru_cache()
@@ -86,7 +98,15 @@ def get_retry_job_use_case(repository: JobRepositoryPort = Depends(get_job_repos
     return RetryJobUseCase(repository)
 
 
+def get_stop_worker_use_case(
+    repository: JobRepositoryPort = Depends(get_job_repository),
+) -> StopWorkerUseCase:
+    return StopWorkerUseCase(repository, get_host_usage(), get_digitization_settings().worker_hosts)
+
+
 def get_check_workers_use_case(
     repository: JobRepositoryPort = Depends(get_job_repository),
 ) -> CheckWorkersUseCase:
-    return CheckWorkersUseCase(repository, get_vision_worker(), get_digitization_settings().worker_hosts)
+    return CheckWorkersUseCase(
+        repository, get_vision_worker(), get_digitization_settings().worker_hosts, get_host_usage()
+    )
