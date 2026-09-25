@@ -1,5 +1,5 @@
 from typing import Generator
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 from sqlalchemy.schema import CreateSchema
 from app.core.config import settings
@@ -12,6 +12,27 @@ if db_uri.startswith("sqlite"):
         connect_args={"check_same_thread": False},
     )
 else:
+    # Guards asked of the server for every connection this app opens. They live
+    # here rather than in ALTER DATABASE so they are versioned with the code and
+    # bind only this app, leaving the other databases on the shared server alone.
+    # They are applied on the "connect" event below, not as libpq startup
+    # `options`: a connection pooler sits in front of this database and rejects
+    # that parameter ("Unsupported startup parameter: options"). It pools by
+    # session, so a plain SET holds for the life of the connection.
+    _SERVER_GUARDS = (
+        # A transaction left open holds its locks, and Postgres grants locks in
+        # arrival order: one forgotten transaction is enough to queue every later
+        # query on that table behind it, which is how this database once stopped
+        # answering while the rest of the server was fine. Ten minutes is far above
+        # any real request -- the longest legitimate chain is folios (90s OCR +
+        # 120s LLM) and chatbot (60s embedding + 180s vision) -- so this only ever
+        # reaches an abandoned one. Tighten it once those domains release the
+        # session before their slow call, the way digitization now does.
+        f"idle_in_transaction_session_timeout={settings.DB_IDLE_IN_TRANSACTION_TIMEOUT_MS}",
+        # Nothing waits forever for a lock: a statement that cannot get one fails
+        # and frees its connection instead of adding to the queue behind it.
+        f"lock_timeout={settings.DB_LOCK_TIMEOUT_MS}",
+    )
     engine = create_engine(
         db_uri,
         # No pool_pre_ping: the DB (172.16.66.103) is ~120ms away, and pre_ping
@@ -21,7 +42,35 @@ else:
         # app hits the DB (polling every 10s on some pages) to keep connections
         # from going stale between uses.
         pool_recycle=3600,
+        # Bounded and explicit, so the ceiling this app can put on a shared server
+        # is predictable: processes x (size + overflow), against max_connections.
+        pool_size=settings.DB_POOL_SIZE,
+        max_overflow=settings.DB_POOL_MAX_OVERFLOW,
+        pool_timeout=settings.DB_POOL_TIMEOUT_SECONDS,
+        connect_args={
+            "connect_timeout": settings.DB_CONNECT_TIMEOUT_SECONDS,
+            # Without keepalives the server cannot tell a client that died from one
+            # that is merely quiet: it waits in ClientRead forever, holding whatever
+            # locks that transaction took. That is exactly how a killed backend left
+            # this table unusable for the better part of an hour. These make the
+            # kernel notice a gone client in about a minute and roll it back.
+            "keepalives": 1,
+            "keepalives_idle": 30,
+            "keepalives_interval": 10,
+            "keepalives_count": 5,
+        },
     )
+
+    @event.listens_for(engine, "connect")
+    def _apply_server_guards(dbapi_connection, _connection_record):
+        cursor = dbapi_connection.cursor()
+        try:
+            for guard in _SERVER_GUARDS:
+                name, value = guard.split("=", 1)
+                cursor.execute(f"SET {name} = {value}")
+        finally:
+            cursor.close()
+        dbapi_connection.commit()
 
 # Database session factory
 SessionLocal = sessionmaker(

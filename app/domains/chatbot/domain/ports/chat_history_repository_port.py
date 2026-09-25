@@ -15,6 +15,13 @@ class ChatHistoryRepositoryPort(ABC):
         """Full turn-by-turn history of a conversation, oldest first."""
 
     @abstractmethod
+    def end_read(self) -> None:
+        """Close the transaction a read left open and hand the connection back.
+        Reads start a transaction too, and one held open across a slow call to an
+        external engine keeps its locks -- and a pooled connection -- for the whole
+        wait, which is what once left this database unable to answer."""
+
+    @abstractmethod
     def add_message(self, message: ChatMessage) -> ChatMessage:
         """Persists one turn and returns it with its assigned id."""
 

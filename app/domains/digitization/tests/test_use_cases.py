@@ -138,6 +138,17 @@ class TestProcessJobUseCase(unittest.TestCase):
         self.use_case.execute(_job(), "http://pc1:11434")
         self.repository.mark_done.assert_called_once_with(_job().id, {"full_text": "x"})
 
+    def test_lets_go_of_the_database_before_the_pc_starts(self):
+        """Reading the image opens a transaction, and `extract` can take minutes. If
+        the two overlap, that transaction holds a lock on the jobs table the whole
+        time and every later query queues behind it -- which is how the table once
+        stopped answering altogether."""
+        order = []
+        self.repository.end_read.side_effect = lambda: order.append("end_read")
+        self.worker.extract.side_effect = lambda *a, **k: order.append("extract") or {"full_text": "x"}
+        self.use_case.execute(_job(), "http://pc1:11434")
+        self.assertEqual(order, ["end_read", "extract"])
+
     def test_passes_the_job_instructions_to_the_pc(self):
         job = _job()
         job.instructions, job.output_template = "Read the FUR.", {"receipt_number": None}

@@ -97,6 +97,13 @@ def create_schema_and_tables(engine: Engine) -> None:
         conn.execute(CreateSchema(SCHEMA, if_not_exists=True))
     DigitizationBase.metadata.create_all(bind=engine)
     with engine.begin() as conn:
+        # ADD COLUMN needs ACCESS EXCLUSIVE, and Postgres grants locks in arrival
+        # order: an ALTER left waiting on one long-running reader also queues every
+        # query that arrives after it, so the whole table stops answering until that
+        # reader ends. Give up on the lock instead -- the caller logs it and the
+        # backend starts anyway, and the column is added on a later start once the
+        # table is free. Losing the column for one boot beats freezing the module.
+        conn.execute(text("SET LOCAL lock_timeout = '5s'"))
         for table, columns in _ADDED_COLUMNS.items():
             for column in columns:
                 conn.execute(text(f"ALTER TABLE {SCHEMA}.{table} ADD COLUMN IF NOT EXISTS {column}"))

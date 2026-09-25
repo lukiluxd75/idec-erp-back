@@ -28,6 +28,13 @@ class JobRepositoryPort(ABC):
     def get_prepared_image(self, job_id: str) -> Optional[bytes]: ...
 
     @abstractmethod
+    def end_read(self) -> None:
+        """Close the transaction a read left open and hand the connection back.
+        Reads start a transaction too, and one held open while a PC works keeps an
+        ACCESS SHARE lock on the jobs table; Postgres grants locks in arrival order,
+        so a single ALTER waiting behind it queues every later query as well."""
+
+    @abstractmethod
     def list_by_requester(self, requested_by: str, limit: int) -> List[DigitizationJob]: ...
 
     @abstractmethod

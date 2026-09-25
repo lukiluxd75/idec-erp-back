@@ -192,6 +192,24 @@ class TestPipeline(unittest.TestCase):
         ProcessFolioUseCase(self.repo, self.ocr, FakeImages(self.pages), structurer, 0.85).execute(folio.id)
         return self.repo.get(folio.id, "user-a")
 
+    def test_lets_go_of_the_database_before_the_ocr_starts(self):
+        """Reading the photos opens a transaction, and OCR runs for as long as the
+        page takes. If the two overlap, that transaction holds its locks -- and a
+        pooled connection -- for the whole wait, which is how this database once
+        stopped answering."""
+        order = []
+        repo = _new_repo()
+        folio = UploadFolioUseCase(repo).execute([(b, "image/jpeg") for b in [b"page-1"]], "user-a")
+        real_pages, real_end = repo.get_page_bytes_for_processing, repo.end_read
+        repo.get_page_bytes_for_processing = lambda fid: (order.append("read_pages"), real_pages(fid))[1]
+        repo.end_read = lambda: (order.append("end_read"), real_end())[1]
+        ocr = FakeOcr(self.pages)
+        real_read = ocr.read
+        ocr.read = lambda *a, **k: (order.append("ocr") if "ocr" not in order else None, real_read(*a, **k))[1]
+
+        ProcessFolioUseCase(repo, ocr, FakeImages(self.pages), None, 0.85).execute(folio.id)
+        self.assertEqual(order[:3], ["read_pages", "end_read", "ocr"])
+
     def test_full_folio_scanned_out_of_order(self):
         folio = self._run([b"page-2", b"page-1"])
         self.assertEqual(folio.status, FolioStatus.READY, folio.extracted_data["observaciones"])

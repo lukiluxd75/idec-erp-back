@@ -56,6 +56,13 @@ class FolioRepositoryPort(ABC):
         """Folio regardless of owner (None if missing/deleted)."""
 
     @abstractmethod
+    def end_read(self) -> None:
+        """Close the transaction a read left open and hand the connection back.
+        Reads start a transaction too, and one held open across the OCR of a page
+        keeps its locks -- and a pooled connection -- for the whole wait, which is
+        what once left this database unable to answer."""
+
+    @abstractmethod
     def get_page_bytes_for_processing(self, folio_id: str) -> List[Tuple[int, bytes, str]]:
         """(page_index, original bytes, mime) for every page, in order."""
 

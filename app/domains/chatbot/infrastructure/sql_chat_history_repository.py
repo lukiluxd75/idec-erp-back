@@ -40,6 +40,9 @@ class SqlChatHistoryRepository(ChatHistoryRepositoryPort):
         )
         return [_to_entity(m) for m in models]
 
+    def end_read(self) -> None:
+        self._db.commit()
+
     def add_message(self, message: ChatMessage) -> ChatMessage:
         m = ChatMessageModel(
             conversation_id=uuid.UUID(message.conversation_id),

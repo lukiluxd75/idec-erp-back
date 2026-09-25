@@ -49,6 +49,19 @@ class Settings(BaseSettings):
     DB_NAME: str = "idec_erp"
     DATABASE_URL: Optional[str] = None
 
+    # Connection pool and the guards asked of the server on every connection (see
+    # app/core/database/connection.py). Exposed here so the shared server can be
+    # protected without a redeploy: this app's ceiling is
+    # processes x (POOL_SIZE + POOL_MAX_OVERFLOW) against its max_connections.
+    DB_POOL_SIZE: int = 5
+    DB_POOL_MAX_OVERFLOW: int = 10
+    DB_POOL_TIMEOUT_SECONDS: float = 30.0
+    DB_CONNECT_TIMEOUT_SECONDS: int = 10
+    # Well above the slowest real request, so it only ever reaches a transaction
+    # nobody is going to close. Milliseconds, as Postgres expects them.
+    DB_IDLE_IN_TRANSACTION_TIMEOUT_MS: int = 600_000
+    DB_LOCK_TIMEOUT_MS: int = 10_000
+
     # Construction-detection GPU engine (stays on 10.0.0.30 — ERP is only a BFF)
     DETECTION_ENGINE_URL: str = "http://10.0.0.30:8100"
     DETECTION_ENGINE_API_KEY: str = ""
