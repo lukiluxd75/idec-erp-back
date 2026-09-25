@@ -49,3 +49,11 @@ __all__ = [
     "DuplicateCiteConfigurationException",
     "InvalidCiteFormatException",
 ]
+
+class TemplateEngineUnavailableException(DomainException):
+    """No se pudo conectar con el Motor de Plantillas Externo, o no está configurado."""
+    http_status = 503
+
+class TemplateEngineErrorException(DomainException):
+    """El Motor de Plantillas Externo respondió con un error de negocio."""
+    http_status = 502
