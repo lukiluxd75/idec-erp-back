@@ -36,6 +36,11 @@ class NoPlanPagesException(DomainException):
     http_status = 400
 
 
+class PlanOcrUnavailableException(DomainException):
+    """The OCR service could not read a plan page (to detect its planta)."""
+    http_status = 503
+
+
 __all__ = [
     "ResolutionNotFoundException",
     "PageNotFoundException",
@@ -44,4 +49,5 @@ __all__ = [
     "PlanPageNotFoundException",
     "InvalidPlantaException",
     "NoPlanPagesException",
+    "PlanOcrUnavailableException",
 ]
