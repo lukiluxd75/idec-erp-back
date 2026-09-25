@@ -87,6 +87,12 @@ class AnswerQuestionUseCase:
 
         history = self._history.list_messages(conversation_id, user_sub)
         engine_messages = [{"role": m.role, "content": m.content} for m in history]
+        # Everything this answer needs has been read; let go of the database before
+        # the model runs. `chat` can take a couple of minutes, and the reads above
+        # otherwise keep a transaction -- and this request's pooled connection --
+        # open for all of it. The write below opens its own.
+        self._history.end_read()
+
         reply = self._engine.chat(system_prompt, engine_messages)
         reply = _normalize_if_audit_json(reply)
 

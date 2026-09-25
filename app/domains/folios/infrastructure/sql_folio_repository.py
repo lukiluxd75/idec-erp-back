@@ -184,6 +184,9 @@ class SqlFolioRepository(FolioRepositoryPort):
         row = self._row(folio_id, None, with_data=True)
         return _to_entity(row, with_data=True) if row is not None else None
 
+    def end_read(self) -> None:
+        self._db.commit()
+
     def get_page_bytes_for_processing(self, folio_id: str) -> List[Tuple[int, bytes, str]]:
         pages = (
             self._db.query(FolioPageModel)

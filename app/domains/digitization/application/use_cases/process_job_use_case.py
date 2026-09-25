@@ -31,6 +31,12 @@ class ProcessJobUseCase:
             self._repository.mark_failed(job.id, "No se encontró la imagen del documento.")
             return
 
+        # Let go of the database before handing the image over: `extract` can hold
+        # this thread for minutes, and the read above keeps a transaction -- and a
+        # lock on the jobs table -- open for exactly that long otherwise. The writes
+        # below open their own transaction when they need one.
+        self._repository.end_read()
+
         try:
             result = self._worker.extract(host, image, job.instructions, job.output_template, should_stop)
         except JobStoppedException:

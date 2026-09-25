@@ -115,7 +115,13 @@ class ProcessFolioUseCase:
         try:
             self._repo.mark_processing(folio_id)
             outcomes = []
-            for page_index, content, _mime in self._repo.get_page_bytes_for_processing(folio_id):
+            pages = self._repo.get_page_bytes_for_processing(folio_id)
+            # The photos are in memory now; let go of the database before the OCR
+            # starts. That read otherwise keeps a transaction open for as long as
+            # the first page takes, and each page is several OCR calls. The saves
+            # inside the loop open their own transaction and close it again.
+            self._repo.end_read()
+            for page_index, content, _mime in pages:
                 outcome = self._process_page(page_index, content)
                 self._repo.save_page_result(
                     folio_id,

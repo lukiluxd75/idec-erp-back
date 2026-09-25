@@ -96,6 +96,9 @@ class SqlJobRepository(JobRepositoryPort):
             return None
         return self._db.execute(select(Job.prepared_image).where(Job.id == parsed)).scalar_one_or_none()
 
+    def end_read(self) -> None:
+        self._db.commit()
+
     def list_by_requester(self, requested_by: str, limit: int) -> List[DigitizationJob]:
         rows = self._db.execute(
             select(Job).where(Job.requested_by == requested_by).order_by(Job.created_at.desc()).limit(limit)
