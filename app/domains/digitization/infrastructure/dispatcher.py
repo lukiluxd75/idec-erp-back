@@ -145,11 +145,14 @@ class JobDispatcher:
         except WorkerUnavailableException:
             logger.warning("digitization: PC %s failed on job %s; resting it", host, job.id)
             self._rest(host)
-        except Exception as exc:
+        except Exception:
+            # The detail (SQL, stack) goes to the log; the architect gets a readable message.
             logger.exception("digitization: unexpected error on job %s", job.id)
             try:
                 with self._session_factory() as db:
-                    self._repository_factory(db).mark_failed(job.id, f"Error interno: {exc}")
+                    self._repository_factory(db).mark_failed(
+                        job.id, "Error interno del servidor al procesar la imagen. Vuelva a intentarlo."
+                    )
             except Exception:
                 logger.exception("digitization: could not mark job %s as failed", job.id)
         finally:

@@ -28,8 +28,10 @@ class DigitizationSettings(BaseSettings):
     num_predict: int = 16000
     connect_timeout_seconds: float = 5.0
     # Ceiling for one image, counted from the request to the last token: past it
-    # the digitization is cut and marked failed instead of holding the PC.
-    request_timeout_seconds: float = 300.0
+    # the digitization is cut and marked failed instead of holding the PC. The
+    # reasoning model took up to ~200 s on a dense folio with the PC idle; model
+    # load and a busy GPU add to that, so 300 s cut documents that would finish.
+    request_timeout_seconds: float = 600.0
     health_timeout_seconds: float = 3.0
     poll_interval_seconds: float = 3.0
     host_cooldown_seconds: float = 60.0
