@@ -508,6 +508,19 @@ class TestJobDispatcherRound(unittest.TestCase):
         self._dispatcher(repository, worker, ["pc1"])._dispatch_round()
         worker.check.assert_not_called()
 
+    def test_unexpected_error_is_stored_without_internal_details(self):
+        repository = MagicMock()
+        repository.get_prepared_image.return_value = b"img"
+        repository.mark_done.side_effect = RuntimeError("server closed the connection [SQL: UPDATE ...]")
+        worker = MagicMock()
+        worker.extract.return_value = {"x": 1}
+
+        self._dispatcher(repository, worker, ["pc1"])._process(_job(), "pc1")
+
+        message = repository.mark_failed.call_args.args[1]
+        self.assertNotIn("SQL", message)
+        self.assertIn("Vuelva a intentarlo", message)
+
 
 if __name__ == "__main__":
     unittest.main()
