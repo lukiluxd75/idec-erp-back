@@ -1,68 +1,48 @@
 pipeline {
-    agent { label 'windows' }
-    
-    parameters {
-        booleanParam(name: 'EJECUTAR_AUTOMATICO', defaultValue: true, description: 'Marcar para ejecución automática y fluida en la demo del backend.')
+    agent {
+        label 'windows-runner'
     }
-    
+    parameters {
+        booleanParam(name: 'EJECUTAR_AUTOMATICO', defaultValue: true, description: 'Ejecución fluida automática')
+    }
     triggers {
         cron('30 2 * * *')
     }
-    
     stages {
-        stage('1. Preparación del Entorno') {
+        stage('Preparación') {
             steps {
-                echo 'Limpiando entorno de trabajo del Backend...'
                 cleanWs()
                 checkout scm
             }
         }
-        
-        stage('2. Instalar Dependencias') {
+        stage('Instalar Dependencias') {
             steps {
-                echo 'Instalando dependencias de Python para el Backend...'
-                bat '''
-                    "C:\\Program Files\\Python311\\python.exe" -m pip install --upgrade pip
-                    "C:\\Program Files\\Python311\\python.exe" -m pip install -r requirements.txt
-                '''
+                bat '"C:\\Program Files\\Python311\\python.exe" -m pip install --upgrade pip'
+                bat '"C:\\Program Files\\Python311\\python.exe" -m pip install -r requirements.txt'
             }
         }
-        
-        stage('3. Pruebas o Ejecución') {
-            steps {
-                echo 'Verificando que la aplicación FastAPI cargue correctamente...'
-                bat '''
-                    set PYTHONIOENCODING=utf-8
-                    "C:\\Program Files\\Python311\\python.exe" -X utf8 -c "import app.main; print('¡La app del backend cargo con exito!')"
-                '''
-            }
-        }
-
-        stage('4. Control y Despliegue') {
+        stage('Pruebas y Verificación') {
             steps {
                 script {
-                    if (params.EJECUTAR_AUTOMATICO == true) {
-                        echo 'Modo automático activado: Despliegue del Backend completado con éxito para la demostración.'
-                    } else {
-                        try {
-                            timeout(time: 1, unit: 'MINUTES') {
-                                input message: '¿Desea aprobar el despliegue del Backend al entorno de destino?', ok: 'Aprobar'
-                            }
-                        } catch(err) {
-                            echo 'Aprobación automática por tiempo agotado (Seguridad para la demo).'
-                        }
-                    }
+                    env.PYTHONIOENCODING = "utf-8"
                 }
+                bat '"C:\\Program Files\\Python311\\python.exe" -X utf8 -c "import app.main; print(\'¡La app del backend cargo con exito!\')"'
+            }
+        }
+        stage('Desplegar a IIS') {
+            steps {
+                echo 'Copiando archivos del backend a IIS...'
+                // Copia los archivos del proyecto a la carpeta de IIS de forma recursiva y forzada
+                bat 'xcopy /E /Y /I "%WORKSPACE%\\*" "C:\\inetpub\\wwwroot\\siscatJenkins\\"'
             }
         }
     }
-    
     post {
         success {
-            echo '¡El pipeline del Backend finalizó exitosamente y está listo!'
+            echo '¡El pipeline del Backend se ejecutó y desplegó con éxito!'
         }
         failure {
-            echo 'El pipeline del Backend falló. Revisa los registros.'
+            echo 'El pipeline del Backend ha fallado. Revise la consola.'
         }
     }
 }
