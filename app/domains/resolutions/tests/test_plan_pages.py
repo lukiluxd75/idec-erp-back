@@ -1,0 +1,268 @@
+"""
+Planta de las páginas del plano: lectura del título (domain/plan_title.py)
+contra el OCR de 6 planos reales (tests/fixtures, solo títulos, rótulos y
+medidas), y los casos de uso de subida / detección / corrección sobre SQLite
+en memoria (schema `resolutions` mapeado a ninguno).
+"""
+import json
+import unittest
+from datetime import datetime
+from pathlib import Path
+from typing import List
+
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import sessionmaker
+
+from app.core.database.connection import Base
+from app.domains.resolutions.application.use_cases import (
+    AddPlanPagesUseCase,
+    DetectPlanPagePlantaUseCase,
+    GetResolutionUseCase,
+    RequestPlantaDetectionUseCase,
+    SetPlanPagePlantasUseCase,
+)
+from app.domains.resolutions.domain.entities.resolution import PlantaStatus
+from app.domains.resolutions.domain.exceptions import (
+    InvalidPlantaException,
+    PlanOcrUnavailableException,
+    PlanPageNotFoundException,
+)
+from app.domains.resolutions.domain.plan_title import TitleBlock, detect_plantas, plantas_de_titulo
+from app.domains.resolutions.domain.ports.plan_ocr_port import PlanOcrPort
+from app.domains.resolutions.infrastructure.models import ResolutionModel, ResolutionPageModel
+from app.domains.resolutions.infrastructure.plan_page_models import ResolutionPlanPageModel
+from app.domains.resolutions.infrastructure.sql_resolution_repository import SqlResolutionRepository
+
+FIXTURE = Path(__file__).parent / "fixtures" / "titulos_planos_ocr.json"
+USER = "user-1"
+
+
+def _bloques(raw) -> List[TitleBlock]:
+    return [TitleBlock(b["text"], *b["box"]) for b in raw]
+
+
+def _pisos(*n):
+    return [f"PLANTA {i}º PISO" for i in n]
+
+
+class TituloDePlantaTest(unittest.TestCase):
+    def test_planos_reales(self):
+        esperado = {
+            "plano_0": ["PLANTA SEMISOTANO"],
+            "plano_1": ["PLANTA BAJA"],
+            "plano_2": _pisos(1),
+            "plano_3": _pisos(2, 3, 4),
+            "plano_4": _pisos(5),
+            "plano_5": _pisos(6),
+        }
+        fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
+        for nombre, plantas in esperado.items():
+            with self.subTest(nombre):
+                self.assertEqual(detect_plantas(_bloques(fixture[nombre])).plantas, plantas)
+
+    def test_variantes_del_ocr(self):
+        casos = {
+            "PLANTA 1 ° PISO": _pisos(1),
+            "PLANTA 10º PISO": _pisos(10),
+            "PLANTA 5° PIS0": _pisos(5),
+            "Planta Tipo 2° - 4° Piso": _pisos(2, 3, 4),
+            "PLANTA TIPO 2 AL 4 PISO": _pisos(2, 3, 4),
+            "PLANTA 2do PISO": _pisos(2),
+            "PLANTA SEMI SOTANO": ["PLANTA SEMISOTANO"],
+            "PLANTA SÓTANO": ["PLANTA SOTANO"],
+            "PLANTA BAJA.": ["PLANTA BAJA"],
+        }
+        for texto, plantas in casos.items():
+            with self.subTest(texto):
+                self.assertEqual(plantas_de_titulo(texto), plantas)
+
+    def test_rotulos_que_no_son_titulo(self):
+        # Rótulos de unidades dúplex que mencionan plantas: nunca son el título.
+        for texto in (
+            "DEPARTAMENTO A DUPLEX (PLANTA BAJA",
+            "5° PIS0 +PLANTA ALTA 6° PIS0",
+            "PISO+PLANTAALTA6PISO",
+            "DUPLEX PLANTA ALTA",
+            "PLANTA 4° - 2° PISO",
+            "PLANTA 31° PISO",
+            "PLANTA CUBIERTA",
+        ):
+            with self.subTest(texto):
+                self.assertIsNone(plantas_de_titulo(texto))
+
+    def test_titulo_partido_en_dos_bloques(self):
+        bloques = [
+            TitleBlock("PLANTA TIPO", 100, 100, 400, 160),
+            TitleBlock("2° - 4° PISO", 440, 102, 700, 160),
+            TitleBlock("PISO", 900, 900, 950, 920),
+        ]
+        d = detect_plantas(bloques)
+        self.assertEqual(d.plantas, _pisos(2, 3, 4))
+        self.assertEqual(d.titulo, "PLANTA TIPO 2° - 4° PISO")
+
+    def test_elige_el_de_letra_mas_grande(self):
+        bloques = [
+            TitleBlock("PLANTA BAJA", 0, 0, 300, 20),  # rótulo chico dentro del plano
+            TitleBlock("PLANTA 1° PISO", 0, 500, 900, 620),  # título
+        ]
+        self.assertEqual(detect_plantas(bloques).plantas, _pisos(1))
+
+    def test_titulo_girado(self):
+        # Plano de costado: el título vertical, su letra es el lado CORTO.
+        bloques = [TitleBlock("PLANTA SEMISOTANO", 50, 100, 150, 1300), TitleBlock("PLANTA BAJA", 0, 0, 400, 30)]
+        self.assertEqual(detect_plantas(bloques).plantas, ["PLANTA SEMISOTANO"])
+
+    def test_dos_titulos_distintos_no_adivina(self):
+        bloques = [TitleBlock("PLANTA BAJA", 0, 0, 900, 110), TitleBlock("PLANTA 1° PISO", 0, 500, 900, 600)]
+        d = detect_plantas(bloques)
+        self.assertEqual(d.plantas, [])
+        self.assertIn("dos títulos", d.motivo)
+
+    def test_sin_titulo(self):
+        d = detect_plantas([TitleBlock("ESC: 1:100", 0, 0, 100, 20), TitleBlock("COCINA", 0, 50, 80, 70)])
+        self.assertEqual(d.plantas, [])
+        self.assertIsNotNone(d.motivo)
+
+
+class FakeOcr(PlanOcrPort):
+    def __init__(self, bloques=None, falla=False):
+        self._bloques = bloques or []
+        self._falla = falla
+
+    def read(self, image_bytes, filename="plano.jpg"):
+        if self._falla:
+            raise PlanOcrUnavailableException("El servicio OCR no respondió a tiempo.")
+        return self._bloques
+
+
+def _new_repo() -> SqlResolutionRepository:
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        execution_options={"schema_translate_map": {"resolutions": None}},
+    )
+    # Los modelos usan server_default now() de Postgres.
+    event.listen(
+        engine, "connect", lambda conn, _: conn.create_function("now", 0, lambda: datetime.utcnow().isoformat(" "))
+    )
+    Base.metadata.create_all(
+        bind=engine,
+        tables=[ResolutionModel.__table__, ResolutionPageModel.__table__, ResolutionPlanPageModel.__table__],
+    )
+    db = sessionmaker(bind=engine)()
+    db.add(
+        ResolutionModel(
+            resolution_id="res-1",
+            resolution_number="123/2026",
+            name="Edificio",
+            status="pendiente_ocr",
+            user_sub=USER,
+            created_at=datetime(2026, 9, 25),
+            updated_at=datetime(2026, 9, 25),
+        )
+    )
+    db.commit()
+    return SqlResolutionRepository(db=db)
+
+
+class PaginasDelPlanoTest(unittest.TestCase):
+    def setUp(self):
+        self.repo = _new_repo()
+        self.add = AddPlanPagesUseCase(self.repo)
+
+    def _pagina(self, order_index):
+        res = GetResolutionUseCase(self.repo).execute("res-1", USER)
+        return next(p for p in res.plan_pages if p.order_index == order_index)
+
+    def test_con_planta_queda_manual_sin_detectar(self):
+        res, pendientes = self.add.execute("res-1", [(b"img", "image/jpeg", ["PLANTA BAJA"])], "app", USER)
+        self.assertEqual(pendientes, [])
+        self.assertEqual(res.plan_pages[0].plantas, ["PLANTA BAJA"])
+        self.assertEqual(res.plan_pages[0].planta, "PLANTA BAJA")
+        self.assertEqual(res.plan_pages[0].planta_status, PlantaStatus.MANUAL)
+
+    def test_varias_plantas_en_una_foto_ordenadas(self):
+        res, _ = self.add.execute("res-1", [(b"img", "image/jpeg", _pisos(4, 2, 3, 2))], "app", USER)
+        self.assertEqual(res.plan_pages[0].plantas, _pisos(2, 3, 4))
+
+    def test_sin_planta_se_detecta_del_titulo(self):
+        res, pendientes = self.add.execute(
+            "res-1", [(b"a", "image/jpeg", ["PLANTA BAJA"]), (b"b", "image/jpeg", [])], "app", USER
+        )
+        self.assertEqual(pendientes, [2])
+        self.assertEqual(self._pagina(2).planta_status, PlantaStatus.DETECTANDO)
+        self.assertEqual(self._pagina(2).planta, "")
+
+        ocr = FakeOcr([TitleBlock("PLANTA TIPO 2° - 4° PISO", 0, 0, 900, 110), TitleBlock("ESC: 1:100", 0, 200, 200, 230)])
+        page = DetectPlanPagePlantaUseCase(self.repo, ocr).execute("res-1", 2)
+        self.assertEqual(page.plantas, _pisos(2, 3, 4))
+        self.assertEqual(page.planta_status, PlantaStatus.DETECTADA)
+        self.assertEqual(page.planta_title, "PLANTA TIPO 2° - 4° PISO")
+        self.assertEqual(self._pagina(2).plantas, _pisos(2, 3, 4))
+        # La otra página no se toca.
+        self.assertEqual(self._pagina(1).plantas, ["PLANTA BAJA"])
+
+    def test_sin_titulo_queda_para_asignar_a_mano(self):
+        self.add.execute("res-1", [(b"a", "image/jpeg", [])], "app", USER)
+        page = DetectPlanPagePlantaUseCase(self.repo, FakeOcr([TitleBlock("COCINA", 0, 0, 100, 20)])).execute("res-1", 1)
+        self.assertEqual(page.plantas, [])
+        self.assertEqual(page.planta_status, PlantaStatus.SIN_TITULO)
+        self.assertTrue(page.planta_detection["motivo"])
+
+    def test_ocr_caido_queda_en_error_y_se_reintenta(self):
+        self.add.execute("res-1", [(b"a", "image/jpeg", [])], "app", USER)
+        page = DetectPlanPagePlantaUseCase(self.repo, FakeOcr(falla=True)).execute("res-1", 1)
+        self.assertEqual(page.planta_status, PlantaStatus.ERROR)
+        self.assertIn("no respondió", page.planta_detection["motivo"])
+
+        self.assertEqual(
+            RequestPlantaDetectionUseCase(self.repo).execute("res-1", 1, USER).planta_status, PlantaStatus.DETECTANDO
+        )
+        ocr = FakeOcr([TitleBlock("PLANTA 5° PISO", 0, 0, 900, 110)])
+        self.assertEqual(DetectPlanPagePlantaUseCase(self.repo, ocr).execute("res-1", 1).plantas, _pisos(5))
+
+    def test_correccion_a_mano(self):
+        self.add.execute("res-1", [(b"a", "image/jpeg", [])], "app", USER)
+        page = SetPlanPagePlantasUseCase(self.repo).execute("res-1", 1, _pisos(3, 2), USER)
+        self.assertEqual(page.plantas, _pisos(2, 3))
+        self.assertEqual(page.planta_status, PlantaStatus.MANUAL)
+
+    def test_correccion_valida_plantas_y_dueno(self):
+        self.add.execute("res-1", [(b"a", "image/jpeg", [])], "app", USER)
+        uc = SetPlanPagePlantasUseCase(self.repo)
+        with self.assertRaises(InvalidPlantaException):
+            uc.execute("res-1", 1, ["PLANTA CUBIERTA"], USER)
+        with self.assertRaises(InvalidPlantaException):
+            uc.execute("res-1", 1, [], USER)
+        with self.assertRaises(PlanPageNotFoundException):
+            uc.execute("res-1", 1, ["PLANTA BAJA"], "otro-usuario")
+        with self.assertRaises(PlanPageNotFoundException):
+            uc.execute("res-1", 9, ["PLANTA BAJA"], USER)
+
+    def test_planta_invalida_al_subir(self):
+        with self.assertRaises(InvalidPlantaException):
+            self.add.execute("res-1", [(b"a", "image/jpeg", ["PLANTA CUBIERTA"])], "app", USER)
+
+    def test_filas_viejas_con_una_sola_planta(self):
+        # Páginas subidas antes de la columna `plantas`: se lee `planta`.
+        self.repo._db.add(
+            ResolutionPlanPageModel(
+                plan_page_id="pp-viejo",
+                resolution_id="res-1",
+                order_index=1,
+                planta="PLANTA BAJA",
+                plantas=None,
+                planta_status="manual",
+                image=b"a",
+                mime="image/jpeg",
+                source="app",
+            )
+        )
+        self.repo._db.commit()
+        page = self._pagina(1)
+        self.assertEqual(page.plantas, ["PLANTA BAJA"])
+        self.assertEqual(page.planta_status, PlantaStatus.MANUAL)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,7 +1,21 @@
 import logging
 from typing import List
 
-from fastapi import APIRouter, Depends, File, Form, Response, UploadFile, WebSocket, WebSocketDisconnect, status
+from typing import Optional
+
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    Response,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
+from fastapi.concurrency import run_in_threadpool
 
 from app.core.errors.exceptions import DomainException
 from app.core.utils.user_agent import is_mobile_user_agent
@@ -10,13 +24,15 @@ from app.domains.resolutions.application.use_cases import (
     CreateResolutionUseCase,
     DeletePlanPageUseCase,
     DeleteResolutionUseCase,
+    RequestPlantaDetectionUseCase,
     SaveTableUseCase,
+    SetPlanPagePlantasUseCase,
     GetPlanPageUseCase,
     ListResolutionsUseCase,
     GetPageUseCase,
     GetResolutionUseCase,
 )
-from app.domains.resolutions.domain.entities.resolution import Resolution
+from app.domains.resolutions.domain.entities.resolution import PlanPage, Resolution
 from app.domains.resolutions.infrastructure.ws_connection_manager import ResolutionsConnectionManager
 from app.domains.resolutions.presentation.deps import (
     get_add_plan_pages_use_case,
@@ -28,7 +44,10 @@ from app.domains.resolutions.presentation.deps import (
     get_get_plan_page_use_case,
     get_list_resolutions_use_case,
     get_page_use_case,
+    get_request_planta_detection_use_case,
     get_resolution_use_case,
+    get_set_plan_page_plantas_use_case,
+    run_detect_plan_page_planta,
 )
 from app.domains.resolutions.presentation.schemas.resolution_schema import (
     SaveTableRequest,
@@ -36,6 +55,7 @@ from app.domains.resolutions.presentation.schemas.resolution_schema import (
     PlanPageOut,
     ResolutionDetail,
     ResolutionListItem,
+    SetPlanPagePlantasRequest,
 )
 from app.domains.security.contracts import UserProfile, get_current_user, verify_token
 
@@ -55,6 +75,18 @@ def _to_list_item(r: Resolution) -> ResolutionListItem:
     )
 
 
+def _to_plan_page_out(p: PlanPage) -> PlanPageOut:
+    return PlanPageOut(
+        order_index=p.order_index,
+        planta=p.planta,
+        plantas=p.plantas,
+        planta_status=p.planta_status,
+        planta_title=p.planta_title,
+        planta_detection=p.planta_detection,
+        source=p.source,
+    )
+
+
 def _to_detail(r: Resolution) -> ResolutionDetail:
     return ResolutionDetail(
         resolution_id=r.resolution_id,
@@ -64,9 +96,7 @@ def _to_detail(r: Resolution) -> ResolutionDetail:
         total_pages=r.total_pages,
         created_at=r.created_at,
         pages=[PageOut(order_index=p.order_index) for p in r.pages],
-        plan_pages=[
-            PlanPageOut(order_index=p.order_index, planta=p.planta, source=p.source) for p in r.plan_pages
-        ],
+        plan_pages=[_to_plan_page_out(p) for p in r.plan_pages],
         table_data=r.table_data,
     )
 
@@ -140,28 +170,92 @@ def get_page(
     return Response(content=content, media_type=content_type)
 
 
+# Separa varias plantas de una misma foto en el campo `plantas`
+# ("PLANTA 2º PISO|PLANTA 3º PISO|PLANTA 4º PISO").
+SEPARADOR_PLANTAS = "|"
+
+
+async def _detect_and_notify(resolution_id: str, order_index: int, manager: ResolutionsConnectionManager) -> None:
+    """Background task: read the plan title (OCR, blocking I/O -> threadpool)
+    and tell the open screens that the page changed."""
+    try:
+        await run_in_threadpool(run_detect_plan_page_planta, resolution_id, order_index)
+    except Exception:
+        logger.exception("resolutions: falló la detección de planta de %s/%s", resolution_id, order_index)
+    await manager.notify_change()
+
+
 @router.post("/{resolution_id}/plan-pages", response_model=ResolutionDetail, status_code=status.HTTP_201_CREATED)
 async def add_plan_pages(
     resolution_id: str,
+    background: BackgroundTasks,
     pages: List[UploadFile] = File(...),
-    plantas: List[str] = Form(...),
+    plantas: Optional[List[str]] = Form(None),
     source: str = Form("app"),
     use_case: AddPlanPagesUseCase = Depends(get_add_plan_pages_use_case),
     manager: ResolutionsConnectionManager = Depends(get_connection_manager),
     user: UserProfile = Depends(get_current_user),
 ):
-    """Attach floor-plan photos to a resolution, each tagged with its planta.
+    """Attach floor-plan photos to a resolution. `plantas` (optional) goes one
+    per photo, in order: one planta, several separated by "|" (a sheet valid
+    for several floors), or "" -- and then the planta is read in background
+    from the plan title ("PLANTA TIPO 2° - 4° PISO"); the page shows up with
+    planta_status "detectando" and the WS tells when it is done.
     Same endpoint for the mobile app and the web upload (see `source`) — no
     separate code path per channel, just metadata about who called it."""
+    plantas = plantas or [""] * len(pages)
     if len(pages) != len(plantas):
         raise DomainException(f"Se recibieron {len(pages)} fotos pero {len(plantas)} plantas.")
     contents = [
-        ((await page.read()), page.content_type or "image/jpeg", planta)
+        (
+            (await page.read()),
+            page.content_type or "image/jpeg",
+            [p.strip() for p in (planta or "").split(SEPARADOR_PLANTAS) if p.strip()],
+        )
         for page, planta in zip(pages, plantas)
     ]
-    resolution = use_case.execute(resolution_id=resolution_id, pages=contents, source=source, user_sub=user.sub)
+    resolution, pendientes = use_case.execute(
+        resolution_id=resolution_id, pages=contents, source=source, user_sub=user.sub
+    )
     await manager.notify_change()
+    for order_index in pendientes:
+        background.add_task(_detect_and_notify, resolution_id, order_index, manager)
     return _to_detail(resolution)
+
+
+@router.put("/{resolution_id}/plan-pages/{order_index}/plantas", response_model=PlanPageOut)
+async def set_plan_page_plantas(
+    resolution_id: str,
+    order_index: int,
+    payload: SetPlanPagePlantasRequest,
+    use_case: SetPlanPagePlantasUseCase = Depends(get_set_plan_page_plantas_use_case),
+    manager: ResolutionsConnectionManager = Depends(get_connection_manager),
+    user: UserProfile = Depends(get_current_user),
+):
+    """Assign by hand the planta(s) of a plan page (web correction)."""
+    page = use_case.execute(resolution_id, order_index, payload.plantas, user.sub)
+    await manager.notify_change()
+    return _to_plan_page_out(page)
+
+
+@router.post(
+    "/{resolution_id}/plan-pages/{order_index}/detect-planta",
+    response_model=PlanPageOut,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def detect_plan_page_planta(
+    resolution_id: str,
+    order_index: int,
+    background: BackgroundTasks,
+    use_case: RequestPlantaDetectionUseCase = Depends(get_request_planta_detection_use_case),
+    manager: ResolutionsConnectionManager = Depends(get_connection_manager),
+    user: UserProfile = Depends(get_current_user),
+):
+    """Read again the planta of a plan page from its title (e.g. after an OCR error)."""
+    page = use_case.execute(resolution_id, order_index, user.sub)
+    await manager.notify_change()
+    background.add_task(_detect_and_notify, resolution_id, order_index, manager)
+    return _to_plan_page_out(page)
 
 
 @router.get("/{resolution_id}/plan-pages/{order_index}")

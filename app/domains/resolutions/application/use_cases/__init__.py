@@ -25,6 +25,13 @@ from app.domains.resolutions.application.use_cases.get_plan_page_use_case import
 from app.domains.resolutions.application.use_cases.delete_plan_page_use_case import (
     DeletePlanPageUseCase,
 )
+from app.domains.resolutions.application.use_cases.detect_plan_page_planta_use_case import (
+    DetectPlanPagePlantaUseCase,
+)
+from app.domains.resolutions.application.use_cases.set_plan_page_plantas_use_case import (
+    RequestPlantaDetectionUseCase,
+    SetPlanPagePlantasUseCase,
+)
 
 __all__ = [
     "ListResolutionsUseCase",
@@ -36,4 +43,7 @@ __all__ = [
     "AddPlanPagesUseCase",
     "GetPlanPageUseCase",
     "DeletePlanPageUseCase",
+    "DetectPlanPagePlantaUseCase",
+    "SetPlanPagePlantasUseCase",
+    "RequestPlantaDetectionUseCase",
 ]

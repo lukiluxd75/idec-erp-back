@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Tuple
 
-from app.domains.resolutions.domain.entities.resolution import Resolution
+from app.domains.resolutions.domain.entities.resolution import PlanPage, Resolution
 
 
 class ResolutionRepositoryPort(ABC):
@@ -51,12 +51,34 @@ class ResolutionRepositoryPort(ABC):
     def add_plan_pages(
         self,
         resolution_id: str,
-        pages: List[Tuple[bytes, str, str]],
+        pages: List[Tuple[bytes, str, List[str]]],
         source: str,
         user_sub: str,
     ) -> Optional[Resolution]:
-        """Append floor-plan photos (bytes, mime, planta) in order, tagged with
-        `source` ('app' o 'web'). None if the resolution is missing / not the user's."""
+        """Append floor-plan photos (bytes, mime, plantas) in order, tagged with
+        `source` ('app' o 'web'). A page with no plantas is stored with status
+        DETECTANDO (its planta is read later from the plan title). None if the
+        resolution is missing / not the user's."""
+
+    @abstractmethod
+    def get_plan_page_for_processing(self, resolution_id: str, order_index: int) -> Optional[Tuple[bytes, str]]:
+        """Image bytes + mime of a plan page WITHOUT the owner check -- only for
+        the background planta detection, which runs after the user's request."""
+
+    @abstractmethod
+    def update_plan_page_planta(
+        self,
+        resolution_id: str,
+        order_index: int,
+        plantas: List[str],
+        status: str,
+        title: Optional[str] = None,
+        detection: Optional[Dict[str, Any]] = None,
+        user_sub: Optional[str] = None,
+    ) -> Optional[PlanPage]:
+        """Set the plantas of one plan page and how they were assigned. With
+        `user_sub`, only if the resolution is that user's (web correction);
+        without it, for the background detection. None if the page is missing."""
 
     @abstractmethod
     def get_plan_page(self, resolution_id: str, order_index: int, user_sub: str) -> Optional[Tuple[bytes, str]]:
