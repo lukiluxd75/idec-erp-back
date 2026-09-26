@@ -1,6 +1,6 @@
 import logging
 from dataclasses import replace
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Set
 
 from app.core.errors.exceptions import DomainException
 from app.domains.folder_analysis.application.document_synchronizer import DocumentSynchronizer
@@ -190,7 +190,7 @@ class RunFolioExtractionUseCase:
                 images.append(image[0])
 
             self._save(document_id, pages, PageStatus.PROCESSING, DocumentStatus.PROCESSING, None, None)
-            data, observations = self._extractor.extract(images)
+            data, observations = self._extractor.extract(images, on_page=self._page_done(document_id, pages))
         except DomainException as exc:
             logger.warning("Folder analysis: folio %s no se pudo leer: %s", document_id, exc.message)
             self._save(document_id, pages, PageStatus.FAILED, DocumentStatus.FAILED, None, exc.message)
@@ -205,6 +205,30 @@ class RunFolioExtractionUseCase:
 
         logger.info("Folder analysis: folio %s leído con %d observación(es)", document_id, len(observations))
         self._save(document_id, pages, PageStatus.DONE, DocumentStatus.EXTRACTED, data, None)
+
+    def _page_done(self, document_id: str, pages: List[DocumentPage]) -> Callable[[int], None]:
+        """Marks each photo as read as soon as it is, so the screen can show how
+        many are left. A photo takes seconds, so this is a handful of writes.
+        Never lets a failure here lose the reading that is already running."""
+        finished: Set[int] = set()
+
+        def done(index: int) -> None:
+            finished.add(index)
+            try:
+                self._documents.save_progress(
+                    document_id,
+                    [
+                        replace(page, status=PageStatus.DONE if i in finished else PageStatus.PROCESSING)
+                        for i, page in enumerate(pages)
+                    ],
+                    DocumentStatus.PROCESSING,
+                    None,
+                    None,
+                )
+            except Exception:
+                logger.exception("Folder analysis: no se pudo guardar el avance del folio %s", document_id)
+
+        return done
 
     def _save(
         self,

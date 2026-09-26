@@ -20,7 +20,7 @@ folio, and the folios contract runs it for other domains (CLAUDE.md §2).
 import re
 from dataclasses import dataclass, field
 from statistics import median
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from app.domains.folios.domain.entities.folio import FolioStatus
 from app.domains.folios.domain.entities.ocr_block import OcrBlock
@@ -119,9 +119,21 @@ class FolioExtractor:
         self._structurer = structurer
         self._threshold = confidence_threshold
 
-    def extract(self, pages: Sequence[bytes]) -> Tuple[Dict[str, Any], str, Dict[str, Any]]:
-        """Every photo of one folio, in scan order -> (data, status, fill log)."""
-        return self.assemble([self.process_page(i, content) for i, content in enumerate(pages)])
+    def extract(
+        self,
+        pages: Sequence[bytes],
+        on_page: Optional[Callable[[int], None]] = None,
+    ) -> Tuple[Dict[str, Any], str, Dict[str, Any]]:
+        """Every photo of one folio, in scan order -> (data, status, fill log).
+
+        `on_page(index)` runs after each photo is read, so a caller can report
+        progress while the rest are still being OCR'd. It must not raise."""
+        outcomes = []
+        for index, content in enumerate(pages):
+            outcomes.append(self.process_page(index, content))
+            if on_page is not None:
+                on_page(index)
+        return self.assemble(outcomes)
 
     # ------------------------------------------------------------------ page
 

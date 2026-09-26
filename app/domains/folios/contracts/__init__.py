@@ -15,7 +15,7 @@ Several OCR calls per photo: seconds, not milliseconds. Call it off the request
 thread (BackgroundTasks), never inside a handler.
 """
 from dataclasses import dataclass
-from typing import Any, Dict, List, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from app.core.config.settings import settings
 from app.domains.folios.application.folio_extractor import FolioExtractor
@@ -38,14 +38,20 @@ class FolioExtraction:
         return list(self.data.get("observaciones") or [])
 
 
-def extract_folio(pages: Sequence[bytes]) -> FolioExtraction:
+def extract_folio(
+    pages: Sequence[bytes],
+    on_page: Optional[Callable[[int], None]] = None,
+) -> FolioExtraction:
     """Read one folio real from its photos, in scan order (page order is taken
     from the printed 'Pag X de N' when it can be read). Never raises for a
-    photo it cannot read: that comes back as an observation."""
+    photo it cannot read: that comes back as an observation.
+
+    `on_page(index)` is called as each photo is finished, for a caller that
+    wants to show progress while the rest are still running."""
     data, status, fill_log = FolioExtractor(
         ocr=get_ocr(),
         images=get_page_images(),
         structurer=get_asiento_structurer(),
         confidence_threshold=settings.FOLIOS_CONFIDENCE_THRESHOLD,
-    ).extract(pages)
+    ).extract(pages, on_page=on_page)
     return FolioExtraction(data=data, needs_review=status == FolioStatus.NEEDS_REVIEW, fill_log=fill_log)

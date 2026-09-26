@@ -7,7 +7,8 @@ review screen renders, so nothing downstream had to change.
 What the rules give that the model never did -- per-field confidence and the
 observations -- is kept under `reading` for the JSON tab.
 """
-from typing import Any, Dict, List, Optional
+import re
+from typing import Any, Dict, List, Optional, Sequence
 
 from app.domains.folder_analysis.domain.extraction_profiles import FOLIO_TEMPLATE
 from app.domains.folder_analysis.domain.services.result_merger import conform, is_empty
@@ -20,6 +21,44 @@ _OWNER_FIELDS = (
     ("marital_status", "estado_civil"),
     ("role", "rol"),
 )
+
+
+# Dotted key in the folios answer -> the key the review form renders. Asientos
+# are handled apart, because their index shifts when empty ones are dropped.
+_CONFIDENCE_KEYS = {
+    "matricula.numero": "registration_number",
+    "matricula.estado": "registration_status",
+    "matricula.zona": "administrative_location",
+    "catastro": "cadastre",
+    "tipo_inmueble": "property_type",
+    "ubicacion": "location",
+    "designacion_s_tit": "designation",
+    "superficie": "surface",
+    "medidas": "measures",
+    "propiedad": "property",
+    "titularidad_dominio.antecedente_dominial": "prior_title",
+    **{f"linderos.{source}": f"boundaries.{key}" for key, source in _BOUNDARIES},
+}
+_ASIENTO_KEY = re.compile(r"^titularidad_dominio\.asientos\.(\d+)$")
+# The pipeline lists the low-confidence fields in an observation, by their
+# internal dotted key. The review form marks those fields one by one instead,
+# so repeating the raw keys at the architect would only be noise.
+_LOW_CONFIDENCE_NOTE = "Campos con baja confianza de lectura:"
+
+
+def _lane_confidence_keys(keys: Sequence[str], entry_index: Dict[int, int]) -> List[str]:
+    """`entry_index` maps the position an asiento had in the folios answer to the
+    one it ends up with, since empty asientos are dropped on the way."""
+    out = []
+    for key in keys:
+        asiento = _ASIENTO_KEY.match(key)
+        if asiento is not None:
+            position = entry_index.get(int(asiento.group(1)))
+            if position is not None:
+                out.append(f"ownership_entries.{position}")
+        elif key in _CONFIDENCE_KEYS:
+            out.append(_CONFIDENCE_KEYS[key])
+    return out
 
 
 def _text(value: Any) -> Optional[str]:
@@ -102,13 +141,15 @@ def to_folio_template(extracted: Dict[str, Any], fill_log: Optional[Dict[str, An
     # Same rule the model path used: an "Asiento Numero" header with nothing
     # under it (the next asiento starting at the bottom edge of the photo) is
     # not an entry yet.
-    result["ownership_entries"] = [
-        entry for entry in result["ownership_entries"]
-        if not (
-            is_empty(entry.get("owners"))
-            and all(is_empty(entry.get(key)) for key in ("act", "document", "authority", "filing"))
-        )
-    ]
+    kept, entry_index = [], {}
+    for original, entry in enumerate(result["ownership_entries"]):
+        if is_empty(entry.get("owners")) and all(
+            is_empty(entry.get(key)) for key in ("act", "document", "authority", "filing")
+        ):
+            continue
+        entry_index[original] = len(kept)
+        kept.append(entry)
+    result["ownership_entries"] = kept
     result["pages_read"] = [
         {"number": _text(photo.get("pagina_impresa")), "total": _text(photo.get("total_impreso"))}
         for photo in (fill_log or {}).get("fotos") or []
@@ -117,10 +158,16 @@ def to_folio_template(extracted: Dict[str, Any], fill_log: Optional[Dict[str, An
         "source": "ocr_rules",
         "current_owners": titularidad.get("titulares_actuales") or [],
         "last_entry_declared": titularidad.get("ultimo_asiento"),
-        "low_confidence_fields": extracted.get("campos_baja_confianza") or [],
+        # In the review form's own keys, so it can mark them without translating.
+        "low_confidence_fields": _lane_confidence_keys(
+            extracted.get("campos_baja_confianza") or [], entry_index
+        ),
         # Column A lines the rules could not attach to an asiento: shown in the
         # JSON tab so nothing read from the photo is silently dropped.
         "unassigned_lines": titularidad.get("lineas_sin_asiento") or [],
-        "observations": extracted.get("observaciones") or [],
+        "observations": [
+            note for note in extracted.get("observaciones") or []
+            if not note.startswith(_LOW_CONFIDENCE_NOTE)
+        ],
     }
     return result

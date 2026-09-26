@@ -142,13 +142,21 @@ class FakeQueue(ExtractionQueuePort):
 
 
 class FakeFolioExtractor(FolioExtractionPort):
-    def __init__(self, data=None, error=None):
+    def __init__(self, data=None, error=None, on_each_page=None):
         self.data, self.error, self.calls = data or {}, error, []
+        # Runs right after the use case is told a page is finished, so a test can
+        # look at the document mid-reading.
+        self._on_each_page = on_each_page
 
-    def extract(self, pages):
+    def extract(self, pages, on_page=None):
         self.calls.append(list(pages))
         if self.error is not None:
             raise self.error
+        for index in range(len(pages)):
+            if on_page is not None:
+                on_page(index)
+            if self._on_each_page is not None:
+                self._on_each_page(index)
         return self.data, ["una observación"]
 
 
@@ -311,8 +319,52 @@ class TestFolioResultMapper(unittest.TestCase):
         reading = self.data["reading"]
         self.assertEqual(reading["source"], "ocr_rules")
         self.assertEqual(reading["unassigned_lines"], ["sientoMumero:0"])
-        self.assertEqual(reading["low_confidence_fields"], ["titularidad_dominio.asientos.0"])
+        # Translated to the keys the review form renders, not the folios ones.
+        self.assertEqual(reading["low_confidence_fields"], ["ownership_entries.0"])
         self.assertEqual(self.data["pages_read"], [{"number": "1", "total": "4"}])
+
+    def test_low_confidence_keys_are_translated(self):
+        extracted = {
+            **self.EXTRACTED,
+            "campos_baja_confianza": ["matricula.numero", "linderos.norte", "superficie", "no_existe"],
+        }
+        self.assertEqual(
+            to_folio_template(extracted)["reading"]["low_confidence_fields"],
+            ["registration_number", "boundaries.north", "surface"],
+        )
+
+    def test_asiento_positions_shift_when_an_empty_one_is_dropped(self):
+        """The second asiento is header-only and disappears, so the third one is
+        flagged at the position it actually has in the form."""
+        person = [{"nombre": "ROJAS VARGAS JUAN", "rol": "titular", "proporcion": "1/1"}]
+        asientos = [
+            {"numero": 1, "personas": person, "acto": "Compra Venta"},
+            {"numero": 2, "personas": [], "acto": None},
+            {"numero": 3, "personas": person, "acto": "Compra Venta"},
+        ]
+        extracted = {
+            "titularidad_dominio": {"asientos": asientos},
+            "campos_baja_confianza": ["titularidad_dominio.asientos.2", "titularidad_dominio.asientos.1"],
+        }
+        result = to_folio_template(extracted)
+        self.assertEqual([e["entry_number"] for e in result["ownership_entries"]], ["1", "3"])
+        # asiento index 2 -> position 1; index 1 was dropped, so it is not flagged.
+        self.assertEqual(result["reading"]["low_confidence_fields"], ["ownership_entries.1"])
+
+    def test_the_raw_key_list_is_not_repeated_at_the_architect(self):
+        """The form marks those fields one by one, so the observation that spells
+        out the internal keys is dropped."""
+        extracted = {
+            **self.EXTRACTED,
+            "observaciones": [
+                "Faltan páginas: el folio tiene 4 y se escanearon 1.",
+                "Campos con baja confianza de lectura: revisar titularidad_dominio.asientos.0.",
+            ],
+        }
+        self.assertEqual(
+            to_folio_template(extracted)["reading"]["observations"],
+            ["Faltan páginas: el folio tiene 4 y se escanearon 1."],
+        )
 
     def test_an_empty_extraction_still_has_the_shape_the_form_needs(self):
         data = to_folio_template({})
@@ -425,6 +477,73 @@ class TestFolderAnalysisFlow(unittest.TestCase):
         # Both photos went in one call, in page order.
         self.assertEqual(len(extractor.calls), 1)
         self.assertEqual(len(extractor.calls[0]), 2)
+
+    def test_pages_are_marked_as_they_are_read(self):
+        """The screen shows how many photos are left, so each one is stored as
+        soon as it is read instead of all of them at the end."""
+        doc = self._create("folio")
+        AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(doc.id, "arq-1")
+
+        seen = []
+        extractor = FakeFolioExtractor(
+            {"registration_number": "X"},
+            on_each_page=lambda _i: seen.append(
+                [p.status for p in self.documents.get(doc.id, "arq-1").pages]
+            ),
+        )
+        RunFolioExtractionUseCase(self.documents, self.captures, extractor).execute(doc.id, "arq-1")
+
+        self.assertEqual(seen, [
+            [PageStatus.DONE, PageStatus.PROCESSING],
+            [PageStatus.DONE, PageStatus.DONE],
+        ])
+        self.assertEqual(self.documents.get(doc.id, "arq-1").status, DocumentStatus.EXTRACTED)
+
+    def test_a_failure_saving_progress_does_not_lose_the_reading(self):
+        doc = self._create("folio")
+        AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(doc.id, "arq-1")
+        original = self.documents.save_progress
+        calls = {"n": 0}
+
+        def flaky(*args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 2:  # the first per-page save
+                raise RuntimeError("database hiccup")
+            return original(*args, **kwargs)
+
+        self.documents.save_progress = flaky
+        RunFolioExtractionUseCase(
+            self.documents, self.captures, FakeFolioExtractor({"registration_number": "X"})
+        ).execute(doc.id, "arq-1")
+        self.documents.save_progress = original
+
+        doc = self.documents.get(doc.id, "arq-1")
+        self.assertEqual(doc.status, DocumentStatus.EXTRACTED)
+        self.assertEqual(doc.extracted_data["registration_number"], "X")
+
+    def test_the_queue_synchronizer_keeps_its_hands_off_a_folio(self):
+        """With every photo read but the data not assembled yet, the queue's own
+        rule reads the pages as finished and would store an empty result over
+        the reading still running. It only runs at all because another document
+        IS queue-driven, which is the everyday case on this screen."""
+        folio = self._create("folio", [self.photos[0].id])
+        AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(folio.id, "arq-1")
+        plan = self._create("plan", [self.photos[1].id])
+        AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(plan.id, "arq-1")
+
+        mid_reading = replace(
+            self.documents.get(folio.id, "arq-1"),
+            pages=[DocumentPage(p.capture_id, p.page_index, PageStatus.DONE) for p in folio.pages],
+            status=DocumentStatus.PROCESSING,
+        )
+        queued_plan = self.documents.get(plan.id, "arq-1")
+
+        refreshed = DocumentSynchronizer(self.documents, self.queue).refresh([mid_reading, queued_plan])
+
+        self.assertEqual(refreshed[0].status, DocumentStatus.PROCESSING)
+        self.assertIsNone(refreshed[0].extracted_data)
+        # Nothing was written over the reading that is still running.
+        self.assertIsNone(self.documents.get(folio.id, "arq-1").extracted_data)
 
     def test_folio_reading_failure_is_stored_on_the_document(self):
         doc = self._create("folio")

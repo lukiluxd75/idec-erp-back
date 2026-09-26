@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from app.domains.folder_analysis.domain.ports import FolioExtractionPort
 from app.domains.folder_analysis.domain.services.folio_result_mapper import to_folio_template
@@ -10,6 +10,10 @@ class FoliosExtractor(FolioExtractionPort):
     lane reads its pages with that pipeline (GAMC OCR + OpenCV + rule parsers)
     and stores the result in its own shape."""
 
-    def extract(self, pages: Sequence[bytes]) -> Tuple[Dict[str, Any], List[str]]:
-        extraction = extract_folio(pages)
+    def extract(
+        self,
+        pages: Sequence[bytes],
+        on_page: Optional[Callable[[int], None]] = None,
+    ) -> Tuple[Dict[str, Any], List[str]]:
+        extraction = extract_folio(pages, on_page=on_page)
         return to_folio_template(extraction.data, extraction.fill_log), extraction.observations
