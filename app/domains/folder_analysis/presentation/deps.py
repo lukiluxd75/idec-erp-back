@@ -3,7 +3,7 @@ from functools import lru_cache
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
-from app.core.database.connection import get_db
+from app.core.database.connection import SessionLocal, get_db
 from app.domains.folder_analysis.application.document_synchronizer import DocumentSynchronizer
 from app.domains.folder_analysis.application.use_cases import (
     AnalyzeDocumentUseCase,
@@ -15,6 +15,7 @@ from app.domains.folder_analysis.application.use_cases import (
     ListDocumentsUseCase,
     ListInboxUseCase,
     ReviewDocumentUseCase,
+    RunFolioExtractionUseCase,
     SetDocumentPagesUseCase,
     UploadCapturesUseCase,
 )
@@ -22,9 +23,11 @@ from app.domains.folder_analysis.domain.ports import (
     CaptureRepositoryPort,
     DocumentRepositoryPort,
     ExtractionQueuePort,
+    FolioExtractionPort,
     ThumbnailPort,
 )
 from app.domains.folder_analysis.infrastructure.digitization_queue import DigitizationQueue
+from app.domains.folder_analysis.infrastructure.folios_extractor import FoliosExtractor
 from app.domains.folder_analysis.infrastructure.opencv_thumbnail import OpenCvThumbnail
 from app.domains.folder_analysis.infrastructure.sql_capture_repository import SqlCaptureRepository
 from app.domains.folder_analysis.infrastructure.sql_document_repository import SqlDocumentRepository
@@ -45,6 +48,26 @@ def get_document_repository(db: Session = Depends(get_db)) -> DocumentRepository
 
 def get_queue(db: Session = Depends(get_db)) -> ExtractionQueuePort:
     return DigitizationQueue(db)
+
+
+@lru_cache()
+def get_folio_extractor() -> FolioExtractionPort:
+    return FoliosExtractor()
+
+
+def run_folio_extraction(document_id: str, user_sub: str) -> None:
+    """Entry point for the folio lane's background reading. Runs after the
+    `analyze` request returned, so the request's session is already closed --
+    it opens and closes its own, like the folios domain's pipeline."""
+    db = SessionLocal()
+    try:
+        RunFolioExtractionUseCase(
+            documents=SqlDocumentRepository(db),
+            captures=SqlCaptureRepository(db),
+            extractor=get_folio_extractor(),
+        ).execute(document_id, user_sub)
+    finally:
+        db.close()
 
 
 def get_synchronizer(

@@ -1,7 +1,17 @@
+import logging
+from dataclasses import replace
 from typing import Any, Dict, List, Optional
 
+from app.core.errors.exceptions import DomainException
 from app.domains.folder_analysis.application.document_synchronizer import DocumentSynchronizer
-from app.domains.folder_analysis.domain.entities import CaptureStatus, DocumentStatus, DocumentType, FolderDocument
+from app.domains.folder_analysis.domain.entities import (
+    CaptureStatus,
+    DocumentPage,
+    DocumentStatus,
+    DocumentType,
+    FolderDocument,
+    PageStatus,
+)
 from app.domains.folder_analysis.domain.exceptions import (
     CaptureNotAvailableException,
     CaptureNotFoundException,
@@ -10,7 +20,14 @@ from app.domains.folder_analysis.domain.exceptions import (
     InvalidDocumentRequestException,
 )
 from app.domains.folder_analysis.domain.extraction_profiles import PROFILES
-from app.domains.folder_analysis.domain.ports import CaptureRepositoryPort, DocumentRepositoryPort, ExtractionQueuePort
+from app.domains.folder_analysis.domain.ports import (
+    CaptureRepositoryPort,
+    DocumentRepositoryPort,
+    ExtractionQueuePort,
+    FolioExtractionPort,
+)
+
+logger = logging.getLogger("uvicorn.error")
 
 MAX_PAGES = 10
 
@@ -94,7 +111,9 @@ class DeleteDocumentUseCase:
 
 
 class AnalyzeDocumentUseCase:
-    """Sends every page to the PCs with the extraction profile of its type."""
+    """Sends every page to the PCs with the extraction profile of its type --
+    except a folio, which is read by the folios pipeline (OCR + rules) off the
+    request thread, so it queues no job at all."""
 
     def __init__(
         self, documents: DocumentRepositoryPort, captures: CaptureRepositoryPort, queue: ExtractionQueuePort
@@ -111,6 +130,12 @@ class AnalyzeDocumentUseCase:
             raise DocumentBusyException(
                 "El documento ya fue revisado. Si lo vuelve a analizar se perderán sus correcciones; confirme para continuar."
             )
+
+        if document.doc_type == DocumentType.FOLIO:
+            # No job ids: RunFolioExtractionUseCase does the reading and writes
+            # the result. The synchronizer skips pages without a job id.
+            self._documents.mark_submitted(document_id, {})
+            return _require_document(self._documents, document_id, user_sub)
 
         profile = PROFILES[document.doc_type]
         job_ids: Dict[int, str] = {}
@@ -129,6 +154,76 @@ class AnalyzeDocumentUseCase:
             )
         self._documents.mark_submitted(document_id, job_ids)
         return _require_document(self._documents, document_id, user_sub)
+
+
+class RunFolioExtractionUseCase:
+    """Reads a folio document with the folios pipeline and stores the result.
+    Runs in a BackgroundTask after `analyze` returned, so -- like the folios
+    domain's own pipeline -- nothing is allowed to escape: every failure is
+    stored on the document, where the architect can see it and retry."""
+
+    def __init__(
+        self,
+        documents: DocumentRepositoryPort,
+        captures: CaptureRepositoryPort,
+        extractor: FolioExtractionPort,
+    ):
+        self._documents = documents
+        self._captures = captures
+        self._extractor = extractor
+
+    def execute(self, document_id: str, user_sub: str) -> None:
+        document = self._documents.get(document_id, user_sub)
+        # Gone, or the architect already changed its pages: this run is stale.
+        if document is None or document.status not in DocumentStatus.IN_PROGRESS:
+            return
+
+        pages = sorted(document.pages, key=lambda p: p.page_index)
+        try:
+            images = []
+            for page in pages:
+                image = self._captures.get_image(page.capture_id, user_sub)
+                if image is None:
+                    raise CaptureNotFoundException(
+                        f"No se encontró la foto de la página {page.page_index + 1}."
+                    )
+                images.append(image[0])
+
+            self._save(document_id, pages, PageStatus.PROCESSING, DocumentStatus.PROCESSING, None, None)
+            data, observations = self._extractor.extract(images)
+        except DomainException as exc:
+            logger.warning("Folder analysis: folio %s no se pudo leer: %s", document_id, exc.message)
+            self._save(document_id, pages, PageStatus.FAILED, DocumentStatus.FAILED, None, exc.message)
+            return
+        except Exception:
+            logger.exception("Folder analysis: error inesperado leyendo el folio %s", document_id)
+            self._save(
+                document_id, pages, PageStatus.FAILED, DocumentStatus.FAILED, None,
+                "Error inesperado al leer el folio. Vuelva a analizarlo.",
+            )
+            return
+
+        logger.info("Folder analysis: folio %s leído con %d observación(es)", document_id, len(observations))
+        self._save(document_id, pages, PageStatus.DONE, DocumentStatus.EXTRACTED, data, None)
+
+    def _save(
+        self,
+        document_id: str,
+        pages: List[DocumentPage],
+        page_status: str,
+        status: str,
+        data: Optional[Dict[str, Any]],
+        error: Optional[str],
+    ) -> None:
+        """One result for the whole folio (the pages are read together), so the
+        pages only carry the status."""
+        self._documents.save_progress(
+            document_id,
+            [replace(page, status=page_status, error=error) for page in pages],
+            status,
+            data,
+            error,
+        )
 
 
 class GetDocumentUseCase:

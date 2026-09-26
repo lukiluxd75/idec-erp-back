@@ -16,6 +16,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.core.database.connection import Base
+from app.domains.folios.application.folio_extractor import FolioExtractor
 from app.domains.folios.application.use_cases import (
     DeleteFolioUseCase,
     GetFolioFillLogUseCase,
@@ -28,6 +29,8 @@ from app.domains.folios.application.use_cases import (
 )
 from app.domains.folios.domain.entities.folio import FolioStatus
 from app.domains.folios.domain.entities.ocr_block import OcrBlock
+from app.domains.folios.domain.services.layout import PageLayout
+from app.domains.folios.domain.services.titularidad_parser import parse_titularidad
 from app.domains.folios.domain.exceptions import (
     AsientoStructurerStoppedException,
     AsientoStructurerUnavailableException,
@@ -288,18 +291,62 @@ class TestPipeline(unittest.TestCase):
         self.assertEqual(self.repo.get_page_image(folio.id, 0, "user-a", upright=True)[1], "image/jpeg")
 
 
+class TestColumnALines(unittest.TestCase):
+    """Boxes as the OCR returned them for the column A crop of a real folio whose
+    left ruling line was not found, so the crop reached into the page margin."""
+
+    # (text, x0, y0, x1, y1) in page frame.
+    BLOCKS = [
+        ("Dirección Ac", 52, 512, 66, 604),   # margin, printed sideways
+        ("sientoMumero:0-", 79, 524, 188, 536),
+        ("endedores):", 80, 540, 163, 553),
+        ("1/2", 444, 555, 468, 569),
+        ("ANZE GUZMAN VILMALUZ-", 78, 556, 216, 569),
+        ("SANCHEZ TERRAZAS JUAN RAUL", 76, 570, 245, 585),
+        ("1/2", 444, 571, 469, 586),
+        ("Asiento Mumero:1-", 77, 605, 190, 617),
+        ("RONDAL ARIAS MIGUEL", 74, 619, 200, 634),
+        ("1/2", 443, 620, 469, 635),
+    ]
+
+    def setUp(self):
+        blocks = [OcrBlock(t, 0.9, x0, y0, x1, y1) for t, x0, y0, x1, y1 in self.BLOCKS]
+        layout = PageLayout(width=1280, height=960)
+        layout.proportion_range = (422.0, 481.5)
+        self.lines = FolioExtractor._column_lines(blocks, layout, 0)
+
+    def test_the_sideways_margin_is_not_a_line(self):
+        self.assertNotIn("Dirección Ac", [line.text for line in self.lines])
+
+    def test_its_height_no_longer_glues_three_rows_into_one(self):
+        self.assertEqual(
+            [line.text for line in self.lines][:4],
+            ["sientoMumero:0-", "endedores):", "ANZE GUZMAN VILMALUZ-", "SANCHEZ TERRAZAS JUAN RAUL"],
+        )
+
+    def test_the_asiento_and_its_sellers_survive(self):
+        result = parse_titularidad(self.lines)
+        first = result["asientos"][0]
+        self.assertEqual(first["numero"], 0)
+        self.assertEqual(
+            [(p["nombre"], p["rol"]) for p in first["personas"]],
+            [("ANZE GUZMAN VILMALUZ", "vendedor"), ("SANCHEZ TERRAZAS JUAN RAUL", "vendedor")],
+        )
+        self.assertEqual(result["lineas_sin_asiento"], [])
+
+
 class TestLlmGapFilling(unittest.TestCase):
     """Asiento whose rules found no people/act: the LLM may fill them, but only
     with values that appear in the asiento's own text."""
 
     def _process(self, structurer, log=None):
-        uc = ProcessFolioUseCase(_new_repo(), FakeOcr({}), FakeImages({}), structurer, 0.85)
+        extractor = FolioExtractor(FakeOcr({}), FakeImages({}), structurer, 0.85)
         asientos = [{
             "numero": 3, "personas": [], "acto": None, "documento": None, "autoridad": None,
             "texto": "Asiento Numero: 3\nA FAVOR DE ROJAS VARGAS JUAN c/CI 1234567 CBA por Donacion\nTestimonio 55/2001",
         }]
         observations = []
-        uc._fill_gaps_with_llm(asientos, observations, log)
+        extractor._fill_gaps_with_llm(asientos, observations, log)
         return asientos[0], observations
 
     def test_log_keeps_proposal_and_what_was_discarded(self):

@@ -1,7 +1,7 @@
 import json
 from typing import List, Optional
 
-from fastapi import APIRouter, Body, Depends, Query, Response, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, Query, Response, status
 
 from app.domains.folder_analysis.application.use_cases import (
     AnalyzeDocumentUseCase,
@@ -12,6 +12,7 @@ from app.domains.folder_analysis.application.use_cases import (
     ReviewDocumentUseCase,
     SetDocumentPagesUseCase,
 )
+from app.domains.folder_analysis.domain.entities import DocumentType
 from app.domains.folder_analysis.presentation.deps import (
     get_analyze_document_use_case,
     get_create_document_use_case,
@@ -20,6 +21,7 @@ from app.domains.folder_analysis.presentation.deps import (
     get_list_documents_use_case,
     get_review_document_use_case,
     get_set_pages_use_case,
+    run_folio_extraction,
 )
 from app.domains.folder_analysis.presentation.schemas.folder_analysis_schema import (
     AnalyzeRequest,
@@ -88,12 +90,19 @@ def delete_document(
 @router.post("/{document_id}/analyze", response_model=DocumentDetail, status_code=status.HTTP_202_ACCEPTED)
 def analyze_document(
     document_id: str,
+    background: BackgroundTasks,
     body: AnalyzeRequest = Body(default_factory=AnalyzeRequest),
     use_case: AnalyzeDocumentUseCase = Depends(get_analyze_document_use_case),
     user: UserProfile = Depends(require_permission("folder-analysis.edit")),
 ):
-    """Sends every page to the architects' PCs. Returns right away; poll GET."""
-    return DocumentDetail.from_entity(use_case.execute(document_id, user.sub, body.force))
+    """Starts the analysis. Returns right away; poll GET.
+
+    A folio is read here on the server (OCR + rules, seconds); the other types
+    go to the architects' PCs through the digitization queue."""
+    document = use_case.execute(document_id, user.sub, body.force)
+    if document.doc_type == DocumentType.FOLIO:
+        background.add_task(run_folio_extraction, document_id, user.sub)
+    return DocumentDetail.from_entity(document)
 
 
 @router.put("/{document_id}/review", response_model=DocumentDetail)

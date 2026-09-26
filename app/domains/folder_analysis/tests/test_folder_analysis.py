@@ -14,6 +14,7 @@ from app.domains.folder_analysis.application.use_cases import (
     DeleteDocumentUseCase,
     GetDocumentUseCase,
     ReviewDocumentUseCase,
+    RunFolioExtractionUseCase,
     SetDocumentPagesUseCase,
     UploadCapturesUseCase,
 )
@@ -37,8 +38,11 @@ from app.domains.folder_analysis.domain.ports import (
     CaptureRepositoryPort,
     DocumentRepositoryPort,
     ExtractionQueuePort,
+    FolioExtractionPort,
 )
+from app.domains.folios.domain.exceptions import OcrUnavailableException
 from app.domains.folder_analysis.domain.services.document_progress import document_status
+from app.domains.folder_analysis.domain.services.folio_result_mapper import to_folio_template
 from app.domains.folder_analysis.domain.services.result_merger import conform, merge_pages
 from app.domains.folder_analysis.infrastructure.opencv_thumbnail import OpenCvThumbnail
 
@@ -108,7 +112,7 @@ class FakeDocuments(DocumentRepositoryPort):
 
     def mark_submitted(self, document_id, job_ids_by_page):
         doc = self.rows[document_id]
-        pages = [replace(p, status=PageStatus.QUEUED, job_id=job_ids_by_page[p.page_index], result=None)
+        pages = [replace(p, status=PageStatus.QUEUED, job_id=job_ids_by_page.get(p.page_index), result=None)
                  for p in doc.pages]
         self.rows[document_id] = replace(doc, pages=pages, status=DocumentStatus.QUEUED,
                                          extracted_data=None, reviewed_data=None)
@@ -135,6 +139,17 @@ class FakeQueue(ExtractionQueuePort):
 
     def status(self, job_ids):
         return {j: self.jobs[j] for j in job_ids if j in self.jobs}
+
+
+class FakeFolioExtractor(FolioExtractionPort):
+    def __init__(self, data=None, error=None):
+        self.data, self.error, self.calls = data or {}, error, []
+
+    def extract(self, pages):
+        self.calls.append(list(pages))
+        if self.error is not None:
+            raise self.error
+        return self.data, ["una observación"]
 
 
 def _png() -> bytes:
@@ -210,6 +225,102 @@ class TestResultMerger(unittest.TestCase):
         self.assertEqual(len(merged["pages"]), 2)
 
 
+class TestFolioResultMapper(unittest.TestCase):
+    """Shape the folios pipeline answers with, taken from a real Cochabamba folio."""
+
+    EXTRACTED = {
+        "matricula": {"numero": "3.01.1.99.0022305", "estado": "VIGENTE", "zona": "CERCADO,PRIMERA,CIUDAD CBBA"},
+        "catastro": "13103024000000000",
+        "tipo_inmueble": "Lote de Terreno",
+        "ubicacion": "ZONA LA CUADRAS,AVENIDA 9 DE ABRIL",
+        "designacion_s_tit": "LOTE S/N,DISTRITO 11",
+        "superficie": {"valor": 205.22, "unidad": "m2", "texto_original": "205.22Metros2"},
+        "medidas": "NSC",
+        "linderos": {"norte": "LOTE N 106", "sud": "AVENIDA 9 DE ABRIL", "este": "LOTE N 107", "oeste": "M. SILES"},
+        "propiedad": "INDEFINIDA",
+        "documento": {"fecha_emision": "01/12/2025", "paginas_declaradas": 4, "paginas_recibidas": 1},
+        "campos_baja_confianza": ["titularidad_dominio.asientos.0"],
+        "observaciones": ["Faltan páginas: el folio tiene 4 y se escanearon 1."],
+        "titularidad_dominio": {
+            "antecedente_dominial": "L:PCPA A:1998 P:0974",
+            "ultimo_asiento": 2,
+            "titulares_actuales": [{"nombre": "RONDAL ARIAS MIGUEL"}],
+            "lineas_sin_asiento": ["sientoMumero:0"],
+            "asientos": [
+                {
+                    "numero": 1,
+                    "personas": [
+                        {"nombre": "RONDAL ARIAS MIGUEL", "rol": "titular", "estado_civil": None,
+                         "ci": "4482143", "expedido": "CBA", "proporcion": "1/2"},
+                        {"nombre": "RONDAL BORDA MARGARITA", "rol": "titular", "estado_civil": "cas.",
+                         "ci": None, "expedido": None, "proporcion": "1/2"},
+                    ],
+                    "acto": "Compra Venta",
+                    "documento": {"descripcion": "Escrit. Pub. Nro. 127 de 03/04/1998", "fecha": "03/04/1998"},
+                    "autoridad": "Not. Pub. JORGE CAMPOS CAMPOS",
+                    "presentacion": {"numero": "14910", "fecha": "09/04/1998", "hora": "09:14:00"},
+                    "confianza": 0.83,
+                },
+                # Cut off at the bottom edge of the photo: nothing but its number.
+                {"numero": 2, "personas": [], "acto": None, "documento": None,
+                 "autoridad": None, "presentacion": None, "confianza": None},
+            ],
+        },
+    }
+    FILL_LOG = {"fotos": [{"pagina_impresa": 1, "total_impreso": 4}]}
+
+    def setUp(self):
+        self.data = to_folio_template(self.EXTRACTED, self.FILL_LOG)
+
+    def test_header_fields_use_the_lane_keys(self):
+        self.assertEqual(self.data["registration_number"], "3.01.1.99.0022305")
+        self.assertEqual(self.data["administrative_location"], "CERCADO,PRIMERA,CIUDAD CBBA")
+        self.assertEqual(self.data["cadastre"], "13103024000000000")
+        self.assertEqual(self.data["property_type"], "Lote de Terreno")
+        self.assertEqual(self.data["prior_title"], "L:PCPA A:1998 P:0974")
+        self.assertEqual(self.data["date"], "01/12/2025")
+        self.assertEqual(self.data["boundaries"]["west"], "M. SILES")
+
+    def test_surface_keeps_the_number_and_its_unit(self):
+        self.assertEqual(self.data["surface"], "205.22 m2")
+
+    def test_surface_falls_back_to_the_ocr_text(self):
+        extracted = {**self.EXTRACTED, "superficie": {"valor": None, "unidad": None, "texto_original": "ilegible"}}
+        self.assertEqual(to_folio_template(extracted)["surface"], "ilegible")
+
+    def test_entries_and_owners(self):
+        entry = self.data["ownership_entries"][0]
+        self.assertEqual(entry["entry_number"], "1")
+        self.assertEqual([o["name"] for o in entry["owners"]], ["RONDAL ARIAS MIGUEL", "RONDAL BORDA MARGARITA"])
+        self.assertEqual(entry["owners"][0]["id_number"], "4482143")
+        self.assertEqual(entry["owners"][0]["id_issued_at"], "CBA")
+        self.assertEqual(entry["owners"][1]["marital_status"], "cas.")
+        self.assertEqual(entry["share"], "1/2")
+        self.assertEqual(entry["document"], "Escrit. Pub. Nro. 127 de 03/04/1998")
+        self.assertEqual(entry["filing"], "No. 14910 de 09/04/1998 Hrs. 09:14:00")
+
+    def test_an_entry_with_nothing_but_its_number_is_dropped(self):
+        self.assertEqual([e["entry_number"] for e in self.data["ownership_entries"]], ["1"])
+
+    def test_differing_shares_are_kept_together(self):
+        people = [{"proporcion": "1/2"}, {"proporcion": "1/4"}, {"proporcion": "1/2"}]
+        extracted = {"titularidad_dominio": {"asientos": [{"numero": 3, "personas": people, "acto": "Compra"}]}}
+        self.assertEqual(to_folio_template(extracted)["ownership_entries"][0]["share"], "1/2 y 1/4")
+
+    def test_what_the_rules_saw_is_kept_for_the_json_tab(self):
+        reading = self.data["reading"]
+        self.assertEqual(reading["source"], "ocr_rules")
+        self.assertEqual(reading["unassigned_lines"], ["sientoMumero:0"])
+        self.assertEqual(reading["low_confidence_fields"], ["titularidad_dominio.asientos.0"])
+        self.assertEqual(self.data["pages_read"], [{"number": "1", "total": "4"}])
+
+    def test_an_empty_extraction_still_has_the_shape_the_form_needs(self):
+        data = to_folio_template({})
+        self.assertIsNone(data["registration_number"])
+        self.assertEqual(data["ownership_entries"], [])
+        self.assertEqual(set(data["boundaries"]), {"north", "south", "east", "west"})
+
+
 class TestDocumentProgress(unittest.TestCase):
     def test_failed_page_waits_for_the_others(self):
         pages = [DocumentPage("a", 0, PageStatus.FAILED, error="x"), DocumentPage("b", 1, PageStatus.PROCESSING)]
@@ -256,30 +367,31 @@ class TestFolderAnalysisFlow(unittest.TestCase):
             GetDocumentUseCase(self.documents, sync).execute(doc.id, "someone-else")
 
     def test_full_cycle_analyze_sync_review(self):
-        doc = self._create()
+        doc = self._create("tax_receipt")
         doc = AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(doc.id, "arq-1")
         self.assertEqual(doc.status, DocumentStatus.QUEUED)
         self.assertEqual(len(self.queue.submitted), 2)
-        self.assertIn("Folio Real", self.queue.submitted[0]["instructions"])
+        self.assertIn("property tax", self.queue.submitted[0]["instructions"])
 
         with self.assertRaises(DocumentBusyException):
             AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(doc.id, "arq-1")
 
         get = GetDocumentUseCase(self.documents, DocumentSynchronizer(self.documents, self.queue))
-        self.queue.jobs["job-1"] = QueuedJob("done", FOLIO_PAGE_1)
+        self.queue.jobs["job-1"] = QueuedJob("done", {"receipt_number": "123", "municipality": "GAM - COCHABAMBA"})
         self.queue.jobs["job-2"] = QueuedJob("processing")
         self.assertEqual(get.execute(doc.id, "arq-1").status, DocumentStatus.PROCESSING)
 
-        self.queue.jobs["job-2"] = QueuedJob("done", FOLIO_PAGE_2)
+        self.queue.jobs["job-2"] = QueuedJob("done", {"tax_year": "2024"})
         doc = get.execute(doc.id, "arq-1")
         self.assertEqual(doc.status, DocumentStatus.EXTRACTED)
-        self.assertEqual(len(doc.extracted_data["ownership_entries"]), 3)
+        self.assertEqual(doc.extracted_data["receipt_number"], "123")
+        self.assertEqual(doc.extracted_data["tax_year"], "2024")
 
-        corrected = {**doc.extracted_data, "registration_status": "VIGENTE (revisado)"}
+        corrected = {**doc.extracted_data, "municipality": "GAM - COCHABAMBA (revisado)"}
         doc = ReviewDocumentUseCase(self.documents).execute(doc.id, "arq-1", corrected)
         self.assertEqual(doc.status, DocumentStatus.REVIEWED)
-        self.assertEqual(doc.current_data["registration_status"], "VIGENTE (revisado)")
-        self.assertEqual(doc.extracted_data["registration_status"], "VIGENTE")
+        self.assertEqual(doc.current_data["municipality"], "GAM - COCHABAMBA (revisado)")
+        self.assertEqual(doc.extracted_data["municipality"], "GAM - COCHABAMBA")
 
         with self.assertRaises(DocumentBusyException):
             AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(doc.id, "arq-1")
@@ -291,6 +403,53 @@ class TestFolderAnalysisFlow(unittest.TestCase):
         doc = self._create("plan", [self.photos[0].id])
         AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(doc.id, "arq-1")
         self.assertIsNone(self.queue.submitted[0]["instructions"])
+
+    def test_folio_is_read_on_the_server_and_queues_no_job(self):
+        doc = self._create("folio")
+        doc = AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(doc.id, "arq-1")
+        self.assertEqual(doc.status, DocumentStatus.QUEUED)
+        self.assertEqual(self.queue.submitted, [])
+        self.assertTrue(all(p.job_id is None for p in doc.pages))
+
+        # A document with no job ids must not confuse the queue synchronizer.
+        sync = DocumentSynchronizer(self.documents, self.queue)
+        self.assertEqual(sync.refresh([doc])[0].status, DocumentStatus.QUEUED)
+
+        extractor = FakeFolioExtractor({"registration_number": "3.01.1.99.0022305"})
+        RunFolioExtractionUseCase(self.documents, self.captures, extractor).execute(doc.id, "arq-1")
+
+        doc = self.documents.get(doc.id, "arq-1")
+        self.assertEqual(doc.status, DocumentStatus.EXTRACTED)
+        self.assertEqual(doc.extracted_data["registration_number"], "3.01.1.99.0022305")
+        self.assertEqual([p.status for p in doc.pages], [PageStatus.DONE, PageStatus.DONE])
+        # Both photos went in one call, in page order.
+        self.assertEqual(len(extractor.calls), 1)
+        self.assertEqual(len(extractor.calls[0]), 2)
+
+    def test_folio_reading_failure_is_stored_on_the_document(self):
+        doc = self._create("folio")
+        AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(doc.id, "arq-1")
+        extractor = FakeFolioExtractor(error=OcrUnavailableException("El servicio OCR no respondió a tiempo."))
+        RunFolioExtractionUseCase(self.documents, self.captures, extractor).execute(doc.id, "arq-1")
+
+        doc = self.documents.get(doc.id, "arq-1")
+        self.assertEqual(doc.status, DocumentStatus.FAILED)
+        self.assertIn("OCR", doc.error)
+
+    def test_an_unexpected_error_does_not_escape_the_background_task(self):
+        doc = self._create("folio")
+        AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(doc.id, "arq-1")
+        extractor = FakeFolioExtractor(error=RuntimeError("boom"))
+        RunFolioExtractionUseCase(self.documents, self.captures, extractor).execute(doc.id, "arq-1")
+        self.assertEqual(self.documents.get(doc.id, "arq-1").status, DocumentStatus.FAILED)
+
+    def test_a_stale_run_does_not_touch_a_document_that_moved_on(self):
+        doc = self._create("folio")
+        extractor = FakeFolioExtractor({"registration_number": "X"})
+        # Never analyzed: the document is still a draft, so this run is stale.
+        RunFolioExtractionUseCase(self.documents, self.captures, extractor).execute(doc.id, "arq-1")
+        self.assertEqual(extractor.calls, [])
+        self.assertEqual(self.documents.get(doc.id, "arq-1").status, DocumentStatus.DRAFT)
 
     def test_pages_can_be_changed_and_deleting_returns_photos_to_inbox(self):
         doc = self._create("folio", [self.photos[0].id])

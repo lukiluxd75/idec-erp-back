@@ -85,9 +85,15 @@ def _asiento_number(line: str) -> Optional[int]:
     m = _ASIENTO_RE.match(c)
     if m:
         return _digits(m.group(1))
-    # One wrong letter in "ASIENTONUMERO" (e.g. 'ASIENTONUNERO0').
-    if len(c) >= 14 and similar(c[:13], "ASIENTONUMERO") >= 0.84:
-        return _digits(c[13:16])
+    # OCR noise in "ASIENTONUMERO": a wrong letter ('ASIENTONUNERO0'), or a
+    # missing one when the column crop clips the left edge ('SIENTOMUMERO0'),
+    # which shifts everything and so rules out a fixed offset. The cut that
+    # matches the word best wins; the longest one wins ties, so the word's own
+    # final 'O' is not taken for a zero when the digit was dropped.
+    cuts = [cut for cut in range(12, 17) if cut <= len(c)]
+    score, cut = max(((similar(c[:cut], "ASIENTONUMERO"), cut) for cut in cuts), default=(0.0, 0))
+    if score >= 0.84:
+        return _digits(c[cut : cut + 3])
     return None
 
 
@@ -126,6 +132,11 @@ def _parse_ci(norm: str) -> Optional[Dict[str, Optional[str]]]:
     return {"ci": re.sub(r"\s+", "", m.group(1)), "expedido": m.group(2)}
 
 
+# The married-name particle, printed in lower case at the end of an otherwise
+# all-caps typed name: "RONDAL BORDA MARGARITA de", "SILES vda. de".
+_NAME_PARTICLE = re.compile(r"(?:\s+V(?:IU)?D[AO]?\.?)?\s+DE(?:\s+LA)?\.?$", re.IGNORECASE)
+
+
 def _is_name(norm: str, raw: str) -> bool:
     if any(ch.isdigit() for ch in norm) or ":" in raw:
         return False
@@ -134,8 +145,10 @@ def _is_name(norm: str, raw: str) -> bool:
     letters = re.sub(r"[^A-Z]", "", norm)
     if len(letters) < 6:
         return False
-    # Typed names are all caps; lower-case letters mean a descriptive line.
-    return sum(1 for ch in raw if ch.islower()) <= 1
+    # Typed names are all caps; lower-case letters mean a descriptive line. The
+    # married-name particle at the end is the one exception -- without it every
+    # "NOMBRE APELLIDO de" on the form was dropped.
+    return sum(1 for ch in _NAME_PARTICLE.sub("", raw.strip()) if ch.islower()) <= 1
 
 
 def _presentation(norm: str) -> Dict[str, Optional[str]]:

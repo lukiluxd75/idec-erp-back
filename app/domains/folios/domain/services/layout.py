@@ -96,7 +96,10 @@ def transform_blocks(blocks: Sequence[OcrBlock], matrix) -> List[OcrBlock]:
     return out
 
 
-_PAGE_RE = re.compile(r"PAG(\d{1,2})DE(\d{1,2})")
+# 'Pag. 1 de 2'. The footer prints small and the OCR mangles the two letters that
+# carry no information ('Pag 1 de 4' -> 'Paq1Je4', 'Pag 2 de 4' -> 'Pag2dn4'), so
+# they are matched loosely.
+_PAGE_RE = re.compile(r"P[A4][GQ96](?:INA)?(\d{1,2})[DJO0][EFN](\d{1,2})")
 
 
 def find_page_number(blocks: Sequence[OcrBlock]) -> Tuple[Optional[int], Optional[int]]:
@@ -176,21 +179,39 @@ def plan_regions(blocks: Sequence[OcrBlock], vertical_lines: Sequence[float], wi
             right_a = a.x1 + (a.x0 - left) * 0.9
             if b is not None:
                 right_a = min(right_a, b.x0 - line_h)
+    # The PROPORCIÓN column's own title, when it is printed on the titles row to
+    # the right of column A. Kept for the fallback below and for title_bottom.
+    proportion_title = find_containing(blocks, "PROPOR") or find_containing(blocks, "CION", min_ratio=1.0)
+    if proportion_title is not None and a is not None and (
+        abs(proportion_title.cy - a.cy) >= 2 * line_h or proportion_title.x0 <= a.x1
+    ):
+        proportion_title = None
+
     if right_a is not None and prop_right is not None:
         layout.proportion_range = (right_a, prop_right)
+    elif proportion_title is not None:
+        # No ruling line found around it -- a skewed or low-contrast photo, seen
+        # on the second page of a real folio. The column sits under its printed
+        # title, and that alone tells a '1/2' from a name. Bounded by the title
+        # and not by the estimated end of column A: a value that lands in this
+        # range without looking like a proportion is dropped, so a bound that is
+        # too far left would silently lose column A text.
+        margin = line_h * 0.4
+        layout.proportion_range = (proportion_title.x0 - margin, proportion_title.x1 + margin)
 
     # Vertical extent of the columns: below the titles, above "REGISTRADOR:"
     # (bottom band with signature / page number).
     if a is not None:
         title_bottom = max(x.y1 for x in (a, b) if x is not None)
-        proportion_title = find_containing(blocks, "CION", min_ratio=1.0)  # 2nd line of "PROPOR-CION"
-        if proportion_title is not None and abs(proportion_title.cy - a.cy) < 2 * line_h:
+        if proportion_title is not None:
             title_bottom = max(title_bottom, proportion_title.y1)
         footer = find_label(blocks, "REGISTRADOR")
         bottom = footer.y0 if footer is not None and footer.y0 > title_bottom else height
         # The crop includes the narrow PROPORCION column: its '1/1' are as small
         # as column A's text and the full-page OCR misses them too.
         crop_right = prop_right if prop_right is not None else right_a
+        if layout.proportion_range is not None:
+            crop_right = max(crop_right, layout.proportion_range[1])
         layout.titularidad_rect = _clamp_rect(
             left - line_h * 0.2, title_bottom + line_h * 0.3, crop_right - line_h * 0.1, bottom - line_h * 0.2,
             width, height,
