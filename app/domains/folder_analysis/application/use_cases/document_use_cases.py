@@ -1,6 +1,6 @@
 import logging
 from dataclasses import replace
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Mapping, Optional, Set
 
 from app.core.errors.exceptions import DomainException
 from app.domains.folder_analysis.application.document_synchronizer import DocumentSynchronizer
@@ -24,12 +24,15 @@ from app.domains.folder_analysis.domain.ports import (
     CaptureRepositoryPort,
     DocumentRepositoryPort,
     ExtractionQueuePort,
-    FolioExtractionPort,
+    ServerReadingPort,
 )
 
 logger = logging.getLogger("uvicorn.error")
 
 MAX_PAGES = 10
+
+# How the lanes read on the server name themselves in a message to the architect.
+DOC_LABEL = {DocumentType.FOLIO: "el folio", DocumentType.TAX_RECEIPT: "el comprobante de impuestos"}
 
 
 def _require_document(repository: DocumentRepositoryPort, document_id: str, user_sub: str) -> FolderDocument:
@@ -112,8 +115,8 @@ class DeleteDocumentUseCase:
 
 class AnalyzeDocumentUseCase:
     """Sends every page to the PCs with the extraction profile of its type --
-    except a folio, which is read by the folios pipeline (OCR + rules) off the
-    request thread, so it queues no job at all."""
+    except the types read here on the server (a folio, a tax receipt), which the
+    OCR + rules pipelines read off the request thread and queue no job at all."""
 
     def __init__(
         self, documents: DocumentRepositoryPort, captures: CaptureRepositoryPort, queue: ExtractionQueuePort
@@ -131,9 +134,9 @@ class AnalyzeDocumentUseCase:
                 "El documento ya fue revisado. Si lo vuelve a analizar se perderán sus correcciones; confirme para continuar."
             )
 
-        if document.doc_type == DocumentType.FOLIO:
-            # No job ids: RunFolioExtractionUseCase does the reading and writes
-            # the result. The synchronizer skips pages without a job id.
+        if document.doc_type in DocumentType.SERVER_READ:
+            # No job ids: RunServerReadingUseCase does the reading and writes the
+            # result. The synchronizer skips pages without a job id.
             self._documents.mark_submitted(document_id, {})
             return _require_document(self._documents, document_id, user_sub)
 
@@ -156,8 +159,9 @@ class AnalyzeDocumentUseCase:
         return _require_document(self._documents, document_id, user_sub)
 
 
-class RunFolioExtractionUseCase:
-    """Reads a folio document with the folios pipeline and stores the result.
+class RunServerReadingUseCase:
+    """Reads a document whose type is read here on the server (a folio with the
+    folios pipeline, a tax receipt with the FUR rules) and stores the result.
     Runs in a BackgroundTask after `analyze` returned, so -- like the folios
     domain's own pipeline -- nothing is allowed to escape: every failure is
     stored on the document, where the architect can see it and retry."""
@@ -166,18 +170,25 @@ class RunFolioExtractionUseCase:
         self,
         documents: DocumentRepositoryPort,
         captures: CaptureRepositoryPort,
-        extractor: FolioExtractionPort,
+        extractors: Mapping[str, ServerReadingPort],
     ):
         self._documents = documents
         self._captures = captures
-        self._extractor = extractor
+        self._extractors = extractors
 
     def execute(self, document_id: str, user_sub: str) -> None:
         document = self._documents.get(document_id, user_sub)
         # Gone, or the architect already changed its pages: this run is stale.
         if document is None or document.status not in DocumentStatus.IN_PROGRESS:
             return
+        extractor = self._extractors.get(document.doc_type)
+        if extractor is None:
+            logger.error(
+                "Folder analysis: %s %s no tiene lector en el servidor", document.doc_type, document_id
+            )
+            return
 
+        label = DOC_LABEL.get(document.doc_type, "el documento")
         pages = sorted(document.pages, key=lambda p: p.page_index)
         try:
             images = []
@@ -190,20 +201,27 @@ class RunFolioExtractionUseCase:
                 images.append(image[0])
 
             self._save(document_id, pages, PageStatus.PROCESSING, DocumentStatus.PROCESSING, None, None)
-            data, observations = self._extractor.extract(images, on_page=self._page_done(document_id, pages))
+            data, observations = extractor.extract(images, on_page=self._page_done(document_id, pages))
         except DomainException as exc:
-            logger.warning("Folder analysis: folio %s no se pudo leer: %s", document_id, exc.message)
+            logger.warning(
+                "Folder analysis: %s %s no se pudo leer: %s", document.doc_type, document_id, exc.message
+            )
             self._save(document_id, pages, PageStatus.FAILED, DocumentStatus.FAILED, None, exc.message)
             return
         except Exception:
-            logger.exception("Folder analysis: error inesperado leyendo el folio %s", document_id)
+            logger.exception(
+                "Folder analysis: error inesperado leyendo %s %s", document.doc_type, document_id
+            )
             self._save(
                 document_id, pages, PageStatus.FAILED, DocumentStatus.FAILED, None,
-                "Error inesperado al leer el folio. Vuelva a analizarlo.",
+                f"Error inesperado al leer {label}. Vuelva a analizarlo.",
             )
             return
 
-        logger.info("Folder analysis: folio %s leído con %d observación(es)", document_id, len(observations))
+        logger.info(
+            "Folder analysis: %s %s leído con %d observación(es)",
+            document.doc_type, document_id, len(observations),
+        )
         self._save(document_id, pages, PageStatus.DONE, DocumentStatus.EXTRACTED, data, None)
 
     def _page_done(self, document_id: str, pages: List[DocumentPage]) -> Callable[[int], None]:
@@ -226,7 +244,7 @@ class RunFolioExtractionUseCase:
                     None,
                 )
             except Exception:
-                logger.exception("Folder analysis: no se pudo guardar el avance del folio %s", document_id)
+                logger.exception("Folder analysis: no se pudo guardar el avance de %s", document_id)
 
         return done
 
@@ -239,8 +257,8 @@ class RunFolioExtractionUseCase:
         data: Optional[Dict[str, Any]],
         error: Optional[str],
     ) -> None:
-        """One result for the whole folio (the pages are read together), so the
-        pages only carry the status."""
+        """One result for the whole document (its pages are read together), so
+        the pages only carry the status."""
         self._documents.save_progress(
             document_id,
             [replace(page, status=page_status, error=error) for page in pages],

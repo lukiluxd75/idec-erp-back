@@ -9,6 +9,10 @@ class DocumentType:
     PLAN = "plan"
 
     ALL = (FOLIO, TAX_RECEIPT, PLAN)
+    # Read here on the server with OCR + the form's rules (seconds), instead of
+    # being queued to the architects' PCs for the vision model (minutes). These
+    # documents carry no job id: RunServerReadingUseCase writes their result.
+    SERVER_READ = (FOLIO, TAX_RECEIPT)
 
 
 class DocumentStatus:

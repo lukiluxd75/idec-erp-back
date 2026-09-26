@@ -21,7 +21,7 @@ from app.domains.folder_analysis.presentation.deps import (
     get_list_documents_use_case,
     get_review_document_use_case,
     get_set_pages_use_case,
-    run_folio_extraction,
+    run_server_reading,
 )
 from app.domains.folder_analysis.presentation.schemas.folder_analysis_schema import (
     AnalyzeRequest,
@@ -97,11 +97,11 @@ def analyze_document(
 ):
     """Starts the analysis. Returns right away; poll GET.
 
-    A folio is read here on the server (OCR + rules, seconds); the other types
-    go to the architects' PCs through the digitization queue."""
+    A folio and a tax receipt are read here on the server (OCR + rules, seconds);
+    a plan goes to the architects' PCs through the digitization queue."""
     document = use_case.execute(document_id, user.sub, body.force)
-    if document.doc_type == DocumentType.FOLIO:
-        background.add_task(run_folio_extraction, document_id, user.sub)
+    if document.doc_type in DocumentType.SERVER_READ:
+        background.add_task(run_server_reading, document_id, user.sub)
     return DocumentDetail.from_entity(document)
 
 

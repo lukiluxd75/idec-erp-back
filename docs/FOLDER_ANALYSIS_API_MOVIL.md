@@ -84,9 +84,11 @@ Todas las respuestas de error tienen la forma `{"detail": "<mensaje en español 
 1. La foto aparece en la bandeja del escritorio. La web consulta cada pocos segundos.
 2. El arquitecto la arrastra al apartado **Folio**, **Impuesto** o **Plano** y
    presiona **Analizar**.
-3. El backend reparte las páginas entre las PCs con GPU de los arquitectos, que
-   extraen los datos según el tipo de documento.
-4. El arquitecto revisa y corrige los datos, y los guarda como JSON.
+3. El folio y el impuesto se leen en el servidor con OCR y reglas: tardan segundos
+   y la pantalla muestra el avance foto por foto. El plano se reparte entre las PCs
+   con GPU de los arquitectos, que extraen los datos con el modelo de visión.
+4. El arquitecto revisa y corrige los datos, y los guarda como JSON. La lectura
+   marca los campos que leyó con poca confianza, para que los compare con la foto.
 
 ## Recomendaciones para las fotos
 
