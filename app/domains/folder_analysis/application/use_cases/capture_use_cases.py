@@ -1,6 +1,8 @@
-from typing import List, Tuple
+import threading
+from collections import OrderedDict
+from typing import List, Optional, Tuple
 
-from app.domains.folder_analysis.domain.entities import Capture, CaptureStatus
+from app.domains.folder_analysis.domain.entities import Capture, CaptureStatus, CaptureVariant
 from app.domains.folder_analysis.domain.exceptions import (
     CaptureNotAvailableException,
     CaptureNotFoundException,
@@ -10,6 +12,41 @@ from app.domains.folder_analysis.domain.ports import CaptureRepositoryPort, Thum
 
 MAX_FILES_PER_UPLOAD = 10
 MAX_FILE_BYTES = 15 * 1024 * 1024
+
+# Web-sized copies of the last photos looked at. A photo never changes once it is
+# uploaded, so a copy made for one architect is the copy for everyone; without it
+# every page turn in the review screen pays the resize again.
+PREVIEW_CACHE_SIZE = 48
+
+
+class _PreviewCache:
+    """Small LRU of finished previews, shared by every request of the process."""
+
+    def __init__(self, size: int = PREVIEW_CACHE_SIZE):
+        self._size = size
+        self._items: "OrderedDict[str, bytes]" = OrderedDict()
+        self._lock = threading.Lock()
+
+    def get(self, key: str) -> Optional[bytes]:
+        with self._lock:
+            if key not in self._items:
+                return None
+            self._items.move_to_end(key)
+            return self._items[key]
+
+    def put(self, key: str, content: bytes) -> None:
+        with self._lock:
+            self._items[key] = content
+            self._items.move_to_end(key)
+            while len(self._items) > self._size:
+                self._items.popitem(last=False)
+
+    def drop(self, key: str) -> None:
+        with self._lock:
+            self._items.pop(key, None)
+
+
+_previews = _PreviewCache()
 
 
 class UploadCapturesUseCase:
@@ -56,14 +93,34 @@ class ListInboxUseCase:
 
 
 class GetCaptureImageUseCase:
-    def __init__(self, repository: CaptureRepositoryPort):
-        self._repository = repository
+    """One of the three copies of a photo (see CaptureVariant). The preview is
+    made from the original the first time it is asked for and kept in memory
+    afterwards; the thumbnail was already made when the photo was uploaded."""
 
-    def execute(self, capture_id: str, user_sub: str, thumbnail: bool) -> Tuple[bytes, str]:
-        image = self._repository.get_image(capture_id, user_sub, thumbnail)
+    def __init__(self, repository: CaptureRepositoryPort, thumbnails: ThumbnailPort):
+        self._repository = repository
+        self._thumbnails = thumbnails
+
+    def execute(self, capture_id: str, user_sub: str, variant: str = CaptureVariant.PREVIEW) -> Tuple[bytes, str]:
+        if variant == CaptureVariant.PREVIEW:
+            cached = _previews.get(capture_id)
+            if cached is not None:
+                return cached, "image/jpeg"
+
+        image = self._repository.get_image(capture_id, user_sub, variant == CaptureVariant.THUMBNAIL)
         if image is None:
             raise CaptureNotFoundException()
-        return image
+        if variant != CaptureVariant.PREVIEW:
+            return image
+
+        try:
+            preview = self._thumbnails.preview(image[0])
+        except InvalidCaptureException:
+            # Unreadable here but readable when it was uploaded: send the original
+            # rather than leaving the architect without the photo.
+            return image
+        _previews.put(capture_id, preview)
+        return preview, "image/jpeg"
 
 
 class DeleteCaptureUseCase:
@@ -79,3 +136,4 @@ class DeleteCaptureUseCase:
                 "La foto forma parte de un documento. Quítela del documento antes de eliminarla."
             )
         self._repository.delete(capture_id, user_sub)
+        _previews.drop(capture_id)
