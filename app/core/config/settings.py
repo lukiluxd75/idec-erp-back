@@ -103,6 +103,22 @@ class Settings(BaseSettings):
     FOLIOS_LLM_MODEL: str = "gemma4:e4b"
     FOLIOS_LLM_TIMEOUT_SECONDS: float = 120.0
 
+    # Folder analysis, tax receipt lane - read on this server like the folio one:
+    # the GAMC OCR above (lent by the folios contract) plus one Ollama call for
+    # the fields the FUR rules could not fill. The model is the vision one the
+    # architects' PCs already keep loaded, asked here over text instead of over
+    # the photo; TAX_RECEIPT_OLLAMA_URL is only the fallback when no PC has it.
+    TAX_RECEIPT_CONFIDENCE_THRESHOLD: float = 0.85
+    TAX_RECEIPT_OLLAMA_URL: str = ""
+    # Empty turns the pass off and leaves the lane on its rules alone.
+    TAX_RECEIPT_LLM_MODEL: str = "qwen3-vl:4b"
+    # Short on purpose: this lane answers in seconds, and the pass is optional --
+    # a model that spirals instead of answering has to be dropped, not waited for.
+    TAX_RECEIPT_LLM_TIMEOUT_SECONDS: float = 45.0
+    # Ceiling on the answer, so a model that keeps writing cannot hold an
+    # architect's PC either. A JSON with every field of the form fits well under it.
+    TAX_RECEIPT_LLM_MAX_TOKENS: int = 1024
+
     @computed_field
     @property
     def SQLALCHEMY_DATABASE_URI(self) -> str:

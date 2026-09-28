@@ -14,6 +14,7 @@ from app.domains.folder_analysis.application.use_cases import (
     DeleteDocumentUseCase,
     GetDocumentUseCase,
     ReviewDocumentUseCase,
+    RunServerReadingUseCase,
     SetDocumentPagesUseCase,
     UploadCapturesUseCase,
 )
@@ -31,15 +32,32 @@ from app.domains.folder_analysis.domain.exceptions import (
     DocumentBusyException,
     DocumentNotFoundException,
     InvalidCaptureException,
+    TaxStructurerUnavailableException,
 )
 from app.domains.folder_analysis.domain.extraction_profiles import PROFILES
 from app.domains.folder_analysis.domain.ports import (
     CaptureRepositoryPort,
     DocumentRepositoryPort,
     ExtractionQueuePort,
+    ServerReadingPort,
+    TaxStructurerPort,
 )
+from app.domains.folios.contracts import PageText, TextBlock
+from app.domains.folios.domain.exceptions import OcrUnavailableException
 from app.domains.folder_analysis.domain.services.document_progress import document_status
+from app.domains.folder_analysis.domain.services.folio_result_mapper import to_folio_template
+from app.domains.folder_analysis.domain.services.fur_parser import (
+    low_confidence_fields,
+    missing_fields,
+    parse_fur,
+)
 from app.domains.folder_analysis.domain.services.result_merger import conform, merge_pages
+from app.domains.folder_analysis.domain.services.tax_result_mapper import to_tax_receipt_template
+from app.domains.folder_analysis.infrastructure.ocr_tax_extractor import OcrTaxExtractor
+from app.domains.folder_analysis.infrastructure.ollama_fur_structurer import (
+    OllamaFurStructurer,
+    _json_object,
+)
 from app.domains.folder_analysis.infrastructure.opencv_thumbnail import OpenCvThumbnail
 
 NOW = datetime.now(timezone.utc)
@@ -108,7 +126,7 @@ class FakeDocuments(DocumentRepositoryPort):
 
     def mark_submitted(self, document_id, job_ids_by_page):
         doc = self.rows[document_id]
-        pages = [replace(p, status=PageStatus.QUEUED, job_id=job_ids_by_page[p.page_index], result=None)
+        pages = [replace(p, status=PageStatus.QUEUED, job_id=job_ids_by_page.get(p.page_index), result=None)
                  for p in doc.pages]
         self.rows[document_id] = replace(doc, pages=pages, status=DocumentStatus.QUEUED,
                                          extracted_data=None, reviewed_data=None)
@@ -135,6 +153,27 @@ class FakeQueue(ExtractionQueuePort):
 
     def status(self, job_ids):
         return {j: self.jobs[j] for j in job_ids if j in self.jobs}
+
+
+class FakeExtractor(ServerReadingPort):
+    """Stands in for whichever lane is read on the server (folio, tax receipt)."""
+
+    def __init__(self, data=None, error=None, on_each_page=None):
+        self.data, self.error, self.calls = data or {}, error, []
+        # Runs right after the use case is told a page is finished, so a test can
+        # look at the document mid-reading.
+        self._on_each_page = on_each_page
+
+    def extract(self, pages, on_page=None):
+        self.calls.append(list(pages))
+        if self.error is not None:
+            raise self.error
+        for index in range(len(pages)):
+            if on_page is not None:
+                on_page(index)
+            if self._on_each_page is not None:
+                self._on_each_page(index)
+        return self.data, ["una observación"]
 
 
 def _png() -> bytes:
@@ -210,6 +249,146 @@ class TestResultMerger(unittest.TestCase):
         self.assertEqual(len(merged["pages"]), 2)
 
 
+class TestFolioResultMapper(unittest.TestCase):
+    """Shape the folios pipeline answers with, taken from a real Cochabamba folio."""
+
+    EXTRACTED = {
+        "matricula": {"numero": "3.01.1.99.0022305", "estado": "VIGENTE", "zona": "CERCADO,PRIMERA,CIUDAD CBBA"},
+        "catastro": "13103024000000000",
+        "tipo_inmueble": "Lote de Terreno",
+        "ubicacion": "ZONA LA CUADRAS,AVENIDA 9 DE ABRIL",
+        "designacion_s_tit": "LOTE S/N,DISTRITO 11",
+        "superficie": {"valor": 205.22, "unidad": "m2", "texto_original": "205.22Metros2"},
+        "medidas": "NSC",
+        "linderos": {"norte": "LOTE N 106", "sud": "AVENIDA 9 DE ABRIL", "este": "LOTE N 107", "oeste": "M. SILES"},
+        "propiedad": "INDEFINIDA",
+        "documento": {"fecha_emision": "01/12/2025", "paginas_declaradas": 4, "paginas_recibidas": 1},
+        "campos_baja_confianza": ["titularidad_dominio.asientos.0"],
+        "observaciones": ["Faltan páginas: el folio tiene 4 y se escanearon 1."],
+        "titularidad_dominio": {
+            "antecedente_dominial": "L:PCPA A:1998 P:0974",
+            "ultimo_asiento": 2,
+            "titulares_actuales": [{"nombre": "RONDAL ARIAS MIGUEL"}],
+            "lineas_sin_asiento": ["sientoMumero:0"],
+            "asientos": [
+                {
+                    "numero": 1,
+                    "personas": [
+                        {"nombre": "RONDAL ARIAS MIGUEL", "rol": "titular", "estado_civil": None,
+                         "ci": "4482143", "expedido": "CBA", "proporcion": "1/2"},
+                        {"nombre": "RONDAL BORDA MARGARITA", "rol": "titular", "estado_civil": "cas.",
+                         "ci": None, "expedido": None, "proporcion": "1/2"},
+                    ],
+                    "acto": "Compra Venta",
+                    "documento": {"descripcion": "Escrit. Pub. Nro. 127 de 03/04/1998", "fecha": "03/04/1998"},
+                    "autoridad": "Not. Pub. JORGE CAMPOS CAMPOS",
+                    "presentacion": {"numero": "14910", "fecha": "09/04/1998", "hora": "09:14:00"},
+                    "confianza": 0.83,
+                },
+                # Cut off at the bottom edge of the photo: nothing but its number.
+                {"numero": 2, "personas": [], "acto": None, "documento": None,
+                 "autoridad": None, "presentacion": None, "confianza": None},
+            ],
+        },
+    }
+    FILL_LOG = {"fotos": [{"pagina_impresa": 1, "total_impreso": 4}]}
+
+    def setUp(self):
+        self.data = to_folio_template(self.EXTRACTED, self.FILL_LOG)
+
+    def test_header_fields_use_the_lane_keys(self):
+        self.assertEqual(self.data["registration_number"], "3.01.1.99.0022305")
+        self.assertEqual(self.data["administrative_location"], "CERCADO,PRIMERA,CIUDAD CBBA")
+        self.assertEqual(self.data["cadastre"], "13103024000000000")
+        self.assertEqual(self.data["property_type"], "Lote de Terreno")
+        self.assertEqual(self.data["prior_title"], "L:PCPA A:1998 P:0974")
+        self.assertEqual(self.data["date"], "01/12/2025")
+        self.assertEqual(self.data["boundaries"]["west"], "M. SILES")
+
+    def test_surface_keeps_the_number_and_its_unit(self):
+        self.assertEqual(self.data["surface"], "205.22 m2")
+
+    def test_surface_falls_back_to_the_ocr_text(self):
+        extracted = {**self.EXTRACTED, "superficie": {"valor": None, "unidad": None, "texto_original": "ilegible"}}
+        self.assertEqual(to_folio_template(extracted)["surface"], "ilegible")
+
+    def test_entries_and_owners(self):
+        entry = self.data["ownership_entries"][0]
+        self.assertEqual(entry["entry_number"], "1")
+        self.assertEqual([o["name"] for o in entry["owners"]], ["RONDAL ARIAS MIGUEL", "RONDAL BORDA MARGARITA"])
+        self.assertEqual(entry["owners"][0]["id_number"], "4482143")
+        self.assertEqual(entry["owners"][0]["id_issued_at"], "CBA")
+        self.assertEqual(entry["owners"][1]["marital_status"], "cas.")
+        self.assertEqual(entry["share"], "1/2")
+        self.assertEqual(entry["document"], "Escrit. Pub. Nro. 127 de 03/04/1998")
+        self.assertEqual(entry["filing"], "No. 14910 de 09/04/1998 Hrs. 09:14:00")
+
+    def test_an_entry_with_nothing_but_its_number_is_dropped(self):
+        self.assertEqual([e["entry_number"] for e in self.data["ownership_entries"]], ["1"])
+
+    def test_differing_shares_are_kept_together(self):
+        people = [{"proporcion": "1/2"}, {"proporcion": "1/4"}, {"proporcion": "1/2"}]
+        extracted = {"titularidad_dominio": {"asientos": [{"numero": 3, "personas": people, "acto": "Compra"}]}}
+        self.assertEqual(to_folio_template(extracted)["ownership_entries"][0]["share"], "1/2 y 1/4")
+
+    def test_what_the_rules_saw_is_kept_for_the_json_tab(self):
+        reading = self.data["reading"]
+        self.assertEqual(reading["source"], "ocr_rules")
+        self.assertEqual(reading["unassigned_lines"], ["sientoMumero:0"])
+        # Translated to the keys the review form renders, not the folios ones.
+        self.assertEqual(reading["low_confidence_fields"], ["ownership_entries.0"])
+        self.assertEqual(self.data["pages_read"], [{"number": "1", "total": "4"}])
+
+    def test_low_confidence_keys_are_translated(self):
+        extracted = {
+            **self.EXTRACTED,
+            "campos_baja_confianza": ["matricula.numero", "linderos.norte", "superficie", "no_existe"],
+        }
+        self.assertEqual(
+            to_folio_template(extracted)["reading"]["low_confidence_fields"],
+            ["registration_number", "boundaries.north", "surface"],
+        )
+
+    def test_asiento_positions_shift_when_an_empty_one_is_dropped(self):
+        """The second asiento is header-only and disappears, so the third one is
+        flagged at the position it actually has in the form."""
+        person = [{"nombre": "ROJAS VARGAS JUAN", "rol": "titular", "proporcion": "1/1"}]
+        asientos = [
+            {"numero": 1, "personas": person, "acto": "Compra Venta"},
+            {"numero": 2, "personas": [], "acto": None},
+            {"numero": 3, "personas": person, "acto": "Compra Venta"},
+        ]
+        extracted = {
+            "titularidad_dominio": {"asientos": asientos},
+            "campos_baja_confianza": ["titularidad_dominio.asientos.2", "titularidad_dominio.asientos.1"],
+        }
+        result = to_folio_template(extracted)
+        self.assertEqual([e["entry_number"] for e in result["ownership_entries"]], ["1", "3"])
+        # asiento index 2 -> position 1; index 1 was dropped, so it is not flagged.
+        self.assertEqual(result["reading"]["low_confidence_fields"], ["ownership_entries.1"])
+
+    def test_the_raw_key_list_is_not_repeated_at_the_architect(self):
+        """The form marks those fields one by one, so the observation that spells
+        out the internal keys is dropped."""
+        extracted = {
+            **self.EXTRACTED,
+            "observaciones": [
+                "Faltan páginas: el folio tiene 4 y se escanearon 1.",
+                "Campos con baja confianza de lectura: revisar titularidad_dominio.asientos.0.",
+            ],
+        }
+        self.assertEqual(
+            to_folio_template(extracted)["reading"]["observations"],
+            ["Faltan páginas: el folio tiene 4 y se escanearon 1."],
+        )
+
+    def test_an_empty_extraction_still_has_the_shape_the_form_needs(self):
+        data = to_folio_template({})
+        self.assertIsNone(data["registration_number"])
+        self.assertEqual(data["ownership_entries"], [])
+        self.assertEqual(set(data["boundaries"]), {"north", "south", "east", "west"})
+
+
 class TestDocumentProgress(unittest.TestCase):
     def test_failed_page_waits_for_the_others(self):
         pages = [DocumentPage("a", 0, PageStatus.FAILED, error="x"), DocumentPage("b", 1, PageStatus.PROCESSING)]
@@ -236,6 +415,12 @@ class TestFolderAnalysisFlow(unittest.TestCase):
         return CreateDocumentUseCase(self.documents, self.captures).execute(
             doc_type, ids or [p.id for p in self.photos], "arq-1")
 
+    def _read(self, document, extractor):
+        """Runs the server-side reading of `document` with that extractor."""
+        RunServerReadingUseCase(
+            self.documents, self.captures, {document.doc_type: extractor}
+        ).execute(document.id, "arq-1")
+
     def test_upload_rejects_non_images_and_normalizes_mime(self):
         with self.assertRaises(InvalidCaptureException):
             UploadCapturesUseCase(self.captures, OpenCvThumbnail()).execute([(b"nope", "image/jpeg", "x")], "arq-1")
@@ -256,30 +441,32 @@ class TestFolderAnalysisFlow(unittest.TestCase):
             GetDocumentUseCase(self.documents, sync).execute(doc.id, "someone-else")
 
     def test_full_cycle_analyze_sync_review(self):
-        doc = self._create()
+        """The queue path, end to end. On a plan: it is the type that still goes
+        to the architects' PCs (a folio and a tax receipt are read here)."""
+        doc = self._create("plan")
         doc = AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(doc.id, "arq-1")
         self.assertEqual(doc.status, DocumentStatus.QUEUED)
         self.assertEqual(len(self.queue.submitted), 2)
-        self.assertIn("Folio Real", self.queue.submitted[0]["instructions"])
 
         with self.assertRaises(DocumentBusyException):
             AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(doc.id, "arq-1")
 
         get = GetDocumentUseCase(self.documents, DocumentSynchronizer(self.documents, self.queue))
-        self.queue.jobs["job-1"] = QueuedJob("done", FOLIO_PAGE_1)
+        self.queue.jobs["job-1"] = QueuedJob("done", {"document_type": "Plano", "full_text": "A"})
         self.queue.jobs["job-2"] = QueuedJob("processing")
         self.assertEqual(get.execute(doc.id, "arq-1").status, DocumentStatus.PROCESSING)
 
-        self.queue.jobs["job-2"] = QueuedJob("done", FOLIO_PAGE_2)
+        self.queue.jobs["job-2"] = QueuedJob("done", {"full_text": "B"})
         doc = get.execute(doc.id, "arq-1")
         self.assertEqual(doc.status, DocumentStatus.EXTRACTED)
-        self.assertEqual(len(doc.extracted_data["ownership_entries"]), 3)
+        self.assertEqual(doc.extracted_data["document_type"], "Plano")
+        self.assertEqual(doc.extracted_data["full_text"], "A\n\nB")
 
-        corrected = {**doc.extracted_data, "registration_status": "VIGENTE (revisado)"}
+        corrected = {**doc.extracted_data, "document_type": "Plano (revisado)"}
         doc = ReviewDocumentUseCase(self.documents).execute(doc.id, "arq-1", corrected)
         self.assertEqual(doc.status, DocumentStatus.REVIEWED)
-        self.assertEqual(doc.current_data["registration_status"], "VIGENTE (revisado)")
-        self.assertEqual(doc.extracted_data["registration_status"], "VIGENTE")
+        self.assertEqual(doc.current_data["document_type"], "Plano (revisado)")
+        self.assertEqual(doc.extracted_data["document_type"], "Plano")
 
         with self.assertRaises(DocumentBusyException):
             AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(doc.id, "arq-1")
@@ -291,6 +478,162 @@ class TestFolderAnalysisFlow(unittest.TestCase):
         doc = self._create("plan", [self.photos[0].id])
         AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(doc.id, "arq-1")
         self.assertIsNone(self.queue.submitted[0]["instructions"])
+
+    def test_folio_is_read_on_the_server_and_queues_no_job(self):
+        doc = self._create("folio")
+        doc = AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(doc.id, "arq-1")
+        self.assertEqual(doc.status, DocumentStatus.QUEUED)
+        self.assertEqual(self.queue.submitted, [])
+        self.assertTrue(all(p.job_id is None for p in doc.pages))
+
+        # A document with no job ids must not confuse the queue synchronizer.
+        sync = DocumentSynchronizer(self.documents, self.queue)
+        self.assertEqual(sync.refresh([doc])[0].status, DocumentStatus.QUEUED)
+
+        extractor = FakeExtractor({"registration_number": "3.01.1.99.0022305"})
+        self._read(doc, extractor)
+
+        doc = self.documents.get(doc.id, "arq-1")
+        self.assertEqual(doc.status, DocumentStatus.EXTRACTED)
+        self.assertEqual(doc.extracted_data["registration_number"], "3.01.1.99.0022305")
+        self.assertEqual([p.status for p in doc.pages], [PageStatus.DONE, PageStatus.DONE])
+        # Both photos went in one call, in page order.
+        self.assertEqual(len(extractor.calls), 1)
+        self.assertEqual(len(extractor.calls[0]), 2)
+
+    def test_tax_receipt_is_read_on_the_server_and_queues_no_job(self):
+        """What changed for this lane: it no longer waits for a PC to pick a job
+        up -- it is read here, like the folio."""
+        doc = self._create("tax_receipt", [self.photos[0].id])
+        doc = AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(doc.id, "arq-1")
+        self.assertEqual(doc.status, DocumentStatus.QUEUED)
+        self.assertEqual(self.queue.submitted, [])
+        self.assertTrue(all(p.job_id is None for p in doc.pages))
+
+        self._read(doc, FakeExtractor({"receipt_number": "59122836"}))
+
+        doc = self.documents.get(doc.id, "arq-1")
+        self.assertEqual(doc.status, DocumentStatus.EXTRACTED)
+        self.assertEqual(doc.extracted_data["receipt_number"], "59122836")
+        self.assertEqual([p.status for p in doc.pages], [PageStatus.DONE])
+
+    def test_each_lane_is_read_by_its_own_extractor(self):
+        folio = self._create("folio", [self.photos[0].id])
+        receipt = self._create("tax_receipt", [self.photos[1].id])
+        for document in (folio, receipt):
+            AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(document.id, "arq-1")
+
+        readers = {
+            "folio": FakeExtractor({"registration_number": "3.01.1.99.0022305"}),
+            "tax_receipt": FakeExtractor({"receipt_number": "59122836"}),
+        }
+        for document in (folio, receipt):
+            RunServerReadingUseCase(self.documents, self.captures, readers).execute(document.id, "arq-1")
+
+        self.assertEqual(len(readers["folio"].calls), 1)
+        self.assertEqual(len(readers["tax_receipt"].calls), 1)
+        self.assertEqual(
+            self.documents.get(folio.id, "arq-1").extracted_data["registration_number"], "3.01.1.99.0022305"
+        )
+        self.assertEqual(self.documents.get(receipt.id, "arq-1").extracted_data["receipt_number"], "59122836")
+
+    def test_a_type_with_no_reader_is_left_alone_instead_of_failing(self):
+        """Defensive: a lane declared as read on the server but not wired yet must
+        not mark the document failed, which would lose the architect's photos."""
+        doc = self._create("tax_receipt", [self.photos[0].id])
+        AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(doc.id, "arq-1")
+        RunServerReadingUseCase(self.documents, self.captures, {}).execute(doc.id, "arq-1")
+        self.assertEqual(self.documents.get(doc.id, "arq-1").status, DocumentStatus.QUEUED)
+
+    def test_pages_are_marked_as_they_are_read(self):
+        """The screen shows how many photos are left, so each one is stored as
+        soon as it is read instead of all of them at the end."""
+        doc = self._create("folio")
+        AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(doc.id, "arq-1")
+
+        seen = []
+        extractor = FakeExtractor(
+            {"registration_number": "X"},
+            on_each_page=lambda _i: seen.append(
+                [p.status for p in self.documents.get(doc.id, "arq-1").pages]
+            ),
+        )
+        self._read(doc, extractor)
+
+        self.assertEqual(seen, [
+            [PageStatus.DONE, PageStatus.PROCESSING],
+            [PageStatus.DONE, PageStatus.DONE],
+        ])
+        self.assertEqual(self.documents.get(doc.id, "arq-1").status, DocumentStatus.EXTRACTED)
+
+    def test_a_failure_saving_progress_does_not_lose_the_reading(self):
+        doc = self._create("folio")
+        AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(doc.id, "arq-1")
+        original = self.documents.save_progress
+        calls = {"n": 0}
+
+        def flaky(*args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 2:  # the first per-page save
+                raise RuntimeError("database hiccup")
+            return original(*args, **kwargs)
+
+        self.documents.save_progress = flaky
+        self._read(doc, FakeExtractor({"registration_number": "X"}))
+        self.documents.save_progress = original
+
+        doc = self.documents.get(doc.id, "arq-1")
+        self.assertEqual(doc.status, DocumentStatus.EXTRACTED)
+        self.assertEqual(doc.extracted_data["registration_number"], "X")
+
+    def test_the_queue_synchronizer_keeps_its_hands_off_a_folio(self):
+        """With every photo read but the data not assembled yet, the queue's own
+        rule reads the pages as finished and would store an empty result over
+        the reading still running. It only runs at all because another document
+        IS queue-driven, which is the everyday case on this screen."""
+        folio = self._create("folio", [self.photos[0].id])
+        AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(folio.id, "arq-1")
+        plan = self._create("plan", [self.photos[1].id])
+        AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(plan.id, "arq-1")
+
+        mid_reading = replace(
+            self.documents.get(folio.id, "arq-1"),
+            pages=[DocumentPage(p.capture_id, p.page_index, PageStatus.DONE) for p in folio.pages],
+            status=DocumentStatus.PROCESSING,
+        )
+        queued_plan = self.documents.get(plan.id, "arq-1")
+
+        refreshed = DocumentSynchronizer(self.documents, self.queue).refresh([mid_reading, queued_plan])
+
+        self.assertEqual(refreshed[0].status, DocumentStatus.PROCESSING)
+        self.assertIsNone(refreshed[0].extracted_data)
+        # Nothing was written over the reading that is still running.
+        self.assertIsNone(self.documents.get(folio.id, "arq-1").extracted_data)
+
+    def test_folio_reading_failure_is_stored_on_the_document(self):
+        doc = self._create("folio")
+        AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(doc.id, "arq-1")
+        extractor = FakeExtractor(error=OcrUnavailableException("El servicio OCR no respondió a tiempo."))
+        self._read(doc, extractor)
+
+        doc = self.documents.get(doc.id, "arq-1")
+        self.assertEqual(doc.status, DocumentStatus.FAILED)
+        self.assertIn("OCR", doc.error)
+
+    def test_an_unexpected_error_does_not_escape_the_background_task(self):
+        doc = self._create("folio")
+        AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(doc.id, "arq-1")
+        extractor = FakeExtractor(error=RuntimeError("boom"))
+        self._read(doc, extractor)
+        self.assertEqual(self.documents.get(doc.id, "arq-1").status, DocumentStatus.FAILED)
+
+    def test_a_stale_run_does_not_touch_a_document_that_moved_on(self):
+        doc = self._create("folio")
+        extractor = FakeExtractor({"registration_number": "X"})
+        # Never analyzed: the document is still a draft, so this run is stale.
+        self._read(doc, extractor)
+        self.assertEqual(extractor.calls, [])
+        self.assertEqual(self.documents.get(doc.id, "arq-1").status, DocumentStatus.DRAFT)
 
     def test_pages_can_be_changed_and_deleting_returns_photos_to_inbox(self):
         doc = self._create("folio", [self.photos[0].id])
@@ -304,6 +647,310 @@ class TestFolderAnalysisFlow(unittest.TestCase):
         doc = self._create()
         with self.assertRaises(DocumentBusyException):
             ReviewDocumentUseCase(self.documents).execute(doc.id, "arq-1", {"x": 1})
+
+
+# ---------------------------------------------------------------- tax receipt lane
+
+def _fur_blocks(rows, confidence=0.99):
+    """Blocks of a receipt laid out row by row: (text, x0, x1) per row, 20 px
+    apart and 12 px tall, which is what group_lines() needs to see lines."""
+    blocks = []
+    for row, items in enumerate(rows):
+        for text, x0, x1 in items:
+            y0 = 20 * row
+            blocks.append(TextBlock(text, confidence, float(x0), float(y0), float(x1), float(y0 + 12)))
+    return blocks
+
+
+# A FUR as the OCR reads it: values next to their label, and one row of stacked
+# boxes (Nº INMUEBLE / COD. CAT. / CLASE / TIPO PROPIEDAD over their values).
+FUR_ROWS = [
+    [("FUR - COMPROBANTE DE PAGO", 100, 400), ("Nº 59122836", 500, 650)],
+    [("GAM - COCHABAMBA", 100, 300)],
+    [("ENTIDAD RECAUDADORA:", 10, 140), ("BANCO UNION", 150, 260), ("CORRESP.:", 300, 360), ("0012", 365, 400)],
+    [("SUCURSAL:", 10, 70), ("CENTRAL", 80, 140), ("AGENCIA:", 160, 220), ("A-15", 225, 260),
+     ("CAJERO:", 280, 330), ("J. PEREZ", 335, 400), ("FOLIO:", 420, 460), ("7788", 465, 500)],
+    [("FECHA:", 10, 50), ("12/03/2024 10:35", 55, 180)],
+    [("CONTRIBUYENTE:", 10, 100), ("NATURAL CI-4482143 CRUZ COLOMI PATRICIO", 105, 400)],
+    [("INMUEBLES IMPBI 2024 TOTAL", 10, 200)],
+    [("Nº INMUEBLE", 10, 80), ("COD. CAT.", 120, 180), ("CLASE", 220, 260), ("TIPO PROPIEDAD", 300, 390)],
+    [("123456", 10, 60), ("3-01-1-01-0058", 120, 200), ("URBANO", 220, 270), ("PROPIA", 300, 350)],
+    [("UBICACION:", 10, 70), ("URB. ALALAY VALLE HERMOSO, MANZANA Y-1", 75, 400)],
+    [("SUP. TERRENO:", 10, 90), ("280.00 m2", 95, 160),
+     ("SUP. TOTAL CONSTRUCCION:", 200, 350), ("120.50 m2", 355, 420)],
+    [("FACTOR ANTIGUEDAD:", 10, 110), ("0.85", 115, 150), ("UFV:", 200, 230), ("2.68451", 235, 300)],
+    [("BASE IMPONIBLE:", 10, 100), ("350000.00", 105, 180)],
+    [("IMPUESTO DETERMINADO:", 10, 130), ("1050.00", 135, 200)],
+    [("EXENCION:", 10, 70), ("0.00", 75, 110)],
+    [("DESCUENTO 10%:", 10, 100), ("105.00", 105, 160)],
+    [("DESCUENTO APP 5%:", 10, 110), ("52.50", 115, 165)],
+    [("IMPORTE A PAGAR:", 10, 110), ("892.50", 115, 170)],
+    [("MONTO PAGADO:", 10, 100), ("892.50", 105, 160)],
+    [("SALDO GESTION:", 10, 100), ("0.00", 105, 140)],
+]
+
+
+def _rows_with_unreadable_cashier_label():
+    """The same receipt with the CAJERO label unreadable: its value is still on
+    the photo, so the rules leave the field empty and only the LLM pass can
+    place it -- which is exactly what the pass is for."""
+    rows = []
+    for row in FUR_ROWS:
+        if "CAJERO:" in [text for text, _x0, _x1 in row]:
+            rows.append([("SUCURSAL:", 10, 70), ("CENTRAL", 80, 140), ("AGENCIA:", 160, 220), ("A-15", 225, 260),
+                         ("FOLIO:", 420, 460), ("7788", 465, 500)])
+            rows.append([("J. PEREZ", 280, 400)])
+        else:
+            rows.append(row)
+    return rows
+
+
+class TestFurParser(unittest.TestCase):
+    """The rules over the OCR of one receipt: no OCR service and no LLM."""
+
+    def setUp(self):
+        self.reading = parse_fur([_fur_blocks(FUR_ROWS)], 0.85)
+
+    def test_values_printed_next_to_their_label(self):
+        data = self.reading.data
+        self.assertEqual(data["collecting_entity"], "BANCO UNION")
+        self.assertEqual(data["correspondent"], "0012")
+        self.assertEqual(data["branch"], "CENTRAL")
+        self.assertEqual(data["agency"], "A-15")
+        self.assertEqual(data["cashier"], "J. PEREZ")
+        self.assertEqual(data["folio"], "7788")
+        self.assertEqual(data["paid_at"], "12/03/2024 10:35")
+        self.assertEqual(data["location"], "URB. ALALAY VALLE HERMOSO, MANZANA Y-1")
+        self.assertEqual(data["land_area"], "280.00 m2")
+        self.assertEqual(data["built_area"], "120.50 m2")
+        self.assertEqual(data["age_factor"], "0.85")
+
+    def test_a_value_stops_at_the_next_label(self):
+        """'BANCO UNION' must not swallow the CORRESP. box printed beside it."""
+        self.assertEqual(self.reading.data["collecting_entity"], "BANCO UNION")
+        self.assertEqual(self.reading.data["cashier"], "J. PEREZ")
+
+    def test_values_printed_under_their_label(self):
+        """A row of stacked boxes: each value belongs to the box above it and not
+        to its neighbour's."""
+        data = self.reading.data
+        self.assertEqual(data["property_number"], "123456")
+        self.assertEqual(data["cadastral_code"], "3-01-1-01-0058")
+        self.assertEqual(data["property_class"], "URBANO")
+        self.assertEqual(data["ownership_type"], "PROPIA")
+
+    def test_amounts_are_kept_as_printed(self):
+        data = self.reading.data
+        self.assertEqual(data["ufv"], "2.68451")
+        self.assertEqual(data["taxable_base"], "350000.00")
+        self.assertEqual(data["assessed_tax"], "1050.00")
+        self.assertEqual(data["exemption"], "0.00")
+        self.assertEqual(data["discount_10"], "105.00")
+        self.assertEqual(data["discount_app_5"], "52.50")
+        self.assertEqual(data["amount_due"], "892.50")
+        self.assertEqual(data["amount_paid"], "892.50")
+        self.assertEqual(data["balance"], "0.00")
+
+    def test_the_lines_printed_without_a_label(self):
+        data = self.reading.data
+        # The number is printed on the title's line: it goes to its own field and
+        # is taken out of the type.
+        self.assertEqual(data["receipt_type"], "FUR - COMPROBANTE DE PAGO")
+        self.assertEqual(data["receipt_number"], "59122836")
+        self.assertEqual(data["municipality"], "GAM - COCHABAMBA")
+        self.assertEqual(data["concept"], "INMUEBLES IMPBI 2024 TOTAL")
+        self.assertEqual(data["tax_year"], "2024")
+
+    def test_the_taxpayer_line_is_split_into_its_three_pieces(self):
+        self.assertEqual(
+            self.reading.data["taxpayer"],
+            {"type": "NATURAL", "id_number": "4482143", "name": "CRUZ COLOMI PATRICIO"},
+        )
+
+    def test_a_receipt_that_adds_up_has_nothing_to_report(self):
+        self.assertEqual(self.reading.observations, [])
+        self.assertEqual(sorted(missing_fields(self.reading)), [])
+
+    def test_a_liquidation_that_does_not_add_up_is_reported(self):
+        rows = [row for row in FUR_ROWS if "IMPORTE A PAGAR:" not in [t for t, _a, _b in row]]
+        rows.append([("IMPORTE A PAGAR:", 10, 110), ("992.50", 115, 170)])
+        reading = parse_fur([_fur_blocks(rows)], 0.85)
+        self.assertTrue(any("no cuadra" in note for note in reading.observations))
+        self.assertTrue(any("no coinciden" in note for note in reading.observations))
+
+    def test_a_photo_that_is_not_a_receipt_says_so(self):
+        reading = parse_fur([_fur_blocks([[("UNA HOJA CUALQUIERA", 10, 200)]])], 0.85)
+        self.assertTrue(any("no se reconoció" in note.lower() for note in reading.observations))
+
+    def test_low_confidence_values_are_listed_by_their_form_key(self):
+        reading = parse_fur([_fur_blocks(FUR_ROWS, confidence=0.4)], 0.85)
+        self.assertIn("amount_due", reading.confidence)
+        self.assertIn("taxpayer.name", low_confidence_fields(reading, 0.85))
+        self.assertTrue(any("baja confianza" in note for note in reading.observations))
+
+    def test_a_label_and_its_value_in_one_block(self):
+        """What the OCR service actually returns on these forms: the label, its
+        colon and the value as ONE block, with the spaces dropped."""
+        rows = [
+            [("FUR-COMPROBANTEDEPAGO No59122836", 100, 650)],
+            [("ENTIDADRECAUDADORA:BANCOUNION", 10, 260), ("CORRESP.0012", 300, 400)],
+            [("BASEIMPONIBLE:350000.00", 10, 180)],
+            [("DESCUENT010%:105.00", 10, 160)],
+            [("IMP0RTEAPAGAR892.50", 10, 170)],
+            [("UBICACIONURB.ALALAY VALLE HERMOSO", 10, 400)],
+        ]
+        reading = parse_fur([_fur_blocks(rows)], 0.85)
+        self.assertEqual(reading.data["receipt_type"], "FUR-COMPROBANTEDEPAGO")
+        self.assertEqual(reading.data["receipt_number"], "59122836")
+        self.assertEqual(reading.data["collecting_entity"], "BANCOUNION")
+        self.assertEqual(reading.data["correspondent"], "0012")
+        self.assertEqual(reading.data["taxable_base"], "350000.00")
+        # The label ends in a sign that is not a letter or a digit: it must not be
+        # left at the front of the value.
+        self.assertEqual(reading.data["discount_10"], "105.00")
+        self.assertEqual(reading.data["location"], "URB.ALALAY VALLE HERMOSO")
+
+    def test_a_label_the_ocr_read_with_digits_for_letters(self):
+        """'IMPUEST0 DETERMINAD0', 'M0NT0 PAGAD0', 'FOLI0': the classic O/0 swap
+        must not lose the field."""
+        rows = [
+            [("IMPUEST0 DETERMINAD0:", 10, 130), ("1050.00", 135, 200)],
+            [("M0NT0 PAGAD0:", 10, 100), ("892.50", 105, 160)],
+            [("FOLI0:", 10, 60), ("7788", 65, 100)],
+        ]
+        reading = parse_fur([_fur_blocks(rows)], 0.85)
+        self.assertEqual(reading.data["assessed_tax"], "1050.00")
+        self.assertEqual(reading.data["amount_paid"], "892.50")
+        self.assertEqual(reading.data["folio"], "7788")
+
+    def test_a_second_photo_only_fills_gaps(self):
+        """The first photo that has a value wins, so re-photographing a receipt
+        cannot overwrite what was already read."""
+        first = [[("FUR - COMPROBANTE DE PAGO", 100, 400)], [("IMPORTE A PAGAR:", 10, 110), ("892.50", 115, 170)]]
+        second = [[("IMPORTE A PAGAR:", 10, 110), ("111.11", 115, 170)], [("FOLIO:", 10, 60), ("7788", 65, 100)]]
+        reading = parse_fur([_fur_blocks(first), _fur_blocks(second)], 0.85)
+        self.assertEqual(reading.data["amount_due"], "892.50")
+        self.assertEqual(reading.data["folio"], "7788")
+
+
+class FakeStructurer(TaxStructurerPort):
+    def __init__(self, proposal=None, error=None, configured=True):
+        self.proposal, self.error, self.configured = proposal or {}, error, configured
+        self.asked = []
+
+    def is_configured(self):
+        return self.configured
+
+    def structure(self, ocr_text, missing):
+        self.asked.append((ocr_text, list(missing)))
+        if self.error is not None:
+            raise self.error
+        return self.proposal
+
+
+class TestOcrTaxExtractor(unittest.TestCase):
+    """The lane's reading end to end, with the OCR step and the LLM step faked."""
+
+    def _extractor(self, structurer=None, rows=None):
+        blocks = _fur_blocks(rows if rows is not None else FUR_ROWS)
+        return OcrTaxExtractor(
+            structurer=structurer,
+            confidence_threshold=0.85,
+            read_page=lambda _content, _name: PageText(blocks=blocks, width=800, height=600),
+        )
+
+    def test_the_rules_alone_fill_the_stored_shape(self):
+        data, observations = self._extractor().extract([b"foto"])
+        self.assertEqual(data["amount_due"], "892.50")
+        self.assertEqual(data["taxpayer"]["name"], "CRUZ COLOMI PATRICIO")
+        self.assertEqual(observations, [])
+        self.assertEqual(data["reading"]["source"], "ocr_rules")
+        self.assertEqual(data["reading"]["low_confidence_fields"], [])
+        self.assertEqual(data["reading"]["fields_filled_by_ai"], [])
+        self.assertIn("INMUEBLES IMPBI 2024 TOTAL", data["reading"]["ocr_lines"])
+
+    def test_each_photo_is_reported_as_it_is_read(self):
+        seen = []
+        self._extractor().extract([b"a", b"b"], on_page=seen.append)
+        self.assertEqual(seen, [0, 1])
+
+    def test_the_llm_is_only_asked_for_what_the_rules_could_not_read(self):
+        rows = _rows_with_unreadable_cashier_label()
+        structurer = FakeStructurer({"cashier": "J. PEREZ"})
+        data, _observations = self._extractor(structurer, rows).extract([b"foto"])
+
+        asked_text, asked_keys = structurer.asked[0]
+        self.assertIn("cashier", asked_keys)
+        self.assertNotIn("amount_due", asked_keys)
+        self.assertIn("BANCO UNION", asked_text)
+        self.assertEqual(data["cashier"], "J. PEREZ")
+        self.assertEqual(data["reading"]["fields_filled_by_ai"], ["cashier"])
+
+    def test_a_value_the_llm_invented_is_discarded(self):
+        rows = _rows_with_unreadable_cashier_label()
+        structurer = FakeStructurer({"cashier": "ALGUIEN QUE NO ESTA EN LA FOTO"})
+        data, _observations = self._extractor(structurer, rows).extract([b"foto"])
+        self.assertIsNone(data["cashier"])
+        self.assertEqual(data["reading"]["fields_filled_by_ai"], [])
+
+    def test_the_reading_survives_the_llm_being_unavailable(self):
+        rows = _rows_with_unreadable_cashier_label()
+        structurer = FakeStructurer(error=TaxStructurerUnavailableException("Ninguna computadora conectada."))
+        data, observations = self._extractor(structurer, rows).extract([b"foto"])
+        self.assertEqual(data["amount_due"], "892.50")
+        self.assertTrue(any("IA" in note for note in observations))
+
+    def test_with_no_llm_configured_nothing_is_asked(self):
+        structurer = FakeStructurer(configured=False)
+        self._extractor(structurer).extract([b"foto"])
+        self.assertEqual(structurer.asked, [])
+
+    def test_an_ocr_failure_reaches_the_use_case(self):
+        def boom(_content, _name):
+            raise OcrUnavailableException("El servicio OCR no respondió a tiempo.")
+
+        extractor = OcrTaxExtractor(structurer=None, confidence_threshold=0.85, read_page=boom)
+        with self.assertRaises(OcrUnavailableException):
+            extractor.extract([b"foto"])
+
+
+class TestTaxResultMapper(unittest.TestCase):
+    def test_an_empty_reading_still_has_the_shape_the_form_needs(self):
+        data = to_tax_receipt_template(parse_fur([], 0.85), 0.85)
+        self.assertEqual(set(PROFILES["tax_receipt"].output_template) - set(data), set())
+        self.assertEqual(data["taxpayer"], {"type": None, "id_number": None, "name": None})
+        self.assertEqual(data["reading"]["low_confidence_fields"], [])
+
+    def test_what_the_ai_filled_is_named_for_the_review_screen(self):
+        reading = parse_fur([_fur_blocks(FUR_ROWS)], 0.85)
+        data = to_tax_receipt_template(reading, 0.85, ["cashier", "taxpayer.name"])
+        self.assertEqual(data["reading"]["fields_filled_by_ai"], ["cashier", "taxpayer.name"])
+        self.assertEqual(data["reading"]["labels_not_found"], [])
+
+
+class TestOllamaAnswer(unittest.TestCase):
+    """The model is asked for JSON, but it is a reasoning model: it may still wrap
+    the object in its thinking, and one stray word would throw the reading away."""
+
+    def test_the_object_is_taken_out_of_whatever_surrounds_it(self):
+        self.assertEqual(
+            _json_object('<think>veamos el texto</think>\n{"cashier": "J. PEREZ"}'),
+            '{"cashier": "J. PEREZ"}',
+        )
+
+    def test_a_clean_answer_is_left_alone(self):
+        self.assertEqual(_json_object('{"cashier": null}'), '{"cashier": null}')
+
+    def test_no_model_configured_turns_the_pass_off(self):
+        """One line of .env leaves the lane on its rules alone."""
+        self.assertFalse(OllamaFurStructurer(model="", host_provider=lambda _m: ["http://pc"]).is_configured())
+        self.assertTrue(
+            OllamaFurStructurer(model="un-modelo", host_provider=lambda _m: ["http://pc"]).is_configured()
+        )
+
+    def test_an_answer_with_no_object_is_handed_back_to_fail_on_its_own(self):
+        self.assertEqual(_json_object("no tengo nada"), "no tengo nada")
+        self.assertEqual(_json_object(""), "")
 
 
 if __name__ == "__main__":

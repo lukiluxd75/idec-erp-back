@@ -60,6 +60,13 @@ def _tidy(text: str) -> str:
     return re.sub(r"\s+", " ", t).strip()
 
 
+def _is_property_kind(text: str) -> bool:
+    """'(Lote de Terreno)', printed next to the UBICACIÓN label. The OCR drops one
+    of the parentheses often enough ('(Lote de Terreno') that one is enough."""
+    t = strip_filler(text)
+    return len(t) > 2 and (t.startswith("(") or t.endswith(")")) and any(c.isalpha() for c in t)
+
+
 def _row_values(
     label: OcrBlock, blocks: Sequence[OcrBlock], x_limit: float, exclude: Sequence[OcrBlock]
 ) -> List[OcrBlock]:
@@ -167,18 +174,44 @@ def parse_header(blocks: Sequence[OcrBlock], width: float) -> HeaderResult:
     kind = next(
         (
             b for b in sorted(blocks, key=lambda b: b.cy)
-            if re.fullmatch(r"\(.+\)", strip_filler(b.text)) and b.x0 < x_limit
+            if _is_property_kind(b.text) and b.x0 < x_limit
             and (number_block is None or b.cy > number_block.cy)
         ),
         None,
     )
-    data["tipo_inmueble"] = strip_filler(kind.text)[1:-1].strip() if kind is not None else None
+    data["tipo_inmueble"] = strip_filler(kind.text).strip("()").strip() if kind is not None else None
     if kind is not None:
         conf["tipo_inmueble"] = round(kind.confidence, 4)
         src["tipo_inmueble"] = [kind.text]
 
+    # ---- Catastro: printed UNDER its label on the right half. A lone "x" (or
+    # nothing) is how the form marks it blank.
+    catastro_label = labels["catastro"]
+    catastro_block = None
+    if catastro_label is not None:
+        catastro_block = min(
+            (
+                b for b in blocks
+                if b is not catastro_label and b not in label_blocks and b is not number_block
+                and catastro_label.cy + 0.3 * catastro_label.h < b.cy <= catastro_label.cy + 3 * catastro_label.h
+                and catastro_label.x0 - 2 * catastro_label.h <= b.x0 <= catastro_label.x1 + 4 * catastro_label.h
+            ),
+            key=lambda b: b.cy,
+            default=None,
+        )
+        if catastro_block is None:  # sometimes on the same row, to the right
+            same_row = _row_values(catastro_label, blocks, float("inf"), label_blocks)
+            catastro_block = same_row[0] if same_row else None
+    catastro = _tidy(catastro_block.text) if catastro_block is not None else None
+    data["catastro"] = None if (catastro or "").lower() in ("", "x") else catastro
+    if catastro_block is not None:
+        conf["catastro"] = round(catastro_block.confidence, 4)
+        src["catastro"] = [catastro_block.text]
+
     # ---- Simple "LABEL: value" rows of the left column.
-    used: List[OcrBlock] = list(label_blocks) + [x for x in (number_block, kind) if x is not None]
+    used: List[OcrBlock] = list(label_blocks) + [
+        x for x in (number_block, kind, catastro_block) if x is not None
+    ]
     for key, label_key in (
         ("ubicacion", "ubicacion"),
         ("designacion_s_tit", "designacion"),
@@ -286,8 +319,13 @@ def _parse_linderos(
             elif previous_line_starts:
                 # Wrapped value: continues the lindero of the previous row whose
                 # start is horizontally closest.
-                direction = min(previous_line_starts, key=lambda s: abs(s[1] - b.x0))[0]
-                if abs(dict(previous_line_starts)[direction] - b.x0) < 6 * b.h:
+                direction, start_x = min(previous_line_starts, key=lambda s: abs(s[1] - b.x0))
+                anchor = parts[direction][0]
+                # Measured against the lindero's own line height: the sideways
+                # "Dirección Administrativa y Financiera" of the left margin comes
+                # back as a single very tall block, and its own height would make
+                # any horizontal distance look close enough.
+                if abs(start_x - b.x0) < 6 * anchor.h and b.h < 2.5 * anchor.h:
                     parts[direction].append(b)
         previous_line_starts = line_starts or previous_line_starts
 

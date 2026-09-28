@@ -11,6 +11,7 @@ from app.domains.folder_analysis.application.use_cases.document_use_cases import
     GetDocumentUseCase,
     ListDocumentsUseCase,
     ReviewDocumentUseCase,
+    RunServerReadingUseCase,
     SetDocumentPagesUseCase,
 )
 
@@ -24,6 +25,7 @@ __all__ = [
     "ListDocumentsUseCase",
     "ListInboxUseCase",
     "ReviewDocumentUseCase",
+    "RunServerReadingUseCase",
     "SetDocumentPagesUseCase",
     "UploadCapturesUseCase",
 ]

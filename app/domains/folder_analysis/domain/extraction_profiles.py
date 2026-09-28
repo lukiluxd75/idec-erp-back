@@ -5,6 +5,12 @@ the architects' PCs together with the JSON template it must fill. Keys are Engli
 
 A plan has no profile yet (fields to be defined): it gets the generic digitization
 (full text, labeled fields and tables).
+
+Only the plan is still sent to the PCs. The folio and the tax receipt are read on
+this server with OCR + rules (see the folios contract and fur_parser), so their
+instructions here are no longer dispatched -- but their templates still are the
+shape those lanes store, and the instructions still say, in one place, what each
+form is expected to yield.
 """
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
