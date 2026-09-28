@@ -1,6 +1,8 @@
 from typing import List
 
-from fastapi import APIRouter, Depends, File, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Request, Response, UploadFile, status
+
+from app.domains.folder_analysis.domain.entities import CaptureVariant
 
 from app.domains.folder_analysis.application.use_cases import (
     DeleteCaptureUseCase,
@@ -41,24 +43,53 @@ def list_inbox(
     return [CaptureOut.from_entity(c) for c in use_case.execute(user.sub)]
 
 
+# A photo never changes once it is uploaded, so the browser may keep any of its
+# copies for as long as it likes: turning a page back, or coming back to the
+# screen tomorrow, costs nothing.
+IMMUTABLE_CACHE = "private, max-age=604800, immutable"
+
+
+def _cached_image(request: Request, use_case: GetCaptureImageUseCase, capture_id: str, user_sub: str, variant: str):
+    """The photo's copy, or 304 when the browser already has it. The tag is the
+    capture and the copy asked for: neither ever changes."""
+    etag = f'"{capture_id}-{variant}"'
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag, "Cache-Control": IMMUTABLE_CACHE})
+    content, mime = use_case.execute(capture_id, user_sub, variant)
+    return Response(content=content, media_type=mime, headers={"ETag": etag, "Cache-Control": IMMUTABLE_CACHE})
+
+
 @router.get("/{capture_id}/image")
 def get_image(
     capture_id: str,
+    request: Request,
     use_case: GetCaptureImageUseCase = Depends(get_capture_image_use_case),
     user: UserProfile = Depends(require_permission("folder-analysis.view")),
 ):
-    content, mime = use_case.execute(capture_id, user.sub, thumbnail=False)
-    return Response(content=content, media_type=mime)
+    """The photo as it was uploaded -- several megabytes. Only the viewer asks
+    for it, and only when the architect zooms past what the preview shows."""
+    return _cached_image(request, use_case, capture_id, user.sub, CaptureVariant.ORIGINAL)
+
+
+@router.get("/{capture_id}/preview")
+def get_preview(
+    capture_id: str,
+    request: Request,
+    use_case: GetCaptureImageUseCase = Depends(get_capture_image_use_case),
+    user: UserProfile = Depends(require_permission("folder-analysis.view")),
+):
+    """Web-sized copy: what the review screen opens with."""
+    return _cached_image(request, use_case, capture_id, user.sub, CaptureVariant.PREVIEW)
 
 
 @router.get("/{capture_id}/thumbnail")
 def get_thumbnail(
     capture_id: str,
+    request: Request,
     use_case: GetCaptureImageUseCase = Depends(get_capture_image_use_case),
     user: UserProfile = Depends(require_permission("folder-analysis.view")),
 ):
-    content, mime = use_case.execute(capture_id, user.sub, thumbnail=True)
-    return Response(content=content, media_type=mime)
+    return _cached_image(request, use_case, capture_id, user.sub, CaptureVariant.THUMBNAIL)
 
 
 @router.delete("/{capture_id}", status_code=status.HTTP_204_NO_CONTENT)

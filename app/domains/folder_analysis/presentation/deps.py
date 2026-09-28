@@ -122,7 +122,7 @@ def get_list_inbox_use_case(captures: CaptureRepositoryPort = Depends(get_captur
 def get_capture_image_use_case(
     captures: CaptureRepositoryPort = Depends(get_capture_repository),
 ) -> GetCaptureImageUseCase:
-    return GetCaptureImageUseCase(captures)
+    return GetCaptureImageUseCase(captures, get_thumbnails())
 
 
 def get_delete_capture_use_case(
