@@ -1,12 +1,28 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 
 from app.core.config.settings import settings
+from app.domains.detection.application.use_cases import (
+    IngestDetectionResultUseCase,
+    StartDetectionJobUseCase,
+)
 from app.domains.detection.domain.exceptions import DetectionEngineError, DetectionEngineUnavailable
+from app.domains.detection.domain.ports.processed_sector_repository_port import (
+    ProcessedSectorRepositoryPort,
+)
 from app.domains.detection.infrastructure.gpu_detection_client import GpuDetectionClient
-from app.domains.detection.presentation.deps import get_detection_engine
+from app.domains.detection.presentation.deps import (
+    get_detection_engine,
+    get_ingest_detection_result_use_case,
+    get_processed_sector_repository,
+    get_start_detection_job_use_case,
+)
 from app.domains.detection.presentation.schemas.detection_schema import AlignManualRequest, DetectChangesRequest
 from app.domains.security.contracts import UserProfile, get_current_user, require_permission
+
+logger = logging.getLogger("uvicorn.error")
 
 router = APIRouter(tags=["Detección de construcciones"])
 
@@ -54,12 +70,13 @@ def list_wms_layers(
 @router.post("/jobs/detect-wms")
 def start_detect_wms(
     payload: DetectChangesRequest,
-    engine: GpuDetectionClient = Depends(get_detection_engine),
+    use_case: StartDetectionJobUseCase = Depends(get_start_detection_job_use_case),
     _user: UserProfile = Depends(require_permission("detection.edit")),
 ):
-    """Start an async WMS change-detection job on the GPU engine."""
+    """Start an async WMS change-detection job on the GPU engine, and persist
+    its `processed_sector` in detection_results (see StartDetectionJobUseCase)."""
     try:
-        return engine.start_detect_wms_async(payload.model_dump(exclude_none=True))
+        return use_case.execute(payload.model_dump(exclude_none=True), created_by_sub=_user.sub)
     except (DetectionEngineUnavailable, DetectionEngineError) as exc:
         _raise_engine(exc)
 
@@ -80,12 +97,41 @@ def job_progress(
 def job_result(
     job_id: str,
     engine: GpuDetectionClient = Depends(get_detection_engine),
+    ingest_use_case: IngestDetectionResultUseCase = Depends(get_ingest_detection_result_use_case),
+    sector_repository: ProcessedSectorRepositoryPort = Depends(get_processed_sector_repository),
     _user: UserProfile = Depends(require_permission("detection.view")),
 ):
     try:
-        return engine.get_result(job_id)
+        result = engine.get_result(job_id)
     except (DetectionEngineUnavailable, DetectionEngineError) as exc:
         _raise_engine(exc)
+        return None
+
+    try:
+        sector = ingest_use_case.execute(job_id, result)
+        if sector is not None:
+            result["processed_sector_id"] = sector.id
+            result["processed_sector_status"] = sector.status
+            # Attaches affected_parcel_id/validation_status onto each raw
+            # engine row, by position: list_affected_parcels() returns rows in
+            # the same order ingest_result() walked engine_result["cambios"]
+            # in, which cambios[]/reporte_arquitecto[] also share (verified
+            # against doc/ejemplo_resultado_job.json). Lets the frontend's
+            # existing hallazgos table (built straight from these arrays) call
+            # /affected-parcels/{id}/review without any other lookup.
+            parcels = sector_repository.list_affected_parcels(sector.id)
+            for array_key in ("cambios", "reporte_arquitecto"):
+                rows = result.get(array_key) or []
+                for row, parcel in zip(rows, parcels):
+                    row["affected_parcel_id"] = parcel.id
+                    row["validation_status"] = parcel.validation_status
+    except Exception:
+        # Persisting into detection_results must never break the read path the
+        # frontend depends on to show the job outcome -- log and still return
+        # what the engine gave us. Idempotent, so the next poll retries it.
+        logger.exception("Failed to persist detection_results for job %s", job_id)
+
+    return result
 
 
 @router.post("/jobs/{job_id}/cancel")
@@ -130,12 +176,38 @@ def apply_align_manual(
     job_id: str,
     payload: AlignManualRequest,
     engine: GpuDetectionClient = Depends(get_detection_engine),
+    sector_repository: ProcessedSectorRepositoryPort = Depends(get_processed_sector_repository),
     _user: UserProfile = Depends(require_permission("detection.edit")),
 ):
     try:
-        return engine.apply_align_manual(job_id, payload.model_dump())
+        data = engine.apply_align_manual(job_id, payload.model_dump())
     except (DetectionEngineUnavailable, DetectionEngineError) as exc:
         _raise_engine(exc)
+        return None
+
+    try:
+        sector = sector_repository.find_by_job_id(job_id)
+        if sector is not None:
+            # cc/residual_m are not read from `data` here on purpose -- apply's
+            # own response does not carry them (verified against a real one);
+            # ingest_result() fills them in once the re-run's actual result
+            # arrives (see record_manual_alignment's docstring).
+            sector_repository.record_manual_alignment(
+                processed_sector_id=sector.id,
+                points=payload.points,
+                gcp_method=payload.method,
+                warp_matrix=data.get("warp_matrix") if isinstance(data, dict) else None,
+            )
+    except Exception:
+        # The engine already applied the realignment and is re-running
+        # detection at this point; failing to record it in detection_results
+        # must not fail the response the frontend is waiting on to start
+        # polling progress again. Logged for follow-up, not retried
+        # automatically (the next ingest_result would just create a fresh
+        # auto_ecc alignment instead, same as before this feature existed).
+        logger.exception("Failed to record manual alignment for job %s", job_id)
+
+    return data
 
 
 @router.get("/cadastre/cadastral-record/{id_registro}")

@@ -15,3 +15,6 @@ __pycache__/
 *.bak*
 .pytest_cache/
 .mypy_cache/
+
+# Runtime-generated data (chips, exports, etc.), never source
+data/
