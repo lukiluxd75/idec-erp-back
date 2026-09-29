@@ -34,10 +34,14 @@ class SqlSectorHistoryRepository(SectorHistoryPort):
     def __init__(self, db: Session):
         self._db = db
 
-    def list_map_items(self, campaign_id: Optional[int] = None) -> List[ProcessedSectorMapItem]:
+    def list_map_items(
+        self, campaign_id: Optional[int] = None, unassigned_only: bool = False
+    ) -> List[ProcessedSectorMapItem]:
         query = self._db.query(ProcessedSectorModel).filter(ProcessedSectorModel.deleted_at.is_(None))
         if campaign_id is not None:
             query = query.filter(ProcessedSectorModel.campaign_id == campaign_id)
+        elif unassigned_only:
+            query = query.filter(ProcessedSectorModel.campaign_id.is_(None))
         rows = query.order_by(ProcessedSectorModel.id.desc()).all()
         sector_ids = [r.id for r in rows]
 
