@@ -57,6 +57,7 @@ from app.domains.folder_analysis.domain.services.plan_layout import (
     Segment,
     labelled_fields,
     table_regions,
+    _split_scattered,
 )
 from app.domains.folder_analysis.domain.services.result_merger import conform, merge_pages
 from app.domains.folder_analysis.domain.services.tax_result_mapper import to_tax_receipt_template
@@ -1056,6 +1057,26 @@ class TestPlanLayout(unittest.TestCase):
     def test_a_label_keeps_a_value_that_has_a_colon(self):
         blocks = [TextBlock("ESC: 1:100", 0.9, 0, 0, 200, 20)]
         self.assertEqual(labelled_fields(group_lines(blocks)), [{"name": "ESC", "value": "1:100"}])
+
+    def test_a_row_of_scattered_notes_is_not_one_field(self):
+        """A rótulo strip along the bottom of the sheet: ESC, the planta name and a
+        handful of room notes all sit at the same height because there was nowhere
+        else to put them. group_lines() alone reads that as one line, so ESC would
+        swallow every note after it as its own value; the gap between one note and
+        the next is what tells them apart."""
+        row = [
+            TextBlock("ESC:1:100", 0.9, 80, 780, 200, 792),
+            TextBlock("PLANTA", 0.9, 300, 780, 380, 792),
+            TextBlock("SEMISOTANO", 0.9, 385, 780, 520, 792),
+            TextBlock("BAULERA", 0.9, 800, 780, 900, 792),
+            TextBlock("2.", 0.9, 905, 780, 925, 792),
+        ]
+        lines = _split_scattered(group_lines(row))
+        self.assertEqual(
+            [[b.text for b in line] for line in lines],
+            [["ESC:1:100"], ["PLANTA", "SEMISOTANO"], ["BAULERA", "2."]],
+        )
+        self.assertEqual(labelled_fields(lines), [{"name": "ESC", "value": "1:100"}])
 
 
 class TestOcrPlanExtractor(unittest.TestCase):

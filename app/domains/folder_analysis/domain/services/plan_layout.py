@@ -43,6 +43,14 @@ MAX_ROW_GAP_RATIO = 0.12
 # A "NAME: value" longer than this is a sentence that happens to have a colon.
 MAX_FIELD_NAME_CHARS = 48
 
+# group_lines() clusters purely by height, so a strip along the bottom or a side
+# of the sheet -- ESC, the propietario, a handful of room notes, all sitting at
+# the same height because there was nowhere else to put them -- comes back as
+# ONE line and swallows every field into whichever of them has a colon first. A
+# gap this many times a block's own height is not the space between two words of
+# the same note, so that is where the line is cut back into its separate notes.
+MAX_WORD_GAP_RATIO = 4.0
+
 
 @dataclass(frozen=True)
 class Segment:
@@ -190,6 +198,26 @@ def table_from_grid(
     return _without_empty_rows_and_columns(table)
 
 
+def _split_scattered(lines: Sequence[Sequence[Block]]) -> List[List[Block]]:
+    """Cuts a line wherever two of its blocks are too far apart sideways to be
+    the same note -- see MAX_WORD_GAP_RATIO. Order is kept: what group_lines()
+    put on one line, left to right, top to bottom, this only adds more breaks
+    to."""
+    split: List[List[Block]] = []
+    for line in lines:
+        current: List[Block] = []
+        for block in line:
+            if current:
+                ref_h = max(sum(b.h for b in current) / len(current), 1.0)
+                if block.x0 - current[-1].x1 > MAX_WORD_GAP_RATIO * ref_h:
+                    split.append(current)
+                    current = []
+            current.append(block)
+        if current:
+            split.append(current)
+    return split
+
+
 def read_page(
     blocks: Sequence[Block],
     grids: Sequence[Tuple[TableRegion, Sequence[float]]],
@@ -198,7 +226,7 @@ def read_page(
     the vision model answered with), so the review screen does not change.
 
     `grids`: each cuadro found on the sheet with its column lines."""
-    lines = group_lines(blocks)
+    lines = _split_scattered(group_lines(blocks))
     tables = [table_from_grid(blocks, region.rows, columns) for region, columns in grids]
     return {
         "document_type": page_title(blocks),
