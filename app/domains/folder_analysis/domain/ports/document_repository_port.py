@@ -16,6 +16,14 @@ class DocumentRepositoryPort(ABC):
     def list(self, user_sub: str, doc_type: Optional[str] = None) -> List[FolderDocument]:
         """Newest first, with pages but without extracted/reviewed data."""
 
+    def list_reviewed(self, user_sub: str, doc_type: Optional[str] = None) -> List[FolderDocument]:
+        """Newest first, reviewed documents including the data confirmed by the user."""
+        return [
+            document
+            for document in self.list(user_sub, doc_type)
+            if document.status == "reviewed"
+        ]
+
     @abstractmethod
     def replace_pages(self, document_id: str, capture_ids: List[str]) -> None:
         """New page list (back to draft, previous results cleared)."""

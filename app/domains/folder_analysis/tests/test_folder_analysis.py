@@ -1,5 +1,6 @@
 import unittest
 import uuid
+from unittest.mock import patch
 from dataclasses import replace
 from datetime import datetime, timezone
 
@@ -23,6 +24,7 @@ from app.domains.folder_analysis.domain.entities import (
     CaptureStatus,
     DocumentPage,
     DocumentStatus,
+    DocumentType,
     FolderDocument,
     PageStatus,
     QueuedJob,
@@ -51,14 +53,23 @@ from app.domains.folder_analysis.domain.services.fur_parser import (
     missing_fields,
     parse_fur,
 )
+from app.domains.folder_analysis.domain.services.plan_layout import (
+    Segment,
+    labelled_fields,
+    table_regions,
+)
 from app.domains.folder_analysis.domain.services.result_merger import conform, merge_pages
 from app.domains.folder_analysis.domain.services.tax_result_mapper import to_tax_receipt_template
+from app.domains.folder_analysis.domain.services.text import group_lines
+from app.domains.folder_analysis.infrastructure import opencv_plan_reader
+from app.domains.folder_analysis.infrastructure.ocr_plan_extractor import OcrPlanExtractor
 from app.domains.folder_analysis.infrastructure.ocr_tax_extractor import OcrTaxExtractor
 from app.domains.folder_analysis.infrastructure.ollama_fur_structurer import (
     OllamaFurStructurer,
     _json_object,
 )
 from app.domains.folder_analysis.infrastructure.opencv_thumbnail import OpenCvThumbnail
+from app.domains.folder_analysis.infrastructure.pdfium_rasterizer import PdfiumRasterizer
 
 NOW = datetime.now(timezone.utc)
 
@@ -178,6 +189,12 @@ class FakeExtractor(ServerReadingPort):
 
 def _png() -> bytes:
     return cv2.imencode(".png", np.full((800, 600, 3), 255, np.uint8))[1].tobytes()
+
+
+def _uploader(captures) -> UploadCapturesUseCase:
+    """The upload as the API wires it: thumbnails plus the PDF rasterizer, since
+    a PDF arrives as one photo per page."""
+    return UploadCapturesUseCase(captures, OpenCvThumbnail(), PdfiumRasterizer())
 
 
 # ---------------------------------------------------------------- merger
@@ -407,7 +424,7 @@ class TestDocumentProgress(unittest.TestCase):
 class TestFolderAnalysisFlow(unittest.TestCase):
     def setUp(self):
         self.captures, self.documents, self.queue = FakeCaptures(), FakeDocuments(), FakeQueue()
-        self.photos = UploadCapturesUseCase(self.captures, OpenCvThumbnail()).execute(
+        self.photos = _uploader(self.captures).execute(
             [(_png(), "image/png", "p1.png"), (_png(), "application/octet-stream", "p2.jpg")], "arq-1"
         )
 
@@ -423,7 +440,7 @@ class TestFolderAnalysisFlow(unittest.TestCase):
 
     def test_upload_rejects_non_images_and_normalizes_mime(self):
         with self.assertRaises(InvalidCaptureException):
-            UploadCapturesUseCase(self.captures, OpenCvThumbnail()).execute([(b"nope", "image/jpeg", "x")], "arq-1")
+            _uploader(self.captures).execute([(b"nope", "image/jpeg", "x")], "arq-1")
         self.assertEqual(self.photos[1].mime, "image/jpeg")
 
     def test_create_moves_photos_out_of_the_inbox_and_blocks_reuse(self):
@@ -440,9 +457,12 @@ class TestFolderAnalysisFlow(unittest.TestCase):
         with self.assertRaises(DocumentNotFoundException):
             GetDocumentUseCase(self.documents, sync).execute(doc.id, "someone-else")
 
+    @patch.object(DocumentType, "SERVER_READ", (DocumentType.FOLIO, DocumentType.TAX_RECEIPT))
     def test_full_cycle_analyze_sync_review(self):
-        """The queue path, end to end. On a plan: it is the type that still goes
-        to the architects' PCs (a folio and a tax receipt are read here)."""
+        """The queue path, end to end. No lane takes it any more -- the plano was
+        the last one and is read here now -- but the machinery stays for the
+        documents that were already queued when it moved, so it is still tested:
+        the lane is put back on the queue for the length of this test."""
         doc = self._create("plan")
         doc = AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(doc.id, "arq-1")
         self.assertEqual(doc.status, DocumentStatus.QUEUED)
@@ -474,10 +494,18 @@ class TestFolderAnalysisFlow(unittest.TestCase):
         self.assertEqual(doc.status, DocumentStatus.QUEUED)
         self.assertIsNone(doc.reviewed_data)
 
-    def test_plan_is_sent_without_instructions(self):
+    def test_plan_is_read_on_the_server_and_queues_no_job(self):
+        """The plano used to be queued to the architects' PCs for the vision
+        model; it is read here with PaddleOCR and OpenCV like the other two."""
         doc = self._create("plan", [self.photos[0].id])
-        AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(doc.id, "arq-1")
-        self.assertIsNone(self.queue.submitted[0]["instructions"])
+        doc = AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(doc.id, "arq-1")
+        self.assertEqual(self.queue.submitted, [])
+        self.assertTrue(all(p.job_id is None for p in doc.pages))
+
+        self._read(doc, FakeExtractor({"full_text": "PLANTA BAJA", "tables": []}))
+        stored = self.documents.get(doc.id, "arq-1")
+        self.assertEqual(stored.status, DocumentStatus.EXTRACTED)
+        self.assertEqual(stored.extracted_data["full_text"], "PLANTA BAJA")
 
     def test_folio_is_read_on_the_server_and_queues_no_job(self):
         doc = self._create("folio")
@@ -951,6 +979,159 @@ class TestOllamaAnswer(unittest.TestCase):
     def test_an_answer_with_no_object_is_handed_back_to_fail_on_its_own(self):
         self.assertEqual(_json_object("no tengo nada"), "no tengo nada")
         self.assertEqual(_json_object(""), "")
+
+
+# ---------------------------------------------------------------- plano lane
+
+def _sheet(tilt_deg: float = 0.0):
+    """A plano like the ones that are scanned: a drawing whose walls are long
+    straight strokes, a cuadro de superficies in one corner and a rótulo in the
+    other. Returns the photo and the blocks a clean OCR would answer with."""
+    width, height = 1800, 1200
+    sheet = np.full((height, width, 3), 255, np.uint8)
+    blocks = []
+
+    def write(text, x, y, scale=0.7, thickness=2):
+        cv2.putText(sheet, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 0, 0), thickness, cv2.LINE_AA)
+        (w, h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness)
+        blocks.append(TextBlock(text, 0.95, float(x), float(y - h), float(x + w), float(y)))
+
+    def grid(rows, columns, cells):
+        for y in rows:
+            cv2.line(sheet, (columns[0], y), (columns[-1], y), (0, 0, 0), 3)
+        for x in columns:
+            cv2.line(sheet, (x, rows[0]), (x, rows[-1]), (0, 0, 0), 3)
+        for r, row in enumerate(cells):
+            for c, cell in enumerate(row):
+                write(cell, columns[c] + 15, rows[r] + 42, scale=0.6)
+
+    # The drawing: walls as long as any rule, and no company above them.
+    for y in (200, 450, 700):
+        cv2.line(sheet, (80, y), (900, y), (0, 0, 0), 5)
+    for x in (80, 900):
+        cv2.line(sheet, (x, 200), (x, 700), (0, 0, 0), 5)
+    write("PLANTA ALTA", 300, 160, scale=1.5, thickness=4)
+    write("DORMITORIO", 200, 350)
+    write("ESC: 1:100", 80, 780)
+    write("PROPIETARIO: JUAN PEREZ", 80, 830)
+
+    grid([140, 200, 260, 320], [1150, 1450, 1720],
+         [["AMBIENTE", "SUP. m2"], ["DORMITORIO", "18.40"], ["SALA", "31.75"]])
+    grid([900, 960, 1020, 1080], [1150, 1400, 1720],
+         [["COD CAT", "04-015-022"], ["MANZANO", "17"], ["ESCALA", "1:100"]])
+
+    if tilt_deg:
+        matrix = cv2.getRotationMatrix2D((width / 2, height / 2), tilt_deg, 1.0)
+        sheet = cv2.warpAffine(sheet, matrix, (width, height), borderValue=(255, 255, 255))
+    photo = cv2.imencode(".jpg", sheet, [cv2.IMWRITE_JPEG_QUALITY, 92])[1].tobytes()
+    return photo, blocks, width, height
+
+
+class TestPlanLayout(unittest.TestCase):
+    """The pure half: what makes a cuadro a cuadro, and a value a value."""
+
+    def test_a_lone_wall_is_not_a_cuadro(self):
+        walls = [Segment(position=200, start=80, end=900), Segment(position=700, start=80, end=900)]
+        self.assertEqual(table_regions(walls, 1200), [])
+
+    def test_three_rules_over_the_same_paper_are_a_cuadro(self):
+        rules = [Segment(position=y, start=1150, end=1720) for y in (140, 200, 260)]
+        region = table_regions(rules, 1200)[0]
+        self.assertEqual((region.top, region.bottom), (140, 260))
+        self.assertEqual(region.left, 1150)
+
+    def test_a_wall_across_the_sheet_does_not_split_a_cuadro(self):
+        """The wall runs between two rows of a cuadro on the other side of the
+        sheet: the cuadro has to survive it."""
+        rules = [Segment(position=y, start=1150, end=1720) for y in (140, 200, 260, 320)]
+        rules.append(Segment(position=200, start=80, end=900))
+        regions = table_regions(rules, 1200)
+        self.assertEqual(len(regions), 1)
+        self.assertEqual(len(regions[0].rows), 4)
+
+    def test_a_scale_is_not_a_label_with_its_value(self):
+        blocks = [TextBlock("ESCALA 1:100", 0.9, 0, 0, 200, 20)]
+        self.assertEqual(labelled_fields(group_lines(blocks)), [])
+
+    def test_a_label_keeps_a_value_that_has_a_colon(self):
+        blocks = [TextBlock("ESC: 1:100", 0.9, 0, 0, 200, 20)]
+        self.assertEqual(labelled_fields(group_lines(blocks)), [{"name": "ESC", "value": "1:100"}])
+
+
+class TestOcrPlanExtractor(unittest.TestCase):
+    """The lane end to end with the OCR service faked -- OpenCV is the real one."""
+
+    def _extractor(self, blocks, width, height):
+        return OcrPlanExtractor(
+            read_page=lambda _content, _name=None: PageText(blocks=blocks, width=width, height=height)
+        )
+
+    def test_the_sheet_is_read_into_text_fields_and_cuadros(self):
+        photo, blocks, width, height = _sheet()
+        data, observations = self._extractor(blocks, width, height).extract([photo])
+
+        page = data["pages"][0]
+        self.assertEqual(page["document_type"], "PLANTA ALTA")
+        self.assertEqual(page["tables"][0], [["AMBIENTE", "SUP. m2"], ["DORMITORIO", "18.40"], ["SALA", "31.75"]])
+        self.assertEqual(page["tables"][1][0], ["COD CAT", "04-015-022"])
+        self.assertIn({"name": "PROPIETARIO", "value": "JUAN PEREZ"}, page["fields"])
+        self.assertIn("PLANTA ALTA", page["full_text"])
+        self.assertEqual(observations, [])
+
+    def test_the_walls_of_the_drawing_are_not_read_as_a_cuadro(self):
+        photo, blocks, width, height = _sheet()
+        data, _observations = self._extractor(blocks, width, height).extract([photo])
+        self.assertEqual(data["reading"]["tables_found"], 2)
+
+    def test_the_stored_shape_is_the_one_the_lane_always_had(self):
+        """The vision model answered with document_type / full_text / fields /
+        tables; the review screen and the stored documents expect no less."""
+        photo, blocks, width, height = _sheet()
+        data, _observations = self._extractor(blocks, width, height).extract([photo])
+        self.assertEqual(set(data), {"document_type", "full_text", "pages", "reading"})
+        self.assertEqual(set(data["pages"][0]), {"page", "document_type", "full_text", "fields", "tables"})
+        self.assertEqual(data["reading"]["engine"], "paddleocr+opencv")
+
+    def test_a_crooked_photo_is_straightened_before_it_is_read(self):
+        photo, _blocks, _width, _height = _sheet(tilt_deg=2.0)
+        straightened = opencv_plan_reader.deskew(photo)
+        self.assertTrue(straightened.corrected)
+        self.assertLess(abs(straightened.angle), 4.0)
+        rules = opencv_plan_reader.row_rules(straightened.frame)
+        self.assertEqual(len(table_regions(rules, straightened.frame.shape[0])), 2)
+
+    def test_a_photo_tilted_beyond_sense_is_left_as_it_came(self):
+        photo, _blocks, _width, _height = _sheet(tilt_deg=25.0)
+        straightened = opencv_plan_reader.deskew(photo)
+        self.assertFalse(straightened.corrected)
+        self.assertEqual(straightened.image, photo)
+
+    def test_a_page_the_ocr_cannot_read_is_reported_and_the_rest_are_read(self):
+        photo, blocks, width, height = _sheet()
+        answers = [
+            PageText(blocks=[], width=width, height=height),
+            PageText(blocks=blocks, width=width, height=height),
+        ]
+        extractor = OcrPlanExtractor(read_page=lambda _content, _name=None: answers.pop(0))
+
+        data, observations = extractor.extract([photo, photo])
+        self.assertEqual(observations, ["La página 1 no tiene texto que el OCR pueda leer."])
+        self.assertEqual(data["pages"][0]["full_text"], "")
+        self.assertIn("PLANTA ALTA", data["pages"][1]["full_text"])
+        self.assertEqual(data["document_type"], "PLANTA ALTA")
+
+    def test_each_photo_is_reported_as_it_is_read(self):
+        photo, blocks, width, height = _sheet()
+        seen = []
+        self._extractor(blocks, width, height).extract([photo, photo], on_page=seen.append)
+        self.assertEqual(seen, [0, 1])
+
+    def test_a_page_opencv_cannot_open_still_gets_its_text(self):
+        """No OpenCV, no cuadros -- but the OCR text is not lost with them."""
+        _photo, blocks, width, height = _sheet()
+        data, _observations = self._extractor(blocks, width, height).extract([b"esto no es una imagen"])
+        self.assertIn("PLANTA ALTA", data["pages"][0]["full_text"])
+        self.assertEqual(data["pages"][0]["tables"], [])
 
 
 if __name__ == "__main__":

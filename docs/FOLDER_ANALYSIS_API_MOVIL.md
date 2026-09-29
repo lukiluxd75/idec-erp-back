@@ -34,7 +34,7 @@ Authorization: Bearer <access_token de Keycloak>
 
 | Campo | Tipo | Detalle |
 |---|---|---|
-| `files` | archivo, **se repite** | Una o varias fotos, en el orden en que se sacaron. Máximo **10 por envío** y **15 MB por foto**. Formatos: JPEG, PNG o WEBP. |
+| `files` | archivo, **se repite** | Una o varias fotos, en el orden en que se sacaron. Máximo **10 por envío** y **15 MB por archivo**. Formatos: JPEG, PNG, WEBP o **PDF**. |
 
 Un documento de varias páginas, como un folio o un plano grande, se puede enviar en un
 solo envío con varias `files`, o en varios envíos. En el escritorio el arquitecto
@@ -67,6 +67,14 @@ Una entrada por foto, en el mismo orden en que se enviaron:
 `status: "inbox"` significa que la foto está en la bandeja del arquitecto, sin
 clasificar. La app no necesita guardar el `id` para nada más.
 
+### PDF
+
+Un PDF se separa en el servidor en **una foto por página** (máximo 20 páginas), y
+desde ahí es indistinguible de una foto del celular: se clasifica, se ordena y se
+lee igual, en los tres carriles. Por eso la respuesta puede traer **más entradas
+que archivos enviados**: cada página vuelve como su propia captura, en orden de
+lectura, con el nombre del PDF y el número de página (`contrato · pág. 2`).
+
 ### Errores
 
 Todas las respuestas de error tienen la forma `{"detail": "<mensaje en español para el usuario>"}`.
@@ -75,7 +83,7 @@ Todas las respuestas de error tienen la forma `{"detail": "<mensaje en español 
 |---|---|
 | `401` | Token ausente, vencido o inválido. Renovar el token y reintentar. |
 | `403` | El rol del usuario no tiene `folder-analysis.edit`. |
-| `422` | Sin fotos, más de 10, una foto vacía o de más de 15 MB, o un archivo que no es una imagen legible. El mensaje indica qué foto falló (por ejemplo, "La foto 2 no es una imagen válida"). **Si falla una, no se guarda ninguna.** |
+| `422` | Sin archivos, más de 10, uno vacío o de más de 15 MB, un archivo que no es una imagen legible, o un PDF ilegible, con contraseña o de más de 20 páginas. El mensaje empieza con el nombre del archivo que falló (por ejemplo, `folio.pdf: El PDF no se pudo abrir…`). **Si falla uno, no se guarda ninguno.** |
 
 ---
 

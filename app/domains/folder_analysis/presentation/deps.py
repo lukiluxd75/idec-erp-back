@@ -15,6 +15,7 @@ from app.domains.folder_analysis.application.use_cases import (
     GetCaptureImageUseCase,
     GetDocumentUseCase,
     ListDocumentsUseCase,
+    ListReviewedDocumentsUseCase,
     ListInboxUseCase,
     ReviewDocumentUseCase,
     RunServerReadingUseCase,
@@ -27,6 +28,7 @@ from app.domains.folder_analysis.domain.ports import (
     DocumentRepositoryPort,
     ExtractionQueuePort,
     FolioExtractionPort,
+    PdfRasterizerPort,
     ServerReadingPort,
     TaxExtractionPort,
     TaxStructurerPort,
@@ -34,9 +36,11 @@ from app.domains.folder_analysis.domain.ports import (
 )
 from app.domains.folder_analysis.infrastructure.digitization_queue import DigitizationQueue
 from app.domains.folder_analysis.infrastructure.folios_extractor import FoliosExtractor
+from app.domains.folder_analysis.infrastructure.ocr_plan_extractor import OcrPlanExtractor
 from app.domains.folder_analysis.infrastructure.ocr_tax_extractor import OcrTaxExtractor
 from app.domains.folder_analysis.infrastructure.ollama_fur_structurer import OllamaFurStructurer
 from app.domains.folder_analysis.infrastructure.opencv_thumbnail import OpenCvThumbnail
+from app.domains.folder_analysis.infrastructure.pdfium_rasterizer import PdfiumRasterizer
 from app.domains.folder_analysis.infrastructure.sql_capture_repository import SqlCaptureRepository
 from app.domains.folder_analysis.infrastructure.sql_document_repository import SqlDocumentRepository
 
@@ -44,6 +48,11 @@ from app.domains.folder_analysis.infrastructure.sql_document_repository import S
 @lru_cache()
 def get_thumbnails() -> ThumbnailPort:
     return OpenCvThumbnail()
+
+
+@lru_cache()
+def get_pdf_rasterizer() -> PdfRasterizerPort:
+    return PdfiumRasterizer()
 
 
 def get_capture_repository(db: Session = Depends(get_db)) -> CaptureRepositoryPort:
@@ -79,11 +88,18 @@ def get_tax_extractor() -> TaxExtractionPort:
 
 
 @lru_cache()
+def get_plan_extractor() -> ServerReadingPort:
+    return OcrPlanExtractor()
+
+
+@lru_cache()
 def get_server_readers() -> Dict[str, ServerReadingPort]:
-    """The lanes that are read here instead of on the architects' PCs."""
+    """The three lanes, all read here with PaddleOCR and OpenCV instead of on
+    the architects' PCs."""
     return {
         DocumentType.FOLIO: get_folio_extractor(),
         DocumentType.TAX_RECEIPT: get_tax_extractor(),
+        DocumentType.PLAN: get_plan_extractor(),
     }
 
 
@@ -112,7 +128,7 @@ def get_synchronizer(
 def get_upload_captures_use_case(
     captures: CaptureRepositoryPort = Depends(get_capture_repository),
 ) -> UploadCapturesUseCase:
-    return UploadCapturesUseCase(captures, get_thumbnails())
+    return UploadCapturesUseCase(captures, get_thumbnails(), get_pdf_rasterizer())
 
 
 def get_list_inbox_use_case(captures: CaptureRepositoryPort = Depends(get_capture_repository)) -> ListInboxUseCase:
@@ -172,6 +188,12 @@ def get_list_documents_use_case(
     synchronizer: DocumentSynchronizer = Depends(get_synchronizer),
 ) -> ListDocumentsUseCase:
     return ListDocumentsUseCase(documents, synchronizer)
+
+
+def get_list_reviewed_documents_use_case(
+    documents: DocumentRepositoryPort = Depends(get_document_repository),
+) -> ListReviewedDocumentsUseCase:
+    return ListReviewedDocumentsUseCase(documents)
 
 
 def get_review_document_use_case(

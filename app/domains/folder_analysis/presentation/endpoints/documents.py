@@ -9,6 +9,7 @@ from app.domains.folder_analysis.application.use_cases import (
     DeleteDocumentUseCase,
     GetDocumentUseCase,
     ListDocumentsUseCase,
+    ListReviewedDocumentsUseCase,
     ReviewDocumentUseCase,
     SetDocumentPagesUseCase,
 )
@@ -19,6 +20,7 @@ from app.domains.folder_analysis.presentation.deps import (
     get_delete_document_use_case,
     get_get_document_use_case,
     get_list_documents_use_case,
+    get_list_reviewed_documents_use_case,
     get_review_document_use_case,
     get_set_pages_use_case,
     run_server_reading,
@@ -55,6 +57,16 @@ def list_documents(
 ):
     """The user's documents, newest first. Refreshes the ones being analyzed."""
     return [DocumentSummary.from_entity(d) for d in use_case.execute(user.sub, doc_type)]
+
+
+@router.get("/reviewed", response_model=List[DocumentDetail])
+def list_reviewed_documents(
+    doc_type: Optional[DocType] = Query(None),
+    use_case: ListReviewedDocumentsUseCase = Depends(get_list_reviewed_documents_use_case),
+    user: UserProfile = Depends(require_permission("folder-analysis.view")),
+):
+    """Saved reviews only, with the confirmed data for the current user."""
+    return [DocumentDetail.from_entity(d) for d in use_case.execute(user.sub, doc_type)]
 
 
 @router.get("/{document_id}", response_model=DocumentDetail)

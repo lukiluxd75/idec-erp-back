@@ -8,10 +8,20 @@ from app.domains.folder_analysis.domain.exceptions import (
     CaptureNotFoundException,
     InvalidCaptureException,
 )
-from app.domains.folder_analysis.domain.ports import CaptureRepositoryPort, ThumbnailPort
+from app.domains.folder_analysis.domain.ports import (
+    CaptureRepositoryPort,
+    PdfRasterizerPort,
+    ThumbnailPort,
+)
 
 MAX_FILES_PER_UPLOAD = 10
 MAX_FILE_BYTES = 15 * 1024 * 1024
+# A PDF arrives as one file and becomes one photo per page, so it is counted in
+# pages and not against the ten files of the upload. Past this many pages it is
+# not one document any more, it is a whole carpeta scanned in one go.
+MAX_PDF_PAGES = 20
+
+PDF_MAGIC = b"%PDF"
 
 # Web-sized copies of the last photos looked at. A photo never changes once it is
 # uploaded, so a copy made for one architect is the copy for everyone; without it
@@ -50,38 +60,90 @@ _previews = _PreviewCache()
 
 
 class UploadCapturesUseCase:
-    """Photos sent from the mobile app land in the architect's inbox, unsorted."""
+    """Photos sent from the mobile app, or picked on the web, land in the
+    architect's inbox unsorted.
 
-    def __init__(self, repository: CaptureRepositoryPort, thumbnails: ThumbnailPort):
+    A PDF -- a folio scanned at the counter, a comprobante downloaded from the
+    bank, a plano exported from CAD -- is separated here into one photo per
+    page. From the inbox on, nothing can tell those pages apart from photos
+    taken with the phone: they are dropped on a lane, ordered and read exactly
+    the same, in the three lanes alike."""
+
+    def __init__(
+        self, repository: CaptureRepositoryPort, thumbnails: ThumbnailPort, pdfs: PdfRasterizerPort
+    ):
         self._repository = repository
         self._thumbnails = thumbnails
+        self._pdfs = pdfs
 
     def execute(self, files: List[Tuple[bytes, str, str]], user_sub: str) -> List[Capture]:
         """`files`: (content, mime, file_name) in the order they were sent."""
         if not files:
-            raise InvalidCaptureException("Debe enviar al menos una foto.")
+            raise InvalidCaptureException("Debe enviar al menos un archivo.")
         if len(files) > MAX_FILES_PER_UPLOAD:
-            raise InvalidCaptureException(f"Puede enviar como máximo {MAX_FILES_PER_UPLOAD} fotos a la vez.")
+            raise InvalidCaptureException(
+                f"Puede enviar como máximo {MAX_FILES_PER_UPLOAD} archivos a la vez."
+            )
 
+        # Each entry carries the place it has in the answer, because a PDF's pages
+        # are stored in the opposite order to the one they are read in.
         prepared = []
         for number, (content, mime, file_name) in enumerate(files, start=1):
+            name = (file_name or f"archivo-{number}").strip() or f"archivo-{number}"
             if not content:
-                raise InvalidCaptureException(f"La foto {number} llegó vacía.")
+                raise InvalidCaptureException(f"{name}: el archivo llegó vacío.")
             if len(content) > MAX_FILE_BYTES:
-                raise InvalidCaptureException(f"La foto {number} supera los 15 MB.")
-            try:
-                thumbnail = self._thumbnails.make(content)
-            except InvalidCaptureException:
-                raise InvalidCaptureException(
-                    f"La foto {number} no es una imagen válida (se aceptan JPG, PNG o WEBP)."
-                ) from None
-            safe_mime = mime if (mime or "").startswith("image/") else "image/jpeg"
-            prepared.append((content, safe_mime, (file_name or f"foto-{number}.jpg")[:255], thumbnail))
+                raise InvalidCaptureException(f"{name}: supera los 15 MB.")
+            place = (number, 0)
+            if self._is_pdf(content, mime, name):
+                prepared.extend(self._from_pdf(content, name, number))
+            else:
+                prepared.append((place, *self._from_image(content, mime, name)))
 
-        return [
-            self._repository.create(user_sub, file_name, mime, content, thumbnail)
-            for content, mime, file_name, thumbnail in prepared
+        # Nothing is written until every file has been read: half a carpeta in
+        # the bandeja and an error on screen is worse than no upload at all.
+        # Written in the order the bandeja wants to show them, answered in the
+        # order they were sent (a PDF's pages, in reading order).
+        created = [
+            (order, self._repository.create(user_sub, file_name, mime, content, thumbnail))
+            for order, content, mime, file_name, thumbnail in prepared
         ]
+        return [capture for _, capture in sorted(created, key=lambda pair: pair[0])]
+
+    @staticmethod
+    def _is_pdf(content: bytes, mime: str, file_name: str) -> bool:
+        # What the file starts with, not what the browser called it: a Windows
+        # file picker often hands over no mime at all.
+        if content.startswith(PDF_MAGIC):
+            return True
+        return (mime or "").lower() == "application/pdf" and file_name.lower().endswith(".pdf")
+
+    def _from_image(self, content: bytes, mime: str, name: str) -> Tuple[bytes, str, str, bytes]:
+        try:
+            thumbnail = self._thumbnails.make(content)
+        except InvalidCaptureException:
+            raise InvalidCaptureException(
+                f"{name}: no es una imagen válida (se aceptan JPG, PNG, WEBP o PDF)."
+            ) from None
+        safe_mime = mime if (mime or "").startswith("image/") else "image/jpeg"
+        return (content, safe_mime, name[:255], thumbnail)
+
+    def _from_pdf(self, content: bytes, name: str, number: int) -> List[Tuple]:
+        try:
+            pages = self._pdfs.pages(content, MAX_PDF_PAGES)
+        except InvalidCaptureException as exc:
+            raise InvalidCaptureException(f"{name}: {exc.message}") from None
+
+        label = name[:-4] if name.lower().endswith(".pdf") else name
+        # The bandeja shows the newest photo first, so the pages are stored from
+        # the last one backwards and the architect reads page 1 at the top.
+        prepared = []
+        for index in reversed(range(len(pages))):
+            page_name = f"{label} · pág. {index + 1}" if len(pages) > 1 else label
+            prepared.append(
+                ((number, index), pages[index], "image/jpeg", page_name[:255], self._thumbnails.make(pages[index]))
+            )
+        return prepared
 
 
 class ListInboxUseCase:

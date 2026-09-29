@@ -121,8 +121,14 @@ class ExtractionProfile:
     output_template: Optional[Dict[str, Any]]
 
 
+# What a lane sends to the architects' PCs. Every lane is read on the server now
+# (DocumentType.SERVER_READ), so nothing reaches the queue and these are only the
+# templates the stored results are shaped against.
 PROFILES: Dict[str, ExtractionProfile] = {
     DocumentType.FOLIO: ExtractionProfile(FOLIO_INSTRUCTIONS, FOLIO_TEMPLATE),
     DocumentType.TAX_RECEIPT: ExtractionProfile(TAX_RECEIPT_INSTRUCTIONS, TAX_RECEIPT_TEMPLATE),
-    DocumentType.PLAN: ExtractionProfile(None, None),
 }
+
+# A lane with nothing to declare gets the queue's generic digitization (text,
+# fields and tables) -- what the plano was sent with before it was read here.
+GENERIC_PROFILE = ExtractionProfile(None, None)
