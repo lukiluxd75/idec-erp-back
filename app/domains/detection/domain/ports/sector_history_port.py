@@ -12,9 +12,15 @@ class SectorHistoryPort(ABC):
     and Historial's full detail view. Never writes anything."""
 
     @abstractmethod
-    def list_map_items(self, campaign_id: Optional[int] = None) -> List[ProcessedSectorMapItem]:
+    def list_map_items(
+        self, campaign_id: Optional[int] = None, unassigned_only: bool = False
+    ) -> List[ProcessedSectorMapItem]:
         """Every non-deleted processed_sector with its geometry, for the map
-        overlay. Optionally scoped to one campaign."""
+        overlay. `campaign_id` scopes to one campaign; `unassigned_only`
+        (ignored when `campaign_id` is given) scopes to sectors with no
+        campaign at all -- "Mapa y detección"'s "Sin campaña" filter, distinct
+        from the unfiltered browse-everything call Historial makes with
+        neither argument set."""
 
     @abstractmethod
     def get_detail(self, processed_sector_id: int) -> Optional[ProcessedSectorDetail]:
