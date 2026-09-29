@@ -9,16 +9,19 @@ class DocumentType:
     PLAN = "plan"
 
     ALL = (FOLIO, TAX_RECEIPT, PLAN)
-    # Read here on the server with OCR + the form's rules (seconds), instead of
-    # being queued to the architects' PCs for the vision model (minutes). These
-    # documents carry no job id: RunServerReadingUseCase writes their result.
-    SERVER_READ = (FOLIO, TAX_RECEIPT)
+    # Every lane is read here on the server, with the GAMC PaddleOCR service and
+    # OpenCV (seconds), and none is queued to the architects' PCs for the vision
+    # model any more (minutes per sheet). A folio and a comprobante are forms, so
+    # rules read them; a plano has no fixed layout, so what is stored is its text,
+    # its labelled values and its tables. None of them carries a job id:
+    # RunServerReadingUseCase writes their result.
+    SERVER_READ = (FOLIO, TAX_RECEIPT, PLAN)
 
 
 class DocumentStatus:
     DRAFT = "draft"            # pages being arranged, not sent yet
-    QUEUED = "queued"          # sent to the PCs, none started
-    PROCESSING = "processing"  # at least one page running on a PC
+    QUEUED = "queued"          # analysis asked for, no page started yet
+    PROCESSING = "processing"  # at least one page being read
     EXTRACTED = "extracted"    # every page done, merged result ready for review
     FAILED = "failed"          # a page could not be analyzed after its retries
     REVIEWED = "reviewed"      # the architect saved the corrected data
