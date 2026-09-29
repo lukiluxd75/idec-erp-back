@@ -9,7 +9,8 @@ sqlalchemy>=2.0.30
 psycopg2-binary>=2.9.9
 ldap3==2.9.1
 
-# detection domain — maps PostGIS geometry columns in schema detection_results
+# detection/alignment domains — map PostGIS geometry columns in schemas
+# detection_results/alignment_results
 geoalchemy2>=0.14
 
 # geoextraction domain
@@ -21,4 +22,5 @@ pandas>=2.0
 # chatbot domain
 pytesseract>=0.3.10
 opencv-python-headless>=4.9
+# also used by alignment domain's least-squares affine fit
 numpy>=1.26
