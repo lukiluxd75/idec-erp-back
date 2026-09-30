@@ -3,8 +3,10 @@ import logging
 
 import pyodbc
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
+
+from app.domains.security.contracts import UserProfile, require_permission
 
 from ...application.use_cases.export_excel import build_excel
 from ...application.use_cases.export_pdf import build_pdf
@@ -67,8 +69,8 @@ def _get_export_report(start_date: date, end_date: date, district: int | None, p
         raise _database_error(exc) from exc
 
 
-@router.get("/api/procedurereports/filters")
-def list_filters():
+@router.get("/filters")
+def list_filters(_user: UserProfile = Depends(require_permission("procedurereports.view"))):
     try:
         return {
             "unitId": settings.unit_id,
@@ -82,12 +84,13 @@ def list_filters():
         raise _database_error(exc) from exc
 
 
-@router.get("/api/procedurereports/reports")
+@router.get("/reports")
 def get_report(
     start_date: date = Query(date(2026, 8, 1)),
     end_date: date = Query(date(2026, 8, 31)),
     district: int | None = Query(7),
     procedure_types: str | None = Query(None),
+    _user: UserProfile = Depends(require_permission("procedurereports.view")),
 ):
     try:
         return _get_report(start_date, end_date, district, procedure_types)
@@ -97,12 +100,13 @@ def get_report(
         raise _database_error(exc) from exc
 
 
-@router.get("/api/procedurereports/reports/export/excel")
+@router.get("/reports/export/excel")
 def export_excel(
     start_date: date = Query(date(2026, 8, 1)),
     end_date: date = Query(date(2026, 8, 31)),
     district: int | None = Query(7),
     procedure_types: str | None = Query(None),
+    _user: UserProfile = Depends(require_permission("procedurereports.view")),
 ):
     data = _get_export_report(start_date, end_date, district, procedure_types)
     filename = f"reporte-cartografia-{start_date.isoformat()}-{end_date.isoformat()}.xlsx"
@@ -113,12 +117,13 @@ def export_excel(
     )
 
 
-@router.get("/api/procedurereports/reports/export/pdf")
+@router.get("/reports/export/pdf")
 def export_pdf(
     start_date: date = Query(date(2026, 8, 1)),
     end_date: date = Query(date(2026, 8, 31)),
     district: int | None = Query(7),
     procedure_types: str | None = Query(None),
+    _user: UserProfile = Depends(require_permission("procedurereports.view")),
 ):
     data = _get_export_report(start_date, end_date, district, procedure_types)
     filename = f"reporte-cartografia-{start_date.isoformat()}-{end_date.isoformat()}.pdf"

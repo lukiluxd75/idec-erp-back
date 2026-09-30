@@ -9,8 +9,16 @@ sqlalchemy>=2.0.30
 psycopg2-binary>=2.9.9
 ldap3==2.9.1
 
-# detection domain — maps PostGIS geometry columns in schema detection_results
+# detection domain — maps PostGIS geometry columns in schema detection_results;
+# xlsxwriter also backs procedurereports' export
 geoalchemy2>=0.14
+xlsxwriter>=3.2
+
+# procedurereports domain — reads a separate SQL Server (see REPORTS_DB_* in
+# .env); pyodbc needs "ODBC Driver 17 for SQL Server" installed on the host,
+# not just this package. reportlab backs its PDF export.
+pyodbc>=5.1
+reportlab>=4.2
 
 # geoextraction domain
 python-multipart>=0.0.9
