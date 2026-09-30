@@ -50,3 +50,28 @@ class TaxStructurerStoppedException(TaxStructurerUnavailableException):
 
     def __init__(self, message: str = "La consulta se detuvo desde el monitor de computadoras."):
         super().__init__(message)
+
+
+class RegisteredFolderNotFoundException(FolderAnalysisException):
+    http_status = 404
+
+    def __init__(self, message: str = "No se encontró la carpeta registrada."):
+        super().__init__(message)
+
+
+class InvalidRegisteredFolderException(FolderAnalysisException):
+    """The name is empty or too long, or the selection is not usable."""
+
+    http_status = 422
+
+
+class RegisteredFolderNameTakenException(FolderAnalysisException):
+    """Two carpetas with the same name could not be told apart in the list."""
+
+    http_status = 409
+
+
+class DocumentAlreadyFiledException(FolderAnalysisException):
+    """A document sits in a single carpeta, like the paper it came from."""
+
+    http_status = 409
