@@ -15,19 +15,37 @@ from app.domains.folder_analysis.application.use_cases.document_use_cases import
     RunServerReadingUseCase,
     SetDocumentPagesUseCase,
 )
+from app.domains.folder_analysis.application.use_cases.registered_folder_use_cases import (
+    AddDocumentsToRegisteredFolderUseCase,
+    CreateRegisteredFolderUseCase,
+    DeleteRegisteredFolderUseCase,
+    GetRegisteredFolderUseCase,
+    ListRegisteredFoldersUseCase,
+    RegisteredFolderService,
+    RemoveDocumentFromRegisteredFolderUseCase,
+    UpdateRegisteredFolderUseCase,
+)
 
 __all__ = [
+    "AddDocumentsToRegisteredFolderUseCase",
     "AnalyzeDocumentUseCase",
     "CreateDocumentUseCase",
+    "CreateRegisteredFolderUseCase",
     "DeleteCaptureUseCase",
     "DeleteDocumentUseCase",
+    "DeleteRegisteredFolderUseCase",
     "GetCaptureImageUseCase",
     "GetDocumentUseCase",
+    "GetRegisteredFolderUseCase",
     "ListDocumentsUseCase",
     "ListReviewedDocumentsUseCase",
     "ListInboxUseCase",
+    "ListRegisteredFoldersUseCase",
+    "RegisteredFolderService",
+    "RemoveDocumentFromRegisteredFolderUseCase",
     "ReviewDocumentUseCase",
     "RunServerReadingUseCase",
     "SetDocumentPagesUseCase",
+    "UpdateRegisteredFolderUseCase",
     "UploadCapturesUseCase",
 ]

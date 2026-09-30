@@ -9,17 +9,26 @@ import numpy as np
 
 from app.domains.folder_analysis.application.document_synchronizer import DocumentSynchronizer
 from app.domains.folder_analysis.application.use_cases import (
+    AddDocumentsToRegisteredFolderUseCase,
     AnalyzeDocumentUseCase,
     CreateDocumentUseCase,
+    CreateRegisteredFolderUseCase,
     DeleteCaptureUseCase,
     DeleteDocumentUseCase,
+    DeleteRegisteredFolderUseCase,
     GetDocumentUseCase,
+    ListRegisteredFoldersUseCase,
+    RegisteredFolderService,
+    RemoveDocumentFromRegisteredFolderUseCase,
     ReviewDocumentUseCase,
     RunServerReadingUseCase,
     SetDocumentPagesUseCase,
+    UpdateRegisteredFolderUseCase,
     UploadCapturesUseCase,
 )
 from app.domains.folder_analysis.domain.entities import (
+    MAX_DOCUMENTS,
+    MAX_NAME_LENGTH,
     Capture,
     CaptureStatus,
     DocumentPage,
@@ -28,12 +37,17 @@ from app.domains.folder_analysis.domain.entities import (
     FolderDocument,
     PageStatus,
     QueuedJob,
+    RegisteredFolder,
 )
 from app.domains.folder_analysis.domain.exceptions import (
     CaptureNotAvailableException,
+    DocumentAlreadyFiledException,
     DocumentBusyException,
     DocumentNotFoundException,
     InvalidCaptureException,
+    InvalidRegisteredFolderException,
+    RegisteredFolderNameTakenException,
+    RegisteredFolderNotFoundException,
     TaxStructurerUnavailableException,
 )
 from app.domains.folder_analysis.domain.extraction_profiles import PROFILES
@@ -41,6 +55,7 @@ from app.domains.folder_analysis.domain.ports import (
     CaptureRepositoryPort,
     DocumentRepositoryPort,
     ExtractionQueuePort,
+    RegisteredFolderRepositoryPort,
     ServerReadingPort,
     TaxStructurerPort,
 )
@@ -1154,6 +1169,268 @@ class TestOcrPlanExtractor(unittest.TestCase):
         self.assertIn("PLANTA ALTA", data["pages"][0]["full_text"])
         self.assertEqual(data["pages"][0]["tables"], [])
 
+
+
+# ------------------------------------------------------- carpetas registradas
+
+class FakeRegisteredFolders(RegisteredFolderRepositoryPort):
+    """In-memory carpetas. Mirrors what the SQL repository guarantees: filing
+    order is kept, and a document can only sit in one carpeta at a time."""
+
+    def __init__(self, documents):
+        self.rows = {}
+        self._owners = {}
+        self._documents = documents
+
+    def _entity(self, row):
+        folder_id, name, notes, ids = row
+        return RegisteredFolder(
+            id=folder_id,
+            user_sub=self._owners[folder_id],
+            name=name,
+            notes=notes,
+            created_at=NOW,
+            updated_at=NOW,
+            documents=[self._documents.rows[i] for i in ids if i in self._documents.rows],
+        )
+
+    def create(self, user_sub, name, notes, document_ids):
+        folder_id = str(uuid.uuid4())
+        self._owners[folder_id] = user_sub
+        self.rows[folder_id] = (folder_id, name, notes, list(document_ids))
+        return self._entity(self.rows[folder_id])
+
+    def get(self, folder_id, user_sub):
+        row = self.rows.get(folder_id)
+        if row is None or self._owners.get(folder_id) != user_sub:
+            return None
+        return self._entity(row)
+
+    def list(self, user_sub):
+        rows = [r for fid, r in self.rows.items() if self._owners.get(fid) == user_sub]
+        return [self._entity(r) for r in sorted(rows, key=lambda r: r[1].lower())]
+
+    def rename(self, folder_id, name, notes):
+        folder_id, _name, _notes, ids = self.rows[folder_id]
+        self.rows[folder_id] = (folder_id, name, notes, ids)
+
+    def set_documents(self, folder_id, document_ids):
+        fid, name, notes, _ids = self.rows[folder_id]
+        self.rows[folder_id] = (fid, name, notes, list(document_ids))
+
+    def delete(self, folder_id):
+        self.rows.pop(folder_id, None)
+        self._owners.pop(folder_id, None)
+
+    def name_taken(self, user_sub, name, exclude_folder_id=None):
+        return any(
+            r[1].lower() == name.strip().lower()
+            for fid, r in self.rows.items()
+            if self._owners.get(fid) == user_sub and fid != exclude_folder_id
+        )
+
+    def folder_names_of_documents(self, user_sub, document_ids, exclude_folder_id=None):
+        taken = {}
+        for fid, (_id, name, _notes, ids) in self.rows.items():
+            if self._owners.get(fid) != user_sub or fid == exclude_folder_id:
+                continue
+            for document_id in ids:
+                if document_id in document_ids:
+                    taken[document_id] = name
+        return taken
+
+
+class TestRegisteredFolders(unittest.TestCase):
+    """The "Carpetas registradas" submodule: the architect names a project and
+    files the documents already solved in it."""
+
+    def setUp(self):
+        self.captures, self.documents = FakeCaptures(), FakeDocuments()
+        self.folders = FakeRegisteredFolders(self.documents)
+        self.service = RegisteredFolderService(self.folders, self.documents)
+
+    def _reviewed(self, doc_type="folio", user_sub="arq-1"):
+        """A document as it looks once its review was saved."""
+        photo = self.captures.create(user_sub, "p.png", "image/png", b"x", b"t")
+        document = self.documents.create(user_sub, doc_type, [photo.id])
+        self.documents.save_progress(document.id, document.pages, DocumentStatus.EXTRACTED, {"a": 1}, None)
+        ReviewDocumentUseCase(self.documents).execute(document.id, user_sub, {"registration_number": "1.1.1"})
+        return self.documents.get(document.id, user_sub)
+
+    def _draft(self, doc_type="plan", user_sub="arq-1"):
+        photo = self.captures.create(user_sub, "p.png", "image/png", b"x", b"t")
+        return self.documents.create(user_sub, doc_type, [photo.id])
+
+    def _create(self, name="Proyecto Sur", notes=None, ids=None, user_sub="arq-1"):
+        return CreateRegisteredFolderUseCase(self.folders, self.service).execute(
+            user_sub, name, notes, ids or []
+        )
+
+    # ------------------------------------------------------------------ create
+
+    def test_a_carpeta_groups_the_three_kinds_of_saved_document(self):
+        folio, tax, plan = self._reviewed("folio"), self._reviewed("tax_receipt"), self._reviewed("plan")
+        folder = self._create("Av. Ballivián 220", "Ampliación", [folio.id, tax.id, plan.id])
+        self.assertEqual(folder.name, "Av. Ballivián 220")
+        self.assertEqual(folder.notes, "Ampliación")
+        self.assertEqual(folder.document_ids, [folio.id, tax.id, plan.id])
+        self.assertEqual(folder.counts_by_type, {"folio": 1, "tax_receipt": 1, "plan": 1})
+
+    def test_the_counters_name_every_type_even_when_empty(self):
+        """The screen draws three counters, so none of them may be missing."""
+        self.assertEqual(self._create().counts_by_type, {"folio": 0, "tax_receipt": 0, "plan": 0})
+
+    def test_the_name_is_required_and_trimmed(self):
+        self.assertEqual(self._create("  Proyecto   Norte  ").name, "Proyecto Norte")
+        with self.assertRaises(InvalidRegisteredFolderException):
+            self._create("   ")
+
+    def test_a_name_too_long_is_refused(self):
+        with self.assertRaises(InvalidRegisteredFolderException):
+            self._create("x" * (MAX_NAME_LENGTH + 1))
+
+    def test_two_carpetas_cannot_share_a_name_however_it_is_typed(self):
+        self._create("Proyecto Sur")
+        with self.assertRaises(RegisteredFolderNameTakenException):
+            self._create("  proyecto sur ")
+
+    def test_another_user_may_use_the_same_project_name(self):
+        self._create("Proyecto Sur")
+        self.assertEqual(self._create("Proyecto Sur", user_sub="arq-2").name, "Proyecto Sur")
+
+    def test_repeated_picks_are_filed_once(self):
+        folio = self._reviewed()
+        self.assertEqual(self._create(ids=[folio.id, folio.id]).document_ids, [folio.id])
+
+    # ------------------------------------------------------------ what may go in
+
+    def test_only_documents_whose_review_was_saved_can_be_filed(self):
+        with self.assertRaises(InvalidRegisteredFolderException):
+            self._create(ids=[self._draft().id])
+
+    def test_another_users_document_cannot_be_filed(self):
+        other = self._reviewed(user_sub="arq-2")
+        with self.assertRaises(DocumentNotFoundException):
+            self._create(ids=[other.id])
+
+    def test_a_document_already_filed_says_which_carpeta_holds_it(self):
+        folio = self._reviewed()
+        self._create("Proyecto Sur", ids=[folio.id])
+        with self.assertRaises(DocumentAlreadyFiledException) as raised:
+            self._create("Proyecto Norte", ids=[folio.id])
+        self.assertIn("Proyecto Sur", raised.exception.message)
+
+    def test_more_documents_than_a_carpeta_admits_are_refused(self):
+        with self.assertRaises(InvalidRegisteredFolderException):
+            self._create(ids=[str(uuid.uuid4()) for _ in range(MAX_DOCUMENTS + 1)])
+
+    # ------------------------------------------------------------------ update
+
+    def test_renaming_alone_keeps_the_documents(self):
+        folio = self._reviewed()
+        folder = self._create("Proyecto Sur", ids=[folio.id])
+        renamed = UpdateRegisteredFolderUseCase(self.folders, self.service).execute(
+            folder.id, "arq-1", "Proyecto Sur — etapa 2", "Con plano nuevo"
+        )
+        self.assertEqual(renamed.name, "Proyecto Sur — etapa 2")
+        self.assertEqual(renamed.notes, "Con plano nuevo")
+        self.assertEqual(renamed.document_ids, [folio.id])
+
+    def test_a_carpeta_can_keep_its_own_name_while_being_edited(self):
+        folder = self._create("Proyecto Sur")
+        self.assertEqual(
+            UpdateRegisteredFolderUseCase(self.folders, self.service)
+            .execute(folder.id, "arq-1", "Proyecto Sur", "otra nota").name,
+            "Proyecto Sur",
+        )
+
+    def test_sending_documents_replaces_the_whole_content(self):
+        folio, tax = self._reviewed("folio"), self._reviewed("tax_receipt")
+        folder = self._create("Proyecto Sur", ids=[folio.id])
+        updated = UpdateRegisteredFolderUseCase(self.folders, self.service).execute(
+            folder.id, "arq-1", "Proyecto Sur", None, [tax.id]
+        )
+        self.assertEqual(updated.document_ids, [tax.id])
+
+    def test_reordering_its_own_documents_is_not_a_conflict(self):
+        folio, tax = self._reviewed("folio"), self._reviewed("tax_receipt")
+        folder = self._create("Proyecto Sur", ids=[folio.id, tax.id])
+        updated = UpdateRegisteredFolderUseCase(self.folders, self.service).execute(
+            folder.id, "arq-1", "Proyecto Sur", None, [tax.id, folio.id]
+        )
+        self.assertEqual(updated.document_ids, [tax.id, folio.id])
+
+    def test_another_user_cannot_touch_the_carpeta(self):
+        folder = self._create("Proyecto Sur")
+        with self.assertRaises(RegisteredFolderNotFoundException):
+            UpdateRegisteredFolderUseCase(self.folders, self.service).execute(
+                folder.id, "arq-2", "Mío"
+            )
+
+    # ------------------------------------------------------- add / remove / delete
+
+    def test_adding_files_at_the_end_and_keeps_what_was_there(self):
+        folio, plan = self._reviewed("folio"), self._reviewed("plan")
+        folder = self._create("Proyecto Sur", ids=[folio.id])
+        added = AddDocumentsToRegisteredFolderUseCase(self.folders, self.service).execute(
+            folder.id, "arq-1", [plan.id]
+        )
+        self.assertEqual(added.document_ids, [folio.id, plan.id])
+
+    def test_adding_what_is_already_inside_is_asked_again(self):
+        folio = self._reviewed()
+        folder = self._create("Proyecto Sur", ids=[folio.id])
+        with self.assertRaises(InvalidRegisteredFolderException):
+            AddDocumentsToRegisteredFolderUseCase(self.folders, self.service).execute(
+                folder.id, "arq-1", [folio.id]
+            )
+
+    def test_removing_leaves_the_document_saved_and_free_to_file_again(self):
+        folio = self._reviewed()
+        folder = self._create("Proyecto Sur", ids=[folio.id])
+        emptied = RemoveDocumentFromRegisteredFolderUseCase(self.folders, self.service).execute(
+            folder.id, "arq-1", folio.id
+        )
+        self.assertEqual(emptied.document_ids, [])
+        self.assertEqual(self.documents.get(folio.id, "arq-1").status, DocumentStatus.REVIEWED)
+        self.assertEqual(self._create("Proyecto Norte", ids=[folio.id]).document_ids, [folio.id])
+
+    def test_removing_something_that_is_not_in_the_carpeta(self):
+        folder = self._create("Proyecto Sur")
+        with self.assertRaises(DocumentNotFoundException):
+            RemoveDocumentFromRegisteredFolderUseCase(self.folders, self.service).execute(
+                folder.id, "arq-1", self._reviewed().id
+            )
+
+    def test_deleting_the_carpeta_keeps_its_documents(self):
+        folio = self._reviewed()
+        folder = self._create("Proyecto Sur", ids=[folio.id])
+        DeleteRegisteredFolderUseCase(self.folders, self.service).execute(folder.id, "arq-1")
+        self.assertEqual(ListRegisteredFoldersUseCase(self.folders).execute("arq-1"), [])
+        self.assertEqual(self.documents.get(folio.id, "arq-1").status, DocumentStatus.REVIEWED)
+
+    def test_another_user_cannot_delete_the_carpeta(self):
+        folder = self._create("Proyecto Sur")
+        with self.assertRaises(RegisteredFolderNotFoundException):
+            DeleteRegisteredFolderUseCase(self.folders, self.service).execute(folder.id, "arq-2")
+
+    # -------------------------------------------------------------------- list
+
+    def test_the_list_is_alphabetical_and_only_the_users_own(self):
+        self._create("Zona Sur")
+        self._create("Achumani")
+        self._create("Ajena", user_sub="arq-2")
+        self.assertEqual(
+            [f.name for f in ListRegisteredFoldersUseCase(self.folders).execute("arq-1")],
+            ["Achumani", "Zona Sur"],
+        )
+
+    def test_a_carpeta_carries_the_saved_data_of_its_documents(self):
+        """The screen shows the matrícula under each row, so the data travels
+        with the carpeta instead of asking for every document."""
+        folio = self._reviewed()
+        folder = self._create("Proyecto Sur", ids=[folio.id])
+        self.assertEqual(folder.documents[0].reviewed_data, {"registration_number": "1.1.1"})
 
 if __name__ == "__main__":
     unittest.main()

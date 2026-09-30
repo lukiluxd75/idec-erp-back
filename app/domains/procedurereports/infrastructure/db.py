@@ -19,7 +19,9 @@ SQL_COLUMN_NAMES = {
 
 def connection_string() -> str:
     if not all((settings.db_server, settings.db_name, settings.db_user, settings.db_password)):
-        raise RuntimeError("Configura DB_SERVER, DB_NAME, DB_USER y DB_PASSWORD en el .env del backend.")
+        raise RuntimeError(
+            "Configura REPORTS_DB_SERVER, REPORTS_DB_NAME, REPORTS_DB_USER y REPORTS_DB_PASSWORD en el .env del backend."
+        )
     return (
         f"DRIVER={{{settings.db_driver}}};"
         f"SERVER={settings.db_server};"
