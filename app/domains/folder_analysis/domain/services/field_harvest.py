@@ -19,6 +19,7 @@ Pure: it only touches the reading it is given (CLAUDE.md §3).
 import re
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from app.domains.folder_analysis.domain.services import spanish_dates
 from app.domains.folder_analysis.domain.services.text import clean_value, compact, normalize
 
 # What is kept of the line that follows a label found in the running text. Longer
@@ -28,6 +29,36 @@ MAX_TEXT_VALUE_CHARS = 80
 # A measurement as it is written on a plano: "12.50", "12,50 m", "240 m2".
 _MEASURE = re.compile(r"^[0-9][0-9.,]*\s*(?:M2|M²|MTS|MT|M)?\b", re.IGNORECASE)
 _FIRST_NUMBER = re.compile(r"\d+")
+
+
+def _spanish_date(match: "re.Match") -> Optional[str]:
+    parts = match.groupdict()
+    return spanish_dates.to_iso_like(
+        parts.get("day", ""), parts.get("month", ""), parts.get("year", "")
+    )
+
+
+# What a field can ask to be done with what its pattern matched.
+TRANSFORMS = {"spanish_date": _spanish_date}
+
+
+def _from_patterns(text: str, spec: Any) -> Optional[str]:
+    """The value written inside a sentence, for a sheet that has no labels.
+
+    A notarial act names nothing: the number of the notary, the person and the
+    date are inside its prose, and what identifies them is the wording around
+    them. Searched on the whole normalized text -- one line, so a sentence that
+    wraps is still one sentence.
+    """
+    transform = TRANSFORMS.get(getattr(spec, "transform", None))
+    for pattern in getattr(spec, "patterns", ()):
+        match = re.search(pattern, text)
+        if not match:
+            continue
+        value = transform(match) if transform else clean_value(match.group(1))
+        if value:
+            return value
+    return None
 
 
 def _labelled_pairs(reading: Dict[str, Any]) -> List[Tuple[str, str]]:
@@ -125,10 +156,20 @@ def harvest(
     value under, the label the screen shows and how it comes printed.
     """
     pairs = _labelled_pairs(reading)
-    lines = _lines(reading.get("full_text") or "")
+    text = reading.get("full_text") or ""
+    lines = _lines(text)
+    prose = normalize(text)
     found: Dict[str, str] = {}
     taken: set = set()
     used_lines: set = set()
+
+    # The wording of the document comes first: a field that says how its sentence
+    # reads is describing that document and nothing else, which is stronger than
+    # a label that happens to start the same way.
+    for spec in specs:
+        value = _from_patterns(prose, spec)
+        if value:
+            found[spec.key] = value
 
     # The pairs the OCR already separated are the sure thing, and an exact label
     # beats one that only starts the same way. Only then is the body of the

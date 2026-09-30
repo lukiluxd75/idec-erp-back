@@ -17,6 +17,7 @@ from typing import Any, Dict, Optional, Tuple
 
 # qué carriles tiene una carpeta, y por el paquete eso sería un círculo.
 from app.domains.folder_analysis.domain.entities.folder_document import DocumentType
+from app.domains.folder_analysis.domain.services import spanish_dates
 
 
 class FieldSource:
@@ -218,9 +219,10 @@ POSSESSORS = FolderTypeSpec(
                 ),
                 FolderField(
                     key="statement_dates",
-                    label="Fechas de la declaración jurada",
+                    label="Fecha de la declaración jurada",
                     source=FieldSource.DOCUMENT,
                     from_document=DocumentType.SWORN_STATEMENT,
+                    hint="En dd/mm/aaaa. El acta la escribe con letras y la lectura la pasa a cifras.",
                 ),
                 FolderField(
                     key="legal_status",
@@ -311,10 +313,51 @@ class DocumentField:
 
     key: str
     label: str
-    printed: Tuple[str, ...]
+    printed: Tuple[str, ...] = ()
     # The office asks for this one by number, not by name (the notary), so only
     # the number of what was read is kept.
     number_only: bool = False
+    # How the value is written when the sheet has no labels at all -- a notarial
+    # act is running prose, and what identifies a value there is the sentence it
+    # sits in ("se hizo presente NOMBRE con Cédula de Identidad"). Regexes over
+    # the normalized text (uppercase, no accents, single spaces); group 1 is the
+    # value, or the named groups the transform asks for.
+    patterns: Tuple[str, ...] = ()
+    # Post-processing of what the pattern matched. Today only "spanish_date",
+    # which turns a date written in words into dd/mm/aaaa.
+    transform: Optional[str] = None
+
+
+# Lo que se le saca a un acta notarial. No tiene rótulos: el número del notario,
+# la persona y la fecha están dentro de su redacción, así que cada campo dice en
+# qué frase vive. Las etiquetas (`printed`) quedan igual para la hoja que sí las
+# trae rotuladas, como un formulario municipal con casillas.
+NOTARIAL_FIELDS: Tuple["DocumentField", ...] = (
+    DocumentField(
+        "notary_number",
+        "Notario (Nº)",
+        printed=("NOTARIA DE FE PUBLICA", "NOTARIA", "NOTARIO"),
+        number_only=True,
+        patterns=(r"NOTARI[AO] DE FE PUBLICA[,\s]*(?:N[°ºO]?[.\s]*)?(\d+)",),
+    ),
+    DocumentField(
+        "owner_name",
+        "Nombre del propietario",
+        printed=("NOMBRE DEL PROPIETARIO", "PROPIETARIO", "DECLARANTE"),
+        patterns=(
+            # "se hizo presente NOELIA ALMENDRAS RODRIGUEZ con Cédula de Identidad"
+            r"SE HIZO PRESENTE[,:\s]+(.+?)[,\s]+CON (?:CEDULA DE IDENTIDAD|C\.? ?I\.?)",
+            r"(?:COMPARECE|COMPARECIO)[,:\s]+(.+?)[,\s]+CON (?:CEDULA DE IDENTIDAD|C\.? ?I\.?)",
+        ),
+    ),
+    DocumentField(
+        "statement_dates",
+        "Fecha de la declaración jurada",
+        printed=("FECHA", "FECHAS"),
+        patterns=spanish_dates.PATTERNS,
+        transform="spanish_date",
+    ),
+)
 
 
 # Keyed by (carpeta, document): the same document read inside two carpetas can
@@ -333,20 +376,10 @@ DOCUMENT_FIELDS: Dict[Tuple[str, str], Tuple[DocumentField, ...]] = {
             ("SUPERFICIE UTIL", "SUP. UTIL", "SUP UTIL", "AREA UTIL", "SUPERFICIE"),
         ),
     ),
-    (POSSESSORS_KEY, DocumentType.SWORN_STATEMENT): (
-        DocumentField(
-            "notary_number",
-            "Notario (Nº)",
-            ("NOTARIA DE FE PUBLICA", "NOTARIA", "NOTARIO"),
-            number_only=True,
-        ),
-        DocumentField(
-            "owner_name",
-            "Nombre del propietario",
-            ("NOMBRE DEL PROPIETARIO", "PROPIETARIO", "DECLARANTE"),
-        ),
-        DocumentField("statement_dates", "Fechas de la declaración jurada", ("FECHA", "FECHAS")),
-    ),
+    (POSSESSORS_KEY, DocumentType.SWORN_STATEMENT): NOTARIAL_FIELDS,
+    # El acta notarial llega clasificada unas veces como declaración jurada y
+    # otras como formulario, y es la misma hoja: se le saca lo mismo.
+    (POSSESSORS_KEY, DocumentType.FORM): NOTARIAL_FIELDS,
 }
 
 

@@ -68,6 +68,7 @@ from app.domains.folder_analysis.domain.folder_types import (
     folder_type,
 )
 from app.domains.folder_analysis.domain.services.field_harvest import harvest, observation
+from app.domains.folder_analysis.domain.services.spanish_dates import to_iso_like, words_to_number
 from app.domains.folder_analysis.domain.ports import (
     CaptureRepositoryPort,
     DocumentRepositoryPort,
@@ -1704,6 +1705,78 @@ class CosechaDeCamposTests(unittest.TestCase):
     def test_nothing_is_asked_of_a_document_the_carpeta_says_nothing_about(self):
         self.assertEqual(document_fields("general", DocumentType.FOLIO), ())
         self.assertEqual(document_fields("possessors", DocumentType.ID_CARD), ())
+
+
+class ActaNotarialTests(unittest.TestCase):
+    """Un acta notarial no rotula nada: el número del notario, la persona y la
+    fecha viven dentro de su redacción, y la fecha viene escrita con letras."""
+
+    FIELDS = document_fields("possessors", DocumentType.SWORN_STATEMENT)
+
+    # El párrafo de apertura, tal como lo lee el OCR de un acta de Cochabamba.
+    ACTA = (
+        "En el municipio de Cochabamba del departamento de Cochabamba del Estado Plurinacional de\n"
+        "Bolivia, a horas 13:18 (trece y dieciocho), del día, lunes veintiun del mes de septiembre del año dos\n"
+        "mil veintiseis, ANTE MÍ ANGEL RODRIGUEZ SALAZAR, Notario de Fe Pública N° 15 del municipio\n"
+        "de Cochabamba del departamento de Cochabamba, se hizo presente NOELIA ALMENDRAS\n"
+        "RODRIGUEZ con Cédula de Identidad N° 8806991 (ocho, ocho, cero, seis, nueve, nueve, uno),\n"
+        "Boliviana, Soltera, mayor de edad, de profesión ESTUDIANTE, con domicilio en AV. PETROLERA"
+    )
+
+    def _harvest(self, text):
+        reading = {"full_text": text, "pages": [{"fields": [], "full_text": text, "tables": []}]}
+        return harvest(reading, self.FIELDS)[0]
+
+    def test_reads_the_three_values_out_of_the_opening_paragraph(self):
+        values = self._harvest(self.ACTA)
+        self.assertEqual(values["notary_number"], "15")
+        self.assertEqual(values["owner_name"], "NOELIA ALMENDRAS RODRIGUEZ")
+        self.assertEqual(values["statement_dates"], "21/09/2026")
+
+    def test_the_name_stops_at_the_identity_card(self):
+        """Sin el corte, el nombre se llevaba media acta -- la nacionalidad, el
+        estado civil y el domicilio van en la misma frase."""
+        self.assertNotIn("CEDULA", self._harvest(self.ACTA)["owner_name"])
+
+    def test_another_wording_of_the_same_act(self):
+        values = self._harvest(
+            "A los veintiun días del mes de septiembre de dos mil veintiseis, ante mí, "
+            "Notaria de Fe Pública Nº 3, compareció JUAN PEREZ LOPEZ con C.I. 123"
+        )
+        self.assertEqual(values["notary_number"], "3")
+        self.assertEqual(values["owner_name"], "JUAN PEREZ LOPEZ")
+        self.assertEqual(values["statement_dates"], "21/09/2026")
+
+    def test_a_date_already_written_in_figures(self):
+        self.assertEqual(self._harvest("Cochabamba, 5 de enero de 1998.")["statement_dates"], "05/01/1998")
+
+    def test_a_sheet_that_says_none_of_it_leaves_everything_empty(self):
+        self.assertEqual(set(self._harvest("HOJA CUALQUIERA").values()), {None})
+
+
+class FechasEnLetrasTests(unittest.TestCase):
+    def test_the_year_of_an_old_minuta_and_of_a_recent_one(self):
+        self.assertEqual(words_to_number("MIL NOVECIENTOS NOVENTA Y DOS"), 1992)
+        self.assertEqual(words_to_number("DOS MIL VEINTISEIS"), 2026)
+
+    def test_the_ways_a_day_is_written(self):
+        self.assertEqual(words_to_number("VEINTIUN"), 21)
+        self.assertEqual(words_to_number("PRIMERO"), 1)
+        self.assertEqual(words_to_number("TREINTA Y UNO"), 31)
+
+    def test_what_is_not_a_number_is_not_invented(self):
+        self.assertIsNone(words_to_number("CUALQUIER COSA"))
+        self.assertIsNone(words_to_number(""))
+
+    def test_the_three_parts_become_one_date(self):
+        self.assertEqual(to_iso_like("VEINTIUN", "SEPTIEMBRE", "DOS MIL VEINTISEIS"), "21/09/2026")
+        self.assertEqual(to_iso_like("5", "ENERO", "1998"), "05/01/1998")
+
+    def test_half_a_date_is_no_date(self):
+        """Una fecha a medias es peor que ninguna: nadie la vuelve a mirar."""
+        self.assertIsNone(to_iso_like("CUARENTA", "SEPTIEMBRE", "DOS MIL"))
+        self.assertIsNone(to_iso_like("DIEZ", "BRUMARIO", "DOS MIL"))
+        self.assertIsNone(to_iso_like("DIEZ", "ENERO", "MIL OCHOCIENTOS"))
 
 
 class LecturaQueLlenaLaCarpetaTests(unittest.TestCase):
