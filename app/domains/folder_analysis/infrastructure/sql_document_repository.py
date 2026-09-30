@@ -14,6 +14,7 @@ from app.domains.folder_analysis.domain.ports import DocumentRepositoryPort
 from app.domains.folder_analysis.infrastructure.models import (
     DocumentModel,
     DocumentPageModel,
+    RegisteredFolderItemModel,
     ReviewedFolioModel,
     ReviewedPlanModel,
     ReviewedTaxReceiptModel,
@@ -41,10 +42,12 @@ def _to_entity(row: DocumentModel, with_data: bool) -> FolderDocument:
         id=str(row.id),
         user_sub=row.user_sub,
         doc_type=row.doc_type,
+        folder_type=row.folder_type,
         status=row.status,
         created_at=row.created_at,
         updated_at=row.updated_at,
         pages=[_to_page(p) for p in row.pages],
+        folder_id=str(row.folder_item.folder_id) if row.folder_item else None,
         extracted_data=row.extracted_data if with_data else None,
         reviewed_data=row.reviewed_data if with_data else None,
         error=row.error,
@@ -78,8 +81,19 @@ class SqlDocumentRepository(DocumentRepositoryPort):
             query = query.options(undefer(DocumentModel.extracted_data), undefer(DocumentModel.reviewed_data))
         return self._db.execute(query).scalar_one_or_none()
 
-    def create(self, user_sub: str, doc_type: str, capture_ids: List[str]) -> FolderDocument:
-        row = DocumentModel(user_sub=user_sub, doc_type=doc_type, status=DocumentStatus.DRAFT)
+    def create(
+        self,
+        user_sub: str,
+        doc_type: str,
+        capture_ids: List[str],
+        folder_type: Optional[str] = None,
+    ) -> FolderDocument:
+        row = DocumentModel(
+            user_sub=user_sub,
+            doc_type=doc_type,
+            folder_type=folder_type,
+            status=DocumentStatus.DRAFT,
+        )
         row.pages = _new_pages(capture_ids)
         self._db.add(row)
         self._db.commit()
@@ -91,21 +105,45 @@ class SqlDocumentRepository(DocumentRepositoryPort):
             return None
         return _to_entity(row, with_data=True)
 
-    def list(self, user_sub: str, doc_type: Optional[str] = None) -> List[FolderDocument]:
-        query = select(DocumentModel).where(DocumentModel.user_sub == user_sub)
+    def _filtered(self, query, doc_type: Optional[str], folder_id: Optional[str]):
+        """The two filters both listings share. Narrowing by carpeta joins the
+        rows that file the documents: which carpeta holds a document is stored
+        there and nowhere else. An id that is not a uuid matches nothing, which
+        is what a carpeta that does not exist should show."""
         if doc_type:
             query = query.where(DocumentModel.doc_type == doc_type)
+        if folder_id:
+            query = query.join(
+                RegisteredFolderItemModel,
+                RegisteredFolderItemModel.document_id == DocumentModel.id,
+            ).where(RegisteredFolderItemModel.folder_id == parse_uuid(folder_id))
+        return query
+
+    def list(
+        self,
+        user_sub: str,
+        doc_type: Optional[str] = None,
+        folder_id: Optional[str] = None,
+    ) -> List[FolderDocument]:
+        query = self._filtered(
+            select(DocumentModel).where(DocumentModel.user_sub == user_sub), doc_type, folder_id
+        )
         rows = self._db.execute(query.order_by(DocumentModel.created_at.desc())).scalars()
         return [_to_entity(row, with_data=False) for row in rows]
 
-    def list_reviewed(self, user_sub: str, doc_type: Optional[str] = None) -> List[FolderDocument]:
-        query = (
+    def list_reviewed(
+        self,
+        user_sub: str,
+        doc_type: Optional[str] = None,
+        folder_id: Optional[str] = None,
+    ) -> List[FolderDocument]:
+        query = self._filtered(
             select(DocumentModel)
             .where(DocumentModel.user_sub == user_sub, DocumentModel.status == DocumentStatus.REVIEWED)
-            .options(undefer(DocumentModel.extracted_data), undefer(DocumentModel.reviewed_data))
+            .options(undefer(DocumentModel.extracted_data), undefer(DocumentModel.reviewed_data)),
+            doc_type,
+            folder_id,
         )
-        if doc_type:
-            query = query.where(DocumentModel.doc_type == doc_type)
         rows = self._db.execute(query.order_by(DocumentModel.reviewed_at.desc())).scalars()
         return [_to_entity(row, with_data=True) for row in rows]
 

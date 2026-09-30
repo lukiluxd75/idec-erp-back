@@ -45,28 +45,37 @@ def create_document(
     use_case: CreateDocumentUseCase = Depends(get_create_document_use_case),
     user: UserProfile = Depends(require_permission("folder-analysis.edit")),
 ):
-    """Photos dropped onto a section (folio, tax_receipt or plan), in page order."""
-    return DocumentDetail.from_entity(use_case.execute(body.doc_type, body.capture_ids, user.sub))
+    """Photos dropped onto a lane, in page order. With `folder_id`, the document
+    is opened inside that carpeta and has to be one of the types it holds."""
+    document = use_case.execute(
+        body.doc_type, body.capture_ids, user.sub, body.folder_id, body.folder_type
+    )
+    return DocumentDetail.from_entity(document)
 
 
 @router.get("", response_model=List[DocumentSummary])
 def list_documents(
     doc_type: Optional[DocType] = Query(None),
+    folder_id: Optional[str] = Query(None, description="Solo los documentos de esa carpeta."),
     use_case: ListDocumentsUseCase = Depends(get_list_documents_use_case),
     user: UserProfile = Depends(require_permission("folder-analysis.view")),
 ):
-    """The user's documents, newest first. Refreshes the ones being analyzed."""
-    return [DocumentSummary.from_entity(d) for d in use_case.execute(user.sub, doc_type)]
+    """The user's documents, newest first. Refreshes the ones being analyzed.
+
+    With `folder_id`, only the ones worked on inside that carpeta -- which is
+    what its board shows."""
+    return [DocumentSummary.from_entity(d) for d in use_case.execute(user.sub, doc_type, folder_id)]
 
 
 @router.get("/reviewed", response_model=List[DocumentDetail])
 def list_reviewed_documents(
     doc_type: Optional[DocType] = Query(None),
+    folder_id: Optional[str] = Query(None, description="Solo los documentos de esa carpeta."),
     use_case: ListReviewedDocumentsUseCase = Depends(get_list_reviewed_documents_use_case),
     user: UserProfile = Depends(require_permission("folder-analysis.view")),
 ):
     """Saved reviews only, with the confirmed data for the current user."""
-    return [DocumentDetail.from_entity(d) for d in use_case.execute(user.sub, doc_type)]
+    return [DocumentDetail.from_entity(d) for d in use_case.execute(user.sub, doc_type, folder_id)]
 
 
 @router.get("/{document_id}", response_model=DocumentDetail)

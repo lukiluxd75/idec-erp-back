@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, undefer
@@ -52,6 +52,8 @@ class SqlRegisteredFolderRepository(RegisteredFolderRepositoryPort):
             user_sub=row.user_sub,
             name=row.name,
             notes=row.notes,
+            folder_type=row.folder_type,
+            data=row.data or {},
             created_at=row.created_at,
             updated_at=row.updated_at,
             # Filing order, skipping anything deleted between the two queries.
@@ -104,20 +106,47 @@ class SqlRegisteredFolderRepository(RegisteredFolderRepositoryPort):
     # ------------------------------------------------------------------ writing
 
     def create(
-        self, user_sub: str, name: str, notes: Optional[str], document_ids: List[str]
+        self,
+        user_sub: str,
+        name: str,
+        notes: Optional[str],
+        folder_type: str,
+        data: Dict[str, Any],
+        document_ids: List[str],
     ) -> RegisteredFolder:
-        row = RegisteredFolderModel(user_sub=user_sub, name=name, notes=notes)
+        row = RegisteredFolderModel(
+            user_sub=user_sub, name=name, notes=notes, folder_type=folder_type, data=data or {}
+        )
         row.items = _new_items(document_ids)
         self._db.add(row)
         self._db.commit()
         return self.get(str(row.id), user_sub)
 
-    def rename(self, folder_id: str, name: str, notes: Optional[str]) -> None:
+    def update_details(
+        self, folder_id: str, name: str, notes: Optional[str], data: Dict[str, Any]
+    ) -> None:
         row = self._row(folder_id)
         if row is None:
             return
         row.name = name
         row.notes = notes
+        row.data = data or {}
+        self._db.commit()
+
+    def file_document(self, folder_id: str, document_id: str) -> None:
+        row = self._row(folder_id)
+        if row is None:
+            return
+        # At the end of the carpeta, and only once: a document opened in it is
+        # already there, and filing it twice would break (folder_id, position).
+        if any(str(item.document_id) == document_id for item in row.items):
+            return
+        row.items.append(
+            RegisteredFolderItemModel(
+                document_id=parse_uuid(document_id),
+                position=max((item.position for item in row.items), default=-1) + 1,
+            )
+        )
         self._db.commit()
 
     def set_documents(self, folder_id: str, document_ids: List[str]) -> None:

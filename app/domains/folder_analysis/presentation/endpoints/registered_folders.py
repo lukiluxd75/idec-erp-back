@@ -46,8 +46,11 @@ def create_folder(
     use_case: CreateRegisteredFolderUseCase = Depends(get_create_registered_folder_use_case),
     user: UserProfile = Depends(require_permission("folder-analysis.edit")),
 ):
-    """A new project folder, with the documents already picked for it (if any)."""
-    folder = use_case.execute(user.sub, body.name, body.notes, body.document_ids)
+    """A new carpeta of the kind asked for, with its own sheet and the documents
+    already picked for it (if any)."""
+    folder = use_case.execute(
+        user.sub, body.name, body.notes, body.folder_type, body.data, body.document_ids
+    )
     return RegisteredFolderOut.from_entity(folder)
 
 
@@ -67,9 +70,11 @@ def update_folder(
     use_case: UpdateRegisteredFolderUseCase = Depends(get_update_registered_folder_use_case),
     user: UserProfile = Depends(require_permission("folder-analysis.edit")),
 ):
-    """Renames the carpeta and, when `document_ids` comes in the body, replaces
-    what it holds in one save."""
-    folder = use_case.execute(folder_id, user.sub, body.name, body.notes, body.document_ids)
+    """The carpeta's name, its note and its own sheet -- and, when `document_ids`
+    comes in the body, the reviewed documents it holds, in one save."""
+    folder = use_case.execute(
+        folder_id, user.sub, body.name, body.notes, body.data, body.document_ids
+    )
     return RegisteredFolderOut.from_entity(folder)
 
 

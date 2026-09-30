@@ -185,6 +185,29 @@ class GetCaptureImageUseCase:
         return preview, "image/jpeg"
 
 
+class ClearInboxUseCase:
+    """Empties the bandeja in one go.
+
+    Only what is still in the bandeja: a photo that is already a page of a
+    document is not the bandeja's to throw away -- it is taken out of the
+    document first, and that puts it back here. So after emptying, the documents
+    keep every photo they were given.
+    """
+
+    def __init__(self, repository: CaptureRepositoryPort):
+        self._repository = repository
+
+    def execute(self, user_sub: str) -> int:
+        captures = self._repository.list_by_status(user_sub, CaptureStatus.INBOX)
+        if not captures:
+            return 0
+        ids = [capture.id for capture in captures]
+        removed = self._repository.delete_many(ids, user_sub)
+        for capture_id in ids:
+            _previews.drop(capture_id)
+        return removed
+
+
 class DeleteCaptureUseCase:
     def __init__(self, repository: CaptureRepositoryPort):
         self._repository = repository

@@ -4,18 +4,29 @@ from typing import Any, Dict, List, Optional
 
 
 class DocumentType:
+    """The kinds of document the board can hold. Which of them a carpeta shows is
+    the carpeta's business, not this list's: see domain/folder_types.py."""
+
     FOLIO = "folio"
     TAX_RECEIPT = "tax_receipt"
     PLAN = "plan"
+    # The documents the carpeta de poseedores brought in. None of them has rules
+    # of its own yet, so they are read with the generic OCR (text, labelled
+    # values and tables) until someone writes down what to pull out of each.
+    APPRAISAL = "appraisal"
+    FORM = "form"
+    SWORN_STATEMENT = "sworn_statement"
+    ID_CARD = "id_card"
 
-    ALL = (FOLIO, TAX_RECEIPT, PLAN)
+    ALL = (FOLIO, TAX_RECEIPT, PLAN, APPRAISAL, FORM, SWORN_STATEMENT, ID_CARD)
     # Every lane is read here on the server, with the GAMC PaddleOCR service and
     # OpenCV (seconds), and none is queued to the architects' PCs for the vision
     # model any more (minutes per sheet). A folio and a comprobante are forms, so
     # rules read them; a plano has no fixed layout, so what is stored is its text,
-    # its labelled values and its tables. None of them carries a job id:
+    # its labelled values and its tables -- and that same generic reading is what
+    # a document without rules gets. None of them carries a job id:
     # RunServerReadingUseCase writes their result.
-    SERVER_READ = (FOLIO, TAX_RECEIPT, PLAN)
+    SERVER_READ = ALL
 
 
 class DocumentStatus:
@@ -58,6 +69,13 @@ class FolderDocument:
     created_at: datetime
     updated_at: datetime
     pages: List[DocumentPage] = field(default_factory=list)
+    # The carpeta it was opened in, when it was opened in one. A document from
+    # before the carpetas -- or one classified on the loose board -- has none.
+    folder_id: Optional[str] = None
+    # The kind of carpeta it was classified under, which is what says what to
+    # pull out of it. A document opened inside a carpeta takes the carpeta's
+    # kind; one classified on the loose board takes the kind chosen there.
+    folder_type: Optional[str] = None
     # What the PCs extracted (never overwritten by the reviewer)...
     extracted_data: Optional[Dict[str, Any]] = None
     # ...and what the architect saved on top of it.

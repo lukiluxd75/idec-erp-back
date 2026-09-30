@@ -6,21 +6,42 @@ from app.domains.folder_analysis.domain.entities import DocumentPage, FolderDocu
 
 class DocumentRepositoryPort(ABC):
     @abstractmethod
-    def create(self, user_sub: str, doc_type: str, capture_ids: List[str]) -> FolderDocument: ...
+    def create(
+        self,
+        user_sub: str,
+        doc_type: str,
+        capture_ids: List[str],
+        folder_type: Optional[str] = None,
+    ) -> FolderDocument:
+        """`folder_type` is the kind of carpeta it was classified under: what
+        says which values are pulled out of it when it is analyzed."""
 
     @abstractmethod
     def get(self, document_id: str, user_sub: str) -> Optional[FolderDocument]:
         """Document with its pages and data."""
 
     @abstractmethod
-    def list(self, user_sub: str, doc_type: Optional[str] = None) -> List[FolderDocument]:
-        """Newest first, with pages but without extracted/reviewed data."""
+    def list(
+        self,
+        user_sub: str,
+        doc_type: Optional[str] = None,
+        folder_id: Optional[str] = None,
+    ) -> List[FolderDocument]:
+        """Newest first, with pages but without extracted/reviewed data.
 
-    def list_reviewed(self, user_sub: str, doc_type: Optional[str] = None) -> List[FolderDocument]:
+        `folder_id` narrows the list to one carpeta's board -- that is what the
+        screen of a carpeta shows, instead of every document of the user."""
+
+    def list_reviewed(
+        self,
+        user_sub: str,
+        doc_type: Optional[str] = None,
+        folder_id: Optional[str] = None,
+    ) -> List[FolderDocument]:
         """Newest first, reviewed documents including the data confirmed by the user."""
         return [
             document
-            for document in self.list(user_sub, doc_type)
+            for document in self.list(user_sub, doc_type, folder_id)
             if document.status == "reviewed"
         ]
 

@@ -10,6 +10,7 @@ import numpy as np
 from app.domains.folder_analysis.application.document_synchronizer import DocumentSynchronizer
 from app.domains.folder_analysis.application.use_cases import (
     AddDocumentsToRegisteredFolderUseCase,
+    ClearInboxUseCase,
     AnalyzeDocumentUseCase,
     CreateDocumentUseCase,
     CreateRegisteredFolderUseCase,
@@ -45,12 +46,29 @@ from app.domains.folder_analysis.domain.exceptions import (
     DocumentBusyException,
     DocumentNotFoundException,
     InvalidCaptureException,
+    InvalidDocumentRequestException,
     InvalidRegisteredFolderException,
     RegisteredFolderNameTakenException,
     RegisteredFolderNotFoundException,
     TaxStructurerUnavailableException,
 )
-from app.domains.folder_analysis.domain.extraction_profiles import PROFILES
+from app.domains.folder_analysis.domain.extraction_profiles import (
+    FOLDER_PROFILES,
+    GENERIC_PROFILE,
+    PROFILES,
+    ExtractionProfile,
+    profile_for,
+)
+from app.domains.folder_analysis.domain.folder_types import (
+    DOCUMENT_TYPES,
+    FOLDER_TYPES,
+    DocumentField,
+    FieldSource,
+    document_fields,
+    folder_type,
+)
+from app.domains.folder_analysis.domain.services.field_harvest import harvest, observation
+from app.domains.folder_analysis.domain.services.spanish_dates import to_iso_like, words_to_number
 from app.domains.folder_analysis.domain.ports import (
     CaptureRepositoryPort,
     DocumentRepositoryPort,
@@ -125,14 +143,24 @@ class FakeCaptures(CaptureRepositoryPort):
     def delete(self, capture_id, user_sub):
         self.rows.pop(capture_id, None)
 
+    def delete_many(self, capture_ids, user_sub):
+        removed = 0
+        for capture_id in capture_ids:
+            row = self.rows.get(capture_id)
+            if row and row[0].user_sub == user_sub:
+                del self.rows[capture_id]
+                removed += 1
+        return removed
+
 
 class FakeDocuments(DocumentRepositoryPort):
     def __init__(self):
         self.rows = {}
 
-    def create(self, user_sub, doc_type, capture_ids):
+    def create(self, user_sub, doc_type, capture_ids, folder_type=None):
         doc = FolderDocument(str(uuid.uuid4()), user_sub, doc_type, DocumentStatus.DRAFT, NOW, NOW,
-                             pages=[DocumentPage(c, i) for i, c in enumerate(capture_ids)])
+                             pages=[DocumentPage(c, i) for i, c in enumerate(capture_ids)],
+                             folder_type=folder_type)
         self.rows[doc.id] = doc
         return doc
 
@@ -140,8 +168,14 @@ class FakeDocuments(DocumentRepositoryPort):
         doc = self.rows.get(document_id)
         return doc if doc and doc.user_sub == user_sub else None
 
-    def list(self, user_sub, doc_type=None):
-        return [d for d in self.rows.values() if d.user_sub == user_sub and (not doc_type or d.doc_type == doc_type)]
+    def list(self, user_sub, doc_type=None, folder_id=None):
+        return [
+            d
+            for d in self.rows.values()
+            if d.user_sub == user_sub
+            and (not doc_type or d.doc_type == doc_type)
+            and (not folder_id or d.folder_id == folder_id)
+        ]
 
     def replace_pages(self, document_id, capture_ids):
         doc = self.rows[document_id]
@@ -1175,7 +1209,9 @@ class TestOcrPlanExtractor(unittest.TestCase):
 
 class FakeRegisteredFolders(RegisteredFolderRepositoryPort):
     """In-memory carpetas. Mirrors what the SQL repository guarantees: filing
-    order is kept, and a document can only sit in one carpeta at a time."""
+    order is kept, a document sits in one carpeta at a time, and the document
+    itself carries which carpeta holds it (there it is read off the row that
+    files it, here it is written on the document when it is filed)."""
 
     def __init__(self, documents):
         self.rows = {}
@@ -1183,21 +1219,38 @@ class FakeRegisteredFolders(RegisteredFolderRepositoryPort):
         self._documents = documents
 
     def _entity(self, row):
-        folder_id, name, notes, ids = row
         return RegisteredFolder(
-            id=folder_id,
-            user_sub=self._owners[folder_id],
-            name=name,
-            notes=notes,
+            id=row["id"],
+            user_sub=self._owners[row["id"]],
+            name=row["name"],
+            notes=row["notes"],
+            folder_type=row["folder_type"],
+            data=dict(row["data"]),
             created_at=NOW,
             updated_at=NOW,
-            documents=[self._documents.rows[i] for i in ids if i in self._documents.rows],
+            documents=[self._documents.rows[i] for i in row["ids"] if i in self._documents.rows],
         )
 
-    def create(self, user_sub, name, notes, document_ids):
+    def _file(self, folder_id, ids):
+        """Keeps every document's folder_id in step with what the carpeta holds."""
+        for document_id, document in self._documents.rows.items():
+            if document_id in ids:
+                self._documents.rows[document_id] = replace(document, folder_id=folder_id)
+            elif document.folder_id == folder_id:
+                self._documents.rows[document_id] = replace(document, folder_id=None)
+
+    def create(self, user_sub, name, notes, folder_type, data, document_ids):
         folder_id = str(uuid.uuid4())
         self._owners[folder_id] = user_sub
-        self.rows[folder_id] = (folder_id, name, notes, list(document_ids))
+        self.rows[folder_id] = {
+            "id": folder_id,
+            "name": name,
+            "notes": notes,
+            "folder_type": folder_type,
+            "data": dict(data or {}),
+            "ids": list(document_ids),
+        }
+        self._file(folder_id, list(document_ids))
         return self._entity(self.rows[folder_id])
 
     def get(self, folder_id, user_sub):
@@ -1208,35 +1261,42 @@ class FakeRegisteredFolders(RegisteredFolderRepositoryPort):
 
     def list(self, user_sub):
         rows = [r for fid, r in self.rows.items() if self._owners.get(fid) == user_sub]
-        return [self._entity(r) for r in sorted(rows, key=lambda r: r[1].lower())]
+        return [self._entity(r) for r in sorted(rows, key=lambda r: r["name"].lower())]
 
-    def rename(self, folder_id, name, notes):
-        folder_id, _name, _notes, ids = self.rows[folder_id]
-        self.rows[folder_id] = (folder_id, name, notes, ids)
+    def update_details(self, folder_id, name, notes, data):
+        self.rows[folder_id].update(name=name, notes=notes, data=dict(data or {}))
+
+    def file_document(self, folder_id, document_id):
+        row = self.rows[folder_id]
+        if document_id not in row["ids"]:
+            row["ids"].append(document_id)
+        self._file(folder_id, row["ids"])
 
     def set_documents(self, folder_id, document_ids):
-        fid, name, notes, _ids = self.rows[folder_id]
-        self.rows[folder_id] = (fid, name, notes, list(document_ids))
+        self.rows[folder_id]["ids"] = list(document_ids)
+        self._file(folder_id, list(document_ids))
 
     def delete(self, folder_id):
-        self.rows.pop(folder_id, None)
+        row = self.rows.pop(folder_id, None)
         self._owners.pop(folder_id, None)
+        if row is not None:
+            self._file(folder_id, [])
 
     def name_taken(self, user_sub, name, exclude_folder_id=None):
         return any(
-            r[1].lower() == name.strip().lower()
+            r["name"].lower() == name.strip().lower()
             for fid, r in self.rows.items()
             if self._owners.get(fid) == user_sub and fid != exclude_folder_id
         )
 
     def folder_names_of_documents(self, user_sub, document_ids, exclude_folder_id=None):
         taken = {}
-        for fid, (_id, name, _notes, ids) in self.rows.items():
+        for fid, row in self.rows.items():
             if self._owners.get(fid) != user_sub or fid == exclude_folder_id:
                 continue
-            for document_id in ids:
+            for document_id in row["ids"]:
                 if document_id in document_ids:
-                    taken[document_id] = name
+                    taken[document_id] = row["name"]
         return taken
 
 
@@ -1261,9 +1321,9 @@ class TestRegisteredFolders(unittest.TestCase):
         photo = self.captures.create(user_sub, "p.png", "image/png", b"x", b"t")
         return self.documents.create(user_sub, doc_type, [photo.id])
 
-    def _create(self, name="Proyecto Sur", notes=None, ids=None, user_sub="arq-1"):
+    def _create(self, name="Proyecto Sur", notes=None, ids=None, user_sub="arq-1", kind=None, data=None):
         return CreateRegisteredFolderUseCase(self.folders, self.service).execute(
-            user_sub, name, notes, ids or []
+            user_sub, name, notes, folder_type_key=kind, data=data, document_ids=ids or []
         )
 
     # ------------------------------------------------------------------ create
@@ -1348,7 +1408,7 @@ class TestRegisteredFolders(unittest.TestCase):
         folio, tax = self._reviewed("folio"), self._reviewed("tax_receipt")
         folder = self._create("Proyecto Sur", ids=[folio.id])
         updated = UpdateRegisteredFolderUseCase(self.folders, self.service).execute(
-            folder.id, "arq-1", "Proyecto Sur", None, [tax.id]
+            folder.id, "arq-1", "Proyecto Sur", None, document_ids=[tax.id]
         )
         self.assertEqual(updated.document_ids, [tax.id])
 
@@ -1356,7 +1416,7 @@ class TestRegisteredFolders(unittest.TestCase):
         folio, tax = self._reviewed("folio"), self._reviewed("tax_receipt")
         folder = self._create("Proyecto Sur", ids=[folio.id, tax.id])
         updated = UpdateRegisteredFolderUseCase(self.folders, self.service).execute(
-            folder.id, "arq-1", "Proyecto Sur", None, [tax.id, folio.id]
+            folder.id, "arq-1", "Proyecto Sur", None, document_ids=[tax.id, folio.id]
         )
         self.assertEqual(updated.document_ids, [tax.id, folio.id])
 
@@ -1425,12 +1485,480 @@ class TestRegisteredFolders(unittest.TestCase):
             ["Achumani", "Zona Sur"],
         )
 
+    # ------------------------------------------------------------ tipo y hoja
+
+    def test_a_carpeta_is_opened_with_its_kind_and_its_sheet(self):
+        folder = self._create(
+            "Poseedores Sarco",
+            kind="possessors",
+            data={"street": "  Av.  Ballivián ", "usable_area": "240 m2"},
+        )
+        self.assertEqual(folder.folder_type, "possessors")
+        self.assertEqual(folder.data["street"], "Av. Ballivián")
+        self.assertEqual(folder.data["usable_area"], "240 m2")
+
+    def test_the_sheet_only_keeps_what_its_kind_declares(self):
+        """The catalogue is the truth about a carpeta's fields: what is not one
+        of them would never be shown again, and a fixed field is not the user's
+        to write."""
+        folder = self._create(
+            "Poseedores Sarco",
+            kind="possessors",
+            data={"inventado": "x", "legal_status": "Municipal"},
+        )
+        self.assertNotIn("inventado", folder.data)
+        self.assertEqual(folder.data["legal_status"], "Particular")
+
+    def test_a_carpeta_without_a_kind_is_the_general_one(self):
+        self.assertEqual(self._create("Proyecto Sur").folder_type, "general")
+
+    def test_an_unknown_kind_is_refused(self):
+        with self.assertRaises(InvalidRegisteredFolderException):
+            self._create("Proyecto Sur", kind="tramite-inventado")
+
+    def test_editing_saves_the_sheet_and_keeps_the_kind(self):
+        folder = self._create("Poseedores Sarco", kind="possessors", data={"street": "Calle A"})
+        updated = UpdateRegisteredFolderUseCase(self.folders, self.service).execute(
+            folder.id, "arq-1", "Poseedores Sarco", None, data={"street": "Calle B"}
+        )
+        self.assertEqual(updated.folder_type, "possessors")
+        self.assertEqual(updated.data["street"], "Calle B")
+
+    def test_editing_does_not_throw_out_the_documents_still_being_worked_on(self):
+        """The screen that sends the selection lists reviewed documents only, so
+        what it sends cannot be read as "and nothing else"."""
+        folder = self._create("Poseedores Sarco", kind="possessors")
+        draft = self._draft(doc_type="plan")
+        self.folders.file_document(folder.id, draft.id)
+        reviewed = self._reviewed()
+        updated = UpdateRegisteredFolderUseCase(self.folders, self.service).execute(
+            folder.id, "arq-1", "Poseedores Sarco", None, document_ids=[reviewed.id]
+        )
+        self.assertEqual(set(updated.document_ids), {reviewed.id, draft.id})
+
     def test_a_carpeta_carries_the_saved_data_of_its_documents(self):
         """The screen shows the matrícula under each row, so the data travels
         with the carpeta instead of asking for every document."""
         folio = self._reviewed()
         folder = self._create("Proyecto Sur", ids=[folio.id])
         self.assertEqual(folder.documents[0].reviewed_data, {"registration_number": "1.1.1"})
+
+class DocumentosDentroDeUnaCarpetaTests(unittest.TestCase):
+    """A document is opened inside a carpeta, so from the moment it is created it
+    belongs to it -- and it has to be one of the types that carpeta works with."""
+
+    def setUp(self):
+        self.captures, self.documents = FakeCaptures(), FakeDocuments()
+        self.folders = FakeRegisteredFolders(self.documents)
+        self.service = RegisteredFolderService(self.folders, self.documents)
+        self.photo = self.captures.create("arq-1", "p.png", "image/png", b"x", b"t")
+
+    def _folder(self, kind="possessors"):
+        return CreateRegisteredFolderUseCase(self.folders, self.service).execute(
+            "arq-1", "Poseedores Sarco", None, folder_type_key=kind
+        )
+
+    def _create(self, doc_type, folder_id=None):
+        return CreateDocumentUseCase(self.documents, self.captures, self.folders).execute(
+            doc_type, [self.photo.id], "arq-1", folder_id
+        )
+
+    def test_a_document_opened_in_a_carpeta_is_filed_in_it_as_a_draft(self):
+        folder = self._folder()
+        document = self._create(DocumentType.SWORN_STATEMENT, folder.id)
+        self.assertEqual(document.folder_id, folder.id)
+        self.assertEqual(document.status, DocumentStatus.DRAFT)
+        self.assertEqual(
+            self.folders.get(folder.id, "arq-1").document_ids, [document.id]
+        )
+
+    def test_a_carpeta_refuses_a_document_it_does_not_work_with(self):
+        folder = self._folder()
+        with self.assertRaises(InvalidDocumentRequestException):
+            self._create(DocumentType.TAX_RECEIPT, folder.id)
+
+    def test_on_the_loose_board_a_document_belongs_to_no_carpeta(self):
+        self.assertIsNone(self._create(DocumentType.FOLIO).folder_id)
+
+    def test_a_carpeta_that_is_not_the_users_is_not_found(self):
+        folder = CreateRegisteredFolderUseCase(self.folders, self.service).execute(
+            "arq-2", "Ajena", None, folder_type_key="possessors"
+        )
+        with self.assertRaises(RegisteredFolderNotFoundException):
+            self._create(DocumentType.PLAN, folder.id)
+
+    def test_the_board_of_a_carpeta_lists_only_its_documents(self):
+        folder = self._folder()
+        mine = self._create(DocumentType.PLAN, folder.id)
+        other_photo = self.captures.create("arq-1", "q.png", "image/png", b"x", b"t")
+        CreateDocumentUseCase(self.documents, self.captures, self.folders).execute(
+            DocumentType.FOLIO, [other_photo.id], "arq-1"
+        )
+        self.assertEqual(
+            [d.id for d in self.documents.list("arq-1", folder_id=folder.id)], [mine.id]
+        )
+
+
+class VaciarLaBandejaTests(unittest.TestCase):
+    """El botón de vaciar la bandeja: se borran de una vez las fotos que quedaron
+    sin clasificar, sin tocar las que ya son página de un documento."""
+
+    def setUp(self):
+        self.captures = FakeCaptures()
+        self.documents = FakeDocuments()
+        self.use_case = ClearInboxUseCase(self.captures)
+
+    def _photo(self, user_sub="arq-1"):
+        return self.captures.create(user_sub, "p.png", "image/png", b"x", b"t")
+
+    def test_empties_the_inbox_and_says_how_many_went(self):
+        self._photo(), self._photo(), self._photo()
+        self.assertEqual(self.use_case.execute("arq-1"), 3)
+        self.assertEqual(self.captures.list_by_status("arq-1", CaptureStatus.INBOX), [])
+
+    def test_the_photos_already_in_a_document_stay(self):
+        loose, used = self._photo(), self._photo()
+        CreateDocumentUseCase(self.documents, self.captures).execute(
+            DocumentType.FOLIO, [used.id], "arq-1"
+        )
+        self.assertEqual(self.use_case.execute("arq-1"), 1)
+        self.assertIsNone(self.captures.get(loose.id, "arq-1"))
+        self.assertIsNotNone(self.captures.get(used.id, "arq-1"))
+
+    def test_it_only_empties_the_users_own_bandeja(self):
+        mine, theirs = self._photo(), self._photo("arq-2")
+        self.assertEqual(self.use_case.execute("arq-1"), 1)
+        self.assertIsNone(self.captures.get(mine.id, "arq-1"))
+        self.assertIsNotNone(self.captures.get(theirs.id, "arq-2"))
+
+    def test_an_empty_bandeja_is_not_an_error(self):
+        self.assertEqual(self.use_case.execute("arq-1"), 0)
+
+
+class CosechaDeCamposTests(unittest.TestCase):
+    """Sacar de una hoja leída genéricamente los valores que la carpeta pide.
+
+    Las lecturas de acá tienen la forma que devuelve el OCR genérico: el texto de
+    la hoja y los pares "ETIQUETA: valor" que pudo separar.
+    """
+
+    PLAN = document_fields("possessors", DocumentType.PLAN)
+    STATEMENT = document_fields("possessors", DocumentType.SWORN_STATEMENT)
+
+    def _reading(self, text="", fields=()):
+        return {
+            "full_text": text,
+            "pages": [{"fields": [dict(f) for f in fields], "full_text": text, "tables": []}],
+        }
+
+    def test_reads_the_measurements_written_on_the_sheet(self):
+        reading = self._reading(
+            "PLANO DE UBICACION\n"
+            "FRENTE 12.50 M\n"
+            "CONTRA FRENTE 12.50 M\n"
+            "FONDO 25.00 M\n"
+            "FONDO 2 24.80 M\n"
+            "SUPERFICIE UTIL 240.00 M2"
+        )
+        values, missing = harvest(reading, self.PLAN)
+        self.assertEqual(values["frontage"], "12.50 M")
+        self.assertEqual(values["rear_frontage"], "12.50 M")
+        self.assertEqual(values["depth"], "25.00 M")
+        self.assertEqual(values["depth_2"], "24.80 M")
+        self.assertEqual(values["usable_area"], "240.00 M2")
+        self.assertEqual(missing, [])
+
+    def test_a_fondo_of_25_metres_is_not_read_as_the_second_fondo(self):
+        """Sin el corte de la etiqueta, "FONDO 25.00" y "FONDO 2" son la misma
+        hilera de letras y dígitos, y el fondo 2 se llevaba un "5.00"."""
+        values, _ = harvest(self._reading("FONDO 25.00 M"), self.PLAN)
+        self.assertEqual(values["depth"], "25.00 M")
+        self.assertIsNone(values["depth_2"])
+
+    def test_the_longer_label_does_not_lend_its_line_to_the_shorter_one(self):
+        values, _ = harvest(self._reading("FONDO 2 24.80 M\nFONDO 25.00 M"), self.PLAN)
+        self.assertEqual(values["depth_2"], "24.80 M")
+        self.assertEqual(values["depth"], "25.00 M")
+
+    def test_a_labelled_pair_is_read_before_the_running_text(self):
+        reading = self._reading(
+            "FRENTE 9.00 M", [{"name": "FRENTE", "value": "12,50 m"}]
+        )
+        self.assertEqual(harvest(reading, self.PLAN)[0]["frontage"], "12,50 m")
+
+    def test_the_notary_is_kept_by_its_number(self):
+        reading = self._reading(
+            fields=[{"name": "NOTARIA DE FE PUBLICA", "value": "N 23 DEL DISTRITO"}]
+        )
+        self.assertEqual(harvest(reading, self.STATEMENT)[0]["notary_number"], "23")
+
+    def test_what_is_not_on_the_sheet_stays_empty_and_is_named(self):
+        values, missing = harvest(self._reading("HOJA SIN DATOS"), self.STATEMENT)
+        self.assertEqual(set(values.values()), {None})
+        self.assertEqual(missing, [f.label for f in self.STATEMENT])
+        self.assertIn("Notario", observation(missing))
+
+    def test_a_label_that_is_only_part_of_a_word_is_not_a_match(self):
+        values, _ = harvest(self._reading("FRENTERA DEL LOTE 3"), self.PLAN)
+        self.assertIsNone(values["frontage"])
+
+    def test_nothing_is_asked_of_a_document_the_carpeta_says_nothing_about(self):
+        self.assertEqual(document_fields("general", DocumentType.FOLIO), ())
+        self.assertEqual(document_fields("possessors", DocumentType.ID_CARD), ())
+
+
+class ActaNotarialTests(unittest.TestCase):
+    """Un acta notarial no rotula nada: el número del notario, la persona y la
+    fecha viven dentro de su redacción, y la fecha viene escrita con letras."""
+
+    FIELDS = document_fields("possessors", DocumentType.SWORN_STATEMENT)
+
+    # El párrafo de apertura, tal como lo lee el OCR de un acta de Cochabamba.
+    ACTA = (
+        "En el municipio de Cochabamba del departamento de Cochabamba del Estado Plurinacional de\n"
+        "Bolivia, a horas 13:18 (trece y dieciocho), del día, lunes veintiun del mes de septiembre del año dos\n"
+        "mil veintiseis, ANTE MÍ ANGEL RODRIGUEZ SALAZAR, Notario de Fe Pública N° 15 del municipio\n"
+        "de Cochabamba del departamento de Cochabamba, se hizo presente NOELIA ALMENDRAS\n"
+        "RODRIGUEZ con Cédula de Identidad N° 8806991 (ocho, ocho, cero, seis, nueve, nueve, uno),\n"
+        "Boliviana, Soltera, mayor de edad, de profesión ESTUDIANTE, con domicilio en AV. PETROLERA"
+    )
+
+    def _harvest(self, text):
+        reading = {"full_text": text, "pages": [{"fields": [], "full_text": text, "tables": []}]}
+        return harvest(reading, self.FIELDS)[0]
+
+    def test_reads_the_three_values_out_of_the_opening_paragraph(self):
+        values = self._harvest(self.ACTA)
+        self.assertEqual(values["notary_number"], "15")
+        self.assertEqual(values["owner_name"], "NOELIA ALMENDRAS RODRIGUEZ")
+        self.assertEqual(values["statement_dates"], "21/09/2026")
+
+    def test_the_name_stops_at_the_identity_card(self):
+        """Sin el corte, el nombre se llevaba media acta -- la nacionalidad, el
+        estado civil y el domicilio van en la misma frase."""
+        self.assertNotIn("CEDULA", self._harvest(self.ACTA)["owner_name"])
+
+    def test_another_wording_of_the_same_act(self):
+        values = self._harvest(
+            "A los veintiun días del mes de septiembre de dos mil veintiseis, ante mí, "
+            "Notaria de Fe Pública Nº 3, compareció JUAN PEREZ LOPEZ con C.I. 123"
+        )
+        self.assertEqual(values["notary_number"], "3")
+        self.assertEqual(values["owner_name"], "JUAN PEREZ LOPEZ")
+        self.assertEqual(values["statement_dates"], "21/09/2026")
+
+    def test_a_date_already_written_in_figures(self):
+        self.assertEqual(self._harvest("Cochabamba, 5 de enero de 1998.")["statement_dates"], "05/01/1998")
+
+    def test_a_sheet_that_says_none_of_it_leaves_everything_empty(self):
+        self.assertEqual(set(self._harvest("HOJA CUALQUIERA").values()), {None})
+
+
+class FechasEnLetrasTests(unittest.TestCase):
+    def test_the_year_of_an_old_minuta_and_of_a_recent_one(self):
+        self.assertEqual(words_to_number("MIL NOVECIENTOS NOVENTA Y DOS"), 1992)
+        self.assertEqual(words_to_number("DOS MIL VEINTISEIS"), 2026)
+
+    def test_the_ways_a_day_is_written(self):
+        self.assertEqual(words_to_number("VEINTIUN"), 21)
+        self.assertEqual(words_to_number("PRIMERO"), 1)
+        self.assertEqual(words_to_number("TREINTA Y UNO"), 31)
+
+    def test_what_is_not_a_number_is_not_invented(self):
+        self.assertIsNone(words_to_number("CUALQUIER COSA"))
+        self.assertIsNone(words_to_number(""))
+
+    def test_the_three_parts_become_one_date(self):
+        self.assertEqual(to_iso_like("VEINTIUN", "SEPTIEMBRE", "DOS MIL VEINTISEIS"), "21/09/2026")
+        self.assertEqual(to_iso_like("5", "ENERO", "1998"), "05/01/1998")
+
+    def test_half_a_date_is_no_date(self):
+        """Una fecha a medias es peor que ninguna: nadie la vuelve a mirar."""
+        self.assertIsNone(to_iso_like("CUARENTA", "SEPTIEMBRE", "DOS MIL"))
+        self.assertIsNone(to_iso_like("DIEZ", "BRUMARIO", "DOS MIL"))
+        self.assertIsNone(to_iso_like("DIEZ", "ENERO", "MIL OCHOCIENTOS"))
+
+
+class LecturaQueLlenaLaCarpetaTests(unittest.TestCase):
+    """Lo leído de un documento entra en la hoja de su carpeta: es lo que hace
+    que "notario" o "propietario" no se tengan que copiar a mano."""
+
+    def setUp(self):
+        self.captures, self.documents = FakeCaptures(), FakeDocuments()
+        self.folders = FakeRegisteredFolders(self.documents)
+        self.service = RegisteredFolderService(self.folders, self.documents)
+        self.photo = self.captures.create("arq-1", "p.png", "image/png", b"x", b"t")
+
+    def _read(self, document, data):
+        RunServerReadingUseCase(
+            self.documents,
+            self.captures,
+            {document.doc_type: FakeExtractor(data)},
+            folders=self.folders,
+        ).execute(document.id, "arq-1")
+        return self.documents.get(document.id, "arq-1")
+
+    def _document(self, folder=None, doc_type=DocumentType.SWORN_STATEMENT):
+        document = CreateDocumentUseCase(self.documents, self.captures, self.folders).execute(
+            doc_type, [self.photo.id], "arq-1", folder.id if folder else None, "possessors"
+        )
+        AnalyzeDocumentUseCase(self.documents, self.captures, FakeQueue()).execute(
+            document.id, "arq-1"
+        )
+        return self.documents.get(document.id, "arq-1")
+
+    def _folder(self, data=None):
+        return CreateRegisteredFolderUseCase(self.folders, self.service).execute(
+            "arq-1", "Poseedores Sarco", None, folder_type_key="possessors", data=data
+        )
+
+    @staticmethod
+    def _statement():
+        return {
+            "full_text": "DECLARACION JURADA",
+            "pages": [
+                {
+                    "fields": [
+                        {"name": "NOTARIA", "value": "N 23"},
+                        {"name": "PROPIETARIO", "value": "MARIA LOPEZ"},
+                        {"name": "FECHA", "value": "12 de marzo de 2025"},
+                    ],
+                    "full_text": "DECLARACION JURADA",
+                    "tables": [],
+                }
+            ],
+            "reading": {"observations": []},
+        }
+
+    def test_the_read_values_are_stored_next_to_the_text(self):
+        document = self._read(self._document(), self._statement())
+        self.assertEqual(
+            document.extracted_data["values"],
+            {"notary_number": "23", "owner_name": "MARIA LOPEZ", "statement_dates": "12 de marzo de 2025"},
+        )
+        # La lectura entera se conserva: los valores se suman, no la reemplazan.
+        self.assertEqual(document.extracted_data["full_text"], "DECLARACION JURADA")
+
+    def test_they_fill_the_empty_fields_of_the_carpeta(self):
+        folder = self._folder()
+        self._read(self._document(folder), self._statement())
+        sheet = self.folders.get(folder.id, "arq-1").data
+        self.assertEqual(sheet["notary_number"], "23")
+        self.assertEqual(sheet["owner_name"], "MARIA LOPEZ")
+
+    def test_what_the_architect_typed_is_never_overwritten(self):
+        folder = self._folder({"owner_name": "Como lo escribí yo"})
+        self._read(self._document(folder), self._statement())
+        self.assertEqual(
+            self.folders.get(folder.id, "arq-1").data["owner_name"], "Como lo escribí yo"
+        )
+
+    def test_a_document_outside_a_carpeta_still_gets_its_values(self):
+        """En el tablero suelto no hay carpeta que llenar, pero el tipo elegido
+        ahí es el que dice qué sacarle al documento."""
+        document = self._read(self._document(), self._statement())
+        self.assertEqual(document.folder_type, "possessors")
+        self.assertEqual(document.extracted_data["values"]["notary_number"], "23")
+
+    def test_a_document_of_a_kind_that_asks_for_nothing_is_left_as_read(self):
+        document = CreateDocumentUseCase(self.documents, self.captures, self.folders).execute(
+            DocumentType.FOLIO, [self.photo.id], "arq-1"
+        )
+        AnalyzeDocumentUseCase(self.documents, self.captures, FakeQueue()).execute(
+            document.id, "arq-1"
+        )
+        read = self._read(self.documents.get(document.id, "arq-1"), {"full_text": "FOLIO REAL"})
+        self.assertNotIn("values", read.extracted_data)
+
+    def test_what_was_not_found_is_written_in_the_observations(self):
+        """El arquitecto tiene que ver qué quedó vacío, no descubrirlo después."""
+        document = self._read(
+            self._document(),
+            {"full_text": "HOJA VACIA", "pages": [], "reading": {"observations": []}},
+        )
+        notes = document.extracted_data["reading"]["observations"]
+        self.assertTrue(any("No se encontraron" in note for note in notes), notes)
+
+
+class CatalogoDeCarpetasTests(unittest.TestCase):
+    """The catalogue is data, so what is tested is that it holds together: a
+    carpeta cannot ask for a document that does not exist, and a field cannot
+    say it is copied from somewhere without saying from where."""
+
+    def test_every_document_of_a_carpeta_is_a_known_document_type(self):
+        for spec in FOLDER_TYPES.values():
+            for doc_type in spec.document_types:
+                self.assertIn(doc_type, DOCUMENT_TYPES, f"{spec.key} pide {doc_type}")
+
+    def test_every_document_type_is_in_the_catalogue(self):
+        """A type the board can create but the catalogue does not name would
+        reach the screen with no label and no hint."""
+        self.assertEqual(set(DOCUMENT_TYPES), set(DocumentType.ALL))
+
+    def test_the_fields_of_a_carpeta_do_not_repeat_their_key(self):
+        for spec in FOLDER_TYPES.values():
+            keys = [field.key for field in spec.fields]
+            self.assertEqual(len(keys), len(set(keys)), f"{spec.key} repite un campo")
+
+    def test_a_field_read_off_a_document_names_a_document_the_carpeta_holds(self):
+        for spec in FOLDER_TYPES.values():
+            for field in spec.fields:
+                if field.source == FieldSource.DOCUMENT:
+                    self.assertIn(field.from_document, spec.document_types, field.key)
+
+    def test_a_fixed_field_says_what_it_always_says(self):
+        for spec in FOLDER_TYPES.values():
+            for field in spec.fields:
+                if field.source == FieldSource.FIXED:
+                    self.assertTrue(field.value, field.key)
+
+    def test_poseedores_carries_its_five_documents_and_its_sheet(self):
+        poseedores = folder_type("possessors")
+        self.assertEqual(
+            poseedores.document_types,
+            (
+                DocumentType.APPRAISAL,
+                DocumentType.PLAN,
+                DocumentType.FORM,
+                DocumentType.SWORN_STATEMENT,
+                DocumentType.ID_CARD,
+            ),
+        )
+        self.assertEqual(
+            [field.key for field in poseedores.fields],
+            [
+                "street", "boundaries", "frontage", "rear_frontage", "depth", "depth_2", "usable_area",
+                "notary_number", "property_number", "owner_name", "statement_dates", "legal_status",
+            ],
+        )
+
+    def test_an_unknown_carpeta_falls_back_to_the_general_one(self):
+        """The carpetas created before the catalogue carry no kind, and they
+        keep opening with the three lanes they were filed with."""
+        self.assertEqual(folder_type(None).key, "general")
+        self.assertEqual(
+            folder_type("una-que-no-existe").document_types,
+            (DocumentType.FOLIO, DocumentType.TAX_RECEIPT, DocumentType.PLAN),
+        )
+
+
+class PerfilDeExtraccionPorCarpetaTests(unittest.TestCase):
+    def test_without_a_carpeta_a_document_keeps_its_own_profile(self):
+        self.assertIs(profile_for(DocumentType.FOLIO), PROFILES[DocumentType.FOLIO])
+
+    def test_a_carpeta_that_says_nothing_reads_the_document_the_usual_way(self):
+        self.assertIs(profile_for(DocumentType.FOLIO, "possessors"), PROFILES[DocumentType.FOLIO])
+
+    def test_a_carpeta_can_ask_for_its_own_reading_of_a_document(self):
+        mine = ExtractionProfile("solo la matrícula", {"registration_number": None})
+        with patch.dict(FOLDER_PROFILES, {("possessors", DocumentType.FOLIO): mine}):
+            self.assertIs(profile_for(DocumentType.FOLIO, "possessors"), mine)
+            # ...and only inside that carpeta.
+            self.assertIs(profile_for(DocumentType.FOLIO, "general"), PROFILES[DocumentType.FOLIO])
+
+    def test_a_document_with_no_rules_gets_the_generic_digitization(self):
+        self.assertIs(profile_for(DocumentType.SWORN_STATEMENT), GENERIC_PROFILE)
+
 
 if __name__ == "__main__":
     unittest.main()
