@@ -1,5 +1,6 @@
 import unittest
 import uuid
+from unittest.mock import patch
 from dataclasses import replace
 from datetime import datetime, timezone
 
@@ -8,30 +9,45 @@ import numpy as np
 
 from app.domains.folder_analysis.application.document_synchronizer import DocumentSynchronizer
 from app.domains.folder_analysis.application.use_cases import (
+    AddDocumentsToRegisteredFolderUseCase,
     AnalyzeDocumentUseCase,
     CreateDocumentUseCase,
+    CreateRegisteredFolderUseCase,
     DeleteCaptureUseCase,
     DeleteDocumentUseCase,
+    DeleteRegisteredFolderUseCase,
     GetDocumentUseCase,
+    ListRegisteredFoldersUseCase,
+    RegisteredFolderService,
+    RemoveDocumentFromRegisteredFolderUseCase,
     ReviewDocumentUseCase,
     RunServerReadingUseCase,
     SetDocumentPagesUseCase,
+    UpdateRegisteredFolderUseCase,
     UploadCapturesUseCase,
 )
 from app.domains.folder_analysis.domain.entities import (
+    MAX_DOCUMENTS,
+    MAX_NAME_LENGTH,
     Capture,
     CaptureStatus,
     DocumentPage,
     DocumentStatus,
+    DocumentType,
     FolderDocument,
     PageStatus,
     QueuedJob,
+    RegisteredFolder,
 )
 from app.domains.folder_analysis.domain.exceptions import (
     CaptureNotAvailableException,
+    DocumentAlreadyFiledException,
     DocumentBusyException,
     DocumentNotFoundException,
     InvalidCaptureException,
+    InvalidRegisteredFolderException,
+    RegisteredFolderNameTakenException,
+    RegisteredFolderNotFoundException,
     TaxStructurerUnavailableException,
 )
 from app.domains.folder_analysis.domain.extraction_profiles import PROFILES
@@ -39,6 +55,7 @@ from app.domains.folder_analysis.domain.ports import (
     CaptureRepositoryPort,
     DocumentRepositoryPort,
     ExtractionQueuePort,
+    RegisteredFolderRepositoryPort,
     ServerReadingPort,
     TaxStructurerPort,
 )
@@ -51,14 +68,24 @@ from app.domains.folder_analysis.domain.services.fur_parser import (
     missing_fields,
     parse_fur,
 )
+from app.domains.folder_analysis.domain.services.plan_layout import (
+    Segment,
+    labelled_fields,
+    table_regions,
+    _split_scattered,
+)
 from app.domains.folder_analysis.domain.services.result_merger import conform, merge_pages
 from app.domains.folder_analysis.domain.services.tax_result_mapper import to_tax_receipt_template
+from app.domains.folder_analysis.domain.services.text import group_lines
+from app.domains.folder_analysis.infrastructure import opencv_plan_reader
+from app.domains.folder_analysis.infrastructure.ocr_plan_extractor import OcrPlanExtractor
 from app.domains.folder_analysis.infrastructure.ocr_tax_extractor import OcrTaxExtractor
 from app.domains.folder_analysis.infrastructure.ollama_fur_structurer import (
     OllamaFurStructurer,
     _json_object,
 )
 from app.domains.folder_analysis.infrastructure.opencv_thumbnail import OpenCvThumbnail
+from app.domains.folder_analysis.infrastructure.pdfium_rasterizer import PdfiumRasterizer
 
 NOW = datetime.now(timezone.utc)
 
@@ -178,6 +205,12 @@ class FakeExtractor(ServerReadingPort):
 
 def _png() -> bytes:
     return cv2.imencode(".png", np.full((800, 600, 3), 255, np.uint8))[1].tobytes()
+
+
+def _uploader(captures) -> UploadCapturesUseCase:
+    """The upload as the API wires it: thumbnails plus the PDF rasterizer, since
+    a PDF arrives as one photo per page."""
+    return UploadCapturesUseCase(captures, OpenCvThumbnail(), PdfiumRasterizer())
 
 
 # ---------------------------------------------------------------- merger
@@ -407,7 +440,7 @@ class TestDocumentProgress(unittest.TestCase):
 class TestFolderAnalysisFlow(unittest.TestCase):
     def setUp(self):
         self.captures, self.documents, self.queue = FakeCaptures(), FakeDocuments(), FakeQueue()
-        self.photos = UploadCapturesUseCase(self.captures, OpenCvThumbnail()).execute(
+        self.photos = _uploader(self.captures).execute(
             [(_png(), "image/png", "p1.png"), (_png(), "application/octet-stream", "p2.jpg")], "arq-1"
         )
 
@@ -423,7 +456,7 @@ class TestFolderAnalysisFlow(unittest.TestCase):
 
     def test_upload_rejects_non_images_and_normalizes_mime(self):
         with self.assertRaises(InvalidCaptureException):
-            UploadCapturesUseCase(self.captures, OpenCvThumbnail()).execute([(b"nope", "image/jpeg", "x")], "arq-1")
+            _uploader(self.captures).execute([(b"nope", "image/jpeg", "x")], "arq-1")
         self.assertEqual(self.photos[1].mime, "image/jpeg")
 
     def test_create_moves_photos_out_of_the_inbox_and_blocks_reuse(self):
@@ -440,9 +473,12 @@ class TestFolderAnalysisFlow(unittest.TestCase):
         with self.assertRaises(DocumentNotFoundException):
             GetDocumentUseCase(self.documents, sync).execute(doc.id, "someone-else")
 
+    @patch.object(DocumentType, "SERVER_READ", (DocumentType.FOLIO, DocumentType.TAX_RECEIPT))
     def test_full_cycle_analyze_sync_review(self):
-        """The queue path, end to end. On a plan: it is the type that still goes
-        to the architects' PCs (a folio and a tax receipt are read here)."""
+        """The queue path, end to end. No lane takes it any more -- the plano was
+        the last one and is read here now -- but the machinery stays for the
+        documents that were already queued when it moved, so it is still tested:
+        the lane is put back on the queue for the length of this test."""
         doc = self._create("plan")
         doc = AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(doc.id, "arq-1")
         self.assertEqual(doc.status, DocumentStatus.QUEUED)
@@ -474,10 +510,18 @@ class TestFolderAnalysisFlow(unittest.TestCase):
         self.assertEqual(doc.status, DocumentStatus.QUEUED)
         self.assertIsNone(doc.reviewed_data)
 
-    def test_plan_is_sent_without_instructions(self):
+    def test_plan_is_read_on_the_server_and_queues_no_job(self):
+        """The plano used to be queued to the architects' PCs for the vision
+        model; it is read here with PaddleOCR and OpenCV like the other two."""
         doc = self._create("plan", [self.photos[0].id])
-        AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(doc.id, "arq-1")
-        self.assertIsNone(self.queue.submitted[0]["instructions"])
+        doc = AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(doc.id, "arq-1")
+        self.assertEqual(self.queue.submitted, [])
+        self.assertTrue(all(p.job_id is None for p in doc.pages))
+
+        self._read(doc, FakeExtractor({"full_text": "PLANTA BAJA", "tables": []}))
+        stored = self.documents.get(doc.id, "arq-1")
+        self.assertEqual(stored.status, DocumentStatus.EXTRACTED)
+        self.assertEqual(stored.extracted_data["full_text"], "PLANTA BAJA")
 
     def test_folio_is_read_on_the_server_and_queues_no_job(self):
         doc = self._create("folio")
@@ -952,6 +996,441 @@ class TestOllamaAnswer(unittest.TestCase):
         self.assertEqual(_json_object("no tengo nada"), "no tengo nada")
         self.assertEqual(_json_object(""), "")
 
+
+# ---------------------------------------------------------------- plano lane
+
+def _sheet(tilt_deg: float = 0.0):
+    """A plano like the ones that are scanned: a drawing whose walls are long
+    straight strokes, a cuadro de superficies in one corner and a rótulo in the
+    other. Returns the photo and the blocks a clean OCR would answer with."""
+    width, height = 1800, 1200
+    sheet = np.full((height, width, 3), 255, np.uint8)
+    blocks = []
+
+    def write(text, x, y, scale=0.7, thickness=2):
+        cv2.putText(sheet, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 0, 0), thickness, cv2.LINE_AA)
+        (w, h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness)
+        blocks.append(TextBlock(text, 0.95, float(x), float(y - h), float(x + w), float(y)))
+
+    def grid(rows, columns, cells):
+        for y in rows:
+            cv2.line(sheet, (columns[0], y), (columns[-1], y), (0, 0, 0), 3)
+        for x in columns:
+            cv2.line(sheet, (x, rows[0]), (x, rows[-1]), (0, 0, 0), 3)
+        for r, row in enumerate(cells):
+            for c, cell in enumerate(row):
+                write(cell, columns[c] + 15, rows[r] + 42, scale=0.6)
+
+    # The drawing: walls as long as any rule, and no company above them.
+    for y in (200, 450, 700):
+        cv2.line(sheet, (80, y), (900, y), (0, 0, 0), 5)
+    for x in (80, 900):
+        cv2.line(sheet, (x, 200), (x, 700), (0, 0, 0), 5)
+    write("PLANTA ALTA", 300, 160, scale=1.5, thickness=4)
+    write("DORMITORIO", 200, 350)
+    write("ESC: 1:100", 80, 780)
+    write("PROPIETARIO: JUAN PEREZ", 80, 830)
+
+    grid([140, 200, 260, 320], [1150, 1450, 1720],
+         [["AMBIENTE", "SUP. m2"], ["DORMITORIO", "18.40"], ["SALA", "31.75"]])
+    grid([900, 960, 1020, 1080], [1150, 1400, 1720],
+         [["COD CAT", "04-015-022"], ["MANZANO", "17"], ["ESCALA", "1:100"]])
+
+    if tilt_deg:
+        matrix = cv2.getRotationMatrix2D((width / 2, height / 2), tilt_deg, 1.0)
+        sheet = cv2.warpAffine(sheet, matrix, (width, height), borderValue=(255, 255, 255))
+    photo = cv2.imencode(".jpg", sheet, [cv2.IMWRITE_JPEG_QUALITY, 92])[1].tobytes()
+    return photo, blocks, width, height
+
+
+class TestPlanLayout(unittest.TestCase):
+    """The pure half: what makes a cuadro a cuadro, and a value a value."""
+
+    def test_a_lone_wall_is_not_a_cuadro(self):
+        walls = [Segment(position=200, start=80, end=900), Segment(position=700, start=80, end=900)]
+        self.assertEqual(table_regions(walls, 1200), [])
+
+    def test_three_rules_over_the_same_paper_are_a_cuadro(self):
+        rules = [Segment(position=y, start=1150, end=1720) for y in (140, 200, 260)]
+        region = table_regions(rules, 1200)[0]
+        self.assertEqual((region.top, region.bottom), (140, 260))
+        self.assertEqual(region.left, 1150)
+
+    def test_a_wall_across_the_sheet_does_not_split_a_cuadro(self):
+        """The wall runs between two rows of a cuadro on the other side of the
+        sheet: the cuadro has to survive it."""
+        rules = [Segment(position=y, start=1150, end=1720) for y in (140, 200, 260, 320)]
+        rules.append(Segment(position=200, start=80, end=900))
+        regions = table_regions(rules, 1200)
+        self.assertEqual(len(regions), 1)
+        self.assertEqual(len(regions[0].rows), 4)
+
+    def test_a_scale_is_not_a_label_with_its_value(self):
+        blocks = [TextBlock("ESCALA 1:100", 0.9, 0, 0, 200, 20)]
+        self.assertEqual(labelled_fields(group_lines(blocks)), [])
+
+    def test_a_label_keeps_a_value_that_has_a_colon(self):
+        blocks = [TextBlock("ESC: 1:100", 0.9, 0, 0, 200, 20)]
+        self.assertEqual(labelled_fields(group_lines(blocks)), [{"name": "ESC", "value": "1:100"}])
+
+    def test_a_row_of_scattered_notes_is_not_one_field(self):
+        """A rótulo strip along the bottom of the sheet: ESC, the planta name and a
+        handful of room notes all sit at the same height because there was nowhere
+        else to put them. group_lines() alone reads that as one line, so ESC would
+        swallow every note after it as its own value; the gap between one note and
+        the next is what tells them apart."""
+        row = [
+            TextBlock("ESC:1:100", 0.9, 80, 780, 200, 792),
+            TextBlock("PLANTA", 0.9, 300, 780, 380, 792),
+            TextBlock("SEMISOTANO", 0.9, 385, 780, 520, 792),
+            TextBlock("BAULERA", 0.9, 800, 780, 900, 792),
+            TextBlock("2.", 0.9, 905, 780, 925, 792),
+        ]
+        lines = _split_scattered(group_lines(row))
+        self.assertEqual(
+            [[b.text for b in line] for line in lines],
+            [["ESC:1:100"], ["PLANTA", "SEMISOTANO"], ["BAULERA", "2."]],
+        )
+        self.assertEqual(labelled_fields(lines), [{"name": "ESC", "value": "1:100"}])
+
+
+class TestOcrPlanExtractor(unittest.TestCase):
+    """The lane end to end with the OCR service faked -- OpenCV is the real one."""
+
+    def _extractor(self, blocks, width, height):
+        return OcrPlanExtractor(
+            read_page=lambda _content, _name=None: PageText(blocks=blocks, width=width, height=height)
+        )
+
+    def test_the_sheet_is_read_into_text_fields_and_cuadros(self):
+        photo, blocks, width, height = _sheet()
+        data, observations = self._extractor(blocks, width, height).extract([photo])
+
+        page = data["pages"][0]
+        self.assertEqual(page["document_type"], "PLANTA ALTA")
+        self.assertEqual(page["tables"][0], [["AMBIENTE", "SUP. m2"], ["DORMITORIO", "18.40"], ["SALA", "31.75"]])
+        self.assertEqual(page["tables"][1][0], ["COD CAT", "04-015-022"])
+        self.assertIn({"name": "PROPIETARIO", "value": "JUAN PEREZ"}, page["fields"])
+        self.assertIn("PLANTA ALTA", page["full_text"])
+        self.assertEqual(observations, [])
+
+    def test_the_walls_of_the_drawing_are_not_read_as_a_cuadro(self):
+        photo, blocks, width, height = _sheet()
+        data, _observations = self._extractor(blocks, width, height).extract([photo])
+        self.assertEqual(data["reading"]["tables_found"], 2)
+
+    def test_the_stored_shape_is_the_one_the_lane_always_had(self):
+        """The vision model answered with document_type / full_text / fields /
+        tables; the review screen and the stored documents expect no less."""
+        photo, blocks, width, height = _sheet()
+        data, _observations = self._extractor(blocks, width, height).extract([photo])
+        self.assertEqual(set(data), {"document_type", "full_text", "pages", "reading"})
+        self.assertEqual(set(data["pages"][0]), {"page", "document_type", "full_text", "fields", "tables"})
+        self.assertEqual(data["reading"]["engine"], "paddleocr+opencv")
+
+    def test_a_crooked_photo_is_straightened_before_it_is_read(self):
+        photo, _blocks, _width, _height = _sheet(tilt_deg=2.0)
+        straightened = opencv_plan_reader.deskew(photo)
+        self.assertTrue(straightened.corrected)
+        self.assertLess(abs(straightened.angle), 4.0)
+        rules = opencv_plan_reader.row_rules(straightened.frame)
+        self.assertEqual(len(table_regions(rules, straightened.frame.shape[0])), 2)
+
+    def test_a_photo_tilted_beyond_sense_is_left_as_it_came(self):
+        photo, _blocks, _width, _height = _sheet(tilt_deg=25.0)
+        straightened = opencv_plan_reader.deskew(photo)
+        self.assertFalse(straightened.corrected)
+        self.assertEqual(straightened.image, photo)
+
+    def test_a_page_the_ocr_cannot_read_is_reported_and_the_rest_are_read(self):
+        photo, blocks, width, height = _sheet()
+        answers = [
+            PageText(blocks=[], width=width, height=height),
+            PageText(blocks=blocks, width=width, height=height),
+        ]
+        extractor = OcrPlanExtractor(read_page=lambda _content, _name=None: answers.pop(0))
+
+        data, observations = extractor.extract([photo, photo])
+        self.assertEqual(observations, ["La página 1 no tiene texto que el OCR pueda leer."])
+        self.assertEqual(data["pages"][0]["full_text"], "")
+        self.assertIn("PLANTA ALTA", data["pages"][1]["full_text"])
+        self.assertEqual(data["document_type"], "PLANTA ALTA")
+
+    def test_each_photo_is_reported_as_it_is_read(self):
+        photo, blocks, width, height = _sheet()
+        seen = []
+        self._extractor(blocks, width, height).extract([photo, photo], on_page=seen.append)
+        self.assertEqual(seen, [0, 1])
+
+    def test_a_page_opencv_cannot_open_still_gets_its_text(self):
+        """No OpenCV, no cuadros -- but the OCR text is not lost with them."""
+        _photo, blocks, width, height = _sheet()
+        data, _observations = self._extractor(blocks, width, height).extract([b"esto no es una imagen"])
+        self.assertIn("PLANTA ALTA", data["pages"][0]["full_text"])
+        self.assertEqual(data["pages"][0]["tables"], [])
+
+
+
+# ------------------------------------------------------- carpetas registradas
+
+class FakeRegisteredFolders(RegisteredFolderRepositoryPort):
+    """In-memory carpetas. Mirrors what the SQL repository guarantees: filing
+    order is kept, and a document can only sit in one carpeta at a time."""
+
+    def __init__(self, documents):
+        self.rows = {}
+        self._owners = {}
+        self._documents = documents
+
+    def _entity(self, row):
+        folder_id, name, notes, ids = row
+        return RegisteredFolder(
+            id=folder_id,
+            user_sub=self._owners[folder_id],
+            name=name,
+            notes=notes,
+            created_at=NOW,
+            updated_at=NOW,
+            documents=[self._documents.rows[i] for i in ids if i in self._documents.rows],
+        )
+
+    def create(self, user_sub, name, notes, document_ids):
+        folder_id = str(uuid.uuid4())
+        self._owners[folder_id] = user_sub
+        self.rows[folder_id] = (folder_id, name, notes, list(document_ids))
+        return self._entity(self.rows[folder_id])
+
+    def get(self, folder_id, user_sub):
+        row = self.rows.get(folder_id)
+        if row is None or self._owners.get(folder_id) != user_sub:
+            return None
+        return self._entity(row)
+
+    def list(self, user_sub):
+        rows = [r for fid, r in self.rows.items() if self._owners.get(fid) == user_sub]
+        return [self._entity(r) for r in sorted(rows, key=lambda r: r[1].lower())]
+
+    def rename(self, folder_id, name, notes):
+        folder_id, _name, _notes, ids = self.rows[folder_id]
+        self.rows[folder_id] = (folder_id, name, notes, ids)
+
+    def set_documents(self, folder_id, document_ids):
+        fid, name, notes, _ids = self.rows[folder_id]
+        self.rows[folder_id] = (fid, name, notes, list(document_ids))
+
+    def delete(self, folder_id):
+        self.rows.pop(folder_id, None)
+        self._owners.pop(folder_id, None)
+
+    def name_taken(self, user_sub, name, exclude_folder_id=None):
+        return any(
+            r[1].lower() == name.strip().lower()
+            for fid, r in self.rows.items()
+            if self._owners.get(fid) == user_sub and fid != exclude_folder_id
+        )
+
+    def folder_names_of_documents(self, user_sub, document_ids, exclude_folder_id=None):
+        taken = {}
+        for fid, (_id, name, _notes, ids) in self.rows.items():
+            if self._owners.get(fid) != user_sub or fid == exclude_folder_id:
+                continue
+            for document_id in ids:
+                if document_id in document_ids:
+                    taken[document_id] = name
+        return taken
+
+
+class TestRegisteredFolders(unittest.TestCase):
+    """The "Carpetas registradas" submodule: the architect names a project and
+    files the documents already solved in it."""
+
+    def setUp(self):
+        self.captures, self.documents = FakeCaptures(), FakeDocuments()
+        self.folders = FakeRegisteredFolders(self.documents)
+        self.service = RegisteredFolderService(self.folders, self.documents)
+
+    def _reviewed(self, doc_type="folio", user_sub="arq-1"):
+        """A document as it looks once its review was saved."""
+        photo = self.captures.create(user_sub, "p.png", "image/png", b"x", b"t")
+        document = self.documents.create(user_sub, doc_type, [photo.id])
+        self.documents.save_progress(document.id, document.pages, DocumentStatus.EXTRACTED, {"a": 1}, None)
+        ReviewDocumentUseCase(self.documents).execute(document.id, user_sub, {"registration_number": "1.1.1"})
+        return self.documents.get(document.id, user_sub)
+
+    def _draft(self, doc_type="plan", user_sub="arq-1"):
+        photo = self.captures.create(user_sub, "p.png", "image/png", b"x", b"t")
+        return self.documents.create(user_sub, doc_type, [photo.id])
+
+    def _create(self, name="Proyecto Sur", notes=None, ids=None, user_sub="arq-1"):
+        return CreateRegisteredFolderUseCase(self.folders, self.service).execute(
+            user_sub, name, notes, ids or []
+        )
+
+    # ------------------------------------------------------------------ create
+
+    def test_a_carpeta_groups_the_three_kinds_of_saved_document(self):
+        folio, tax, plan = self._reviewed("folio"), self._reviewed("tax_receipt"), self._reviewed("plan")
+        folder = self._create("Av. Ballivián 220", "Ampliación", [folio.id, tax.id, plan.id])
+        self.assertEqual(folder.name, "Av. Ballivián 220")
+        self.assertEqual(folder.notes, "Ampliación")
+        self.assertEqual(folder.document_ids, [folio.id, tax.id, plan.id])
+        self.assertEqual(folder.counts_by_type, {"folio": 1, "tax_receipt": 1, "plan": 1})
+
+    def test_the_counters_name_every_type_even_when_empty(self):
+        """The screen draws three counters, so none of them may be missing."""
+        self.assertEqual(self._create().counts_by_type, {"folio": 0, "tax_receipt": 0, "plan": 0})
+
+    def test_the_name_is_required_and_trimmed(self):
+        self.assertEqual(self._create("  Proyecto   Norte  ").name, "Proyecto Norte")
+        with self.assertRaises(InvalidRegisteredFolderException):
+            self._create("   ")
+
+    def test_a_name_too_long_is_refused(self):
+        with self.assertRaises(InvalidRegisteredFolderException):
+            self._create("x" * (MAX_NAME_LENGTH + 1))
+
+    def test_two_carpetas_cannot_share_a_name_however_it_is_typed(self):
+        self._create("Proyecto Sur")
+        with self.assertRaises(RegisteredFolderNameTakenException):
+            self._create("  proyecto sur ")
+
+    def test_another_user_may_use_the_same_project_name(self):
+        self._create("Proyecto Sur")
+        self.assertEqual(self._create("Proyecto Sur", user_sub="arq-2").name, "Proyecto Sur")
+
+    def test_repeated_picks_are_filed_once(self):
+        folio = self._reviewed()
+        self.assertEqual(self._create(ids=[folio.id, folio.id]).document_ids, [folio.id])
+
+    # ------------------------------------------------------------ what may go in
+
+    def test_only_documents_whose_review_was_saved_can_be_filed(self):
+        with self.assertRaises(InvalidRegisteredFolderException):
+            self._create(ids=[self._draft().id])
+
+    def test_another_users_document_cannot_be_filed(self):
+        other = self._reviewed(user_sub="arq-2")
+        with self.assertRaises(DocumentNotFoundException):
+            self._create(ids=[other.id])
+
+    def test_a_document_already_filed_says_which_carpeta_holds_it(self):
+        folio = self._reviewed()
+        self._create("Proyecto Sur", ids=[folio.id])
+        with self.assertRaises(DocumentAlreadyFiledException) as raised:
+            self._create("Proyecto Norte", ids=[folio.id])
+        self.assertIn("Proyecto Sur", raised.exception.message)
+
+    def test_more_documents_than_a_carpeta_admits_are_refused(self):
+        with self.assertRaises(InvalidRegisteredFolderException):
+            self._create(ids=[str(uuid.uuid4()) for _ in range(MAX_DOCUMENTS + 1)])
+
+    # ------------------------------------------------------------------ update
+
+    def test_renaming_alone_keeps_the_documents(self):
+        folio = self._reviewed()
+        folder = self._create("Proyecto Sur", ids=[folio.id])
+        renamed = UpdateRegisteredFolderUseCase(self.folders, self.service).execute(
+            folder.id, "arq-1", "Proyecto Sur — etapa 2", "Con plano nuevo"
+        )
+        self.assertEqual(renamed.name, "Proyecto Sur — etapa 2")
+        self.assertEqual(renamed.notes, "Con plano nuevo")
+        self.assertEqual(renamed.document_ids, [folio.id])
+
+    def test_a_carpeta_can_keep_its_own_name_while_being_edited(self):
+        folder = self._create("Proyecto Sur")
+        self.assertEqual(
+            UpdateRegisteredFolderUseCase(self.folders, self.service)
+            .execute(folder.id, "arq-1", "Proyecto Sur", "otra nota").name,
+            "Proyecto Sur",
+        )
+
+    def test_sending_documents_replaces_the_whole_content(self):
+        folio, tax = self._reviewed("folio"), self._reviewed("tax_receipt")
+        folder = self._create("Proyecto Sur", ids=[folio.id])
+        updated = UpdateRegisteredFolderUseCase(self.folders, self.service).execute(
+            folder.id, "arq-1", "Proyecto Sur", None, [tax.id]
+        )
+        self.assertEqual(updated.document_ids, [tax.id])
+
+    def test_reordering_its_own_documents_is_not_a_conflict(self):
+        folio, tax = self._reviewed("folio"), self._reviewed("tax_receipt")
+        folder = self._create("Proyecto Sur", ids=[folio.id, tax.id])
+        updated = UpdateRegisteredFolderUseCase(self.folders, self.service).execute(
+            folder.id, "arq-1", "Proyecto Sur", None, [tax.id, folio.id]
+        )
+        self.assertEqual(updated.document_ids, [tax.id, folio.id])
+
+    def test_another_user_cannot_touch_the_carpeta(self):
+        folder = self._create("Proyecto Sur")
+        with self.assertRaises(RegisteredFolderNotFoundException):
+            UpdateRegisteredFolderUseCase(self.folders, self.service).execute(
+                folder.id, "arq-2", "Mío"
+            )
+
+    # ------------------------------------------------------- add / remove / delete
+
+    def test_adding_files_at_the_end_and_keeps_what_was_there(self):
+        folio, plan = self._reviewed("folio"), self._reviewed("plan")
+        folder = self._create("Proyecto Sur", ids=[folio.id])
+        added = AddDocumentsToRegisteredFolderUseCase(self.folders, self.service).execute(
+            folder.id, "arq-1", [plan.id]
+        )
+        self.assertEqual(added.document_ids, [folio.id, plan.id])
+
+    def test_adding_what_is_already_inside_is_asked_again(self):
+        folio = self._reviewed()
+        folder = self._create("Proyecto Sur", ids=[folio.id])
+        with self.assertRaises(InvalidRegisteredFolderException):
+            AddDocumentsToRegisteredFolderUseCase(self.folders, self.service).execute(
+                folder.id, "arq-1", [folio.id]
+            )
+
+    def test_removing_leaves_the_document_saved_and_free_to_file_again(self):
+        folio = self._reviewed()
+        folder = self._create("Proyecto Sur", ids=[folio.id])
+        emptied = RemoveDocumentFromRegisteredFolderUseCase(self.folders, self.service).execute(
+            folder.id, "arq-1", folio.id
+        )
+        self.assertEqual(emptied.document_ids, [])
+        self.assertEqual(self.documents.get(folio.id, "arq-1").status, DocumentStatus.REVIEWED)
+        self.assertEqual(self._create("Proyecto Norte", ids=[folio.id]).document_ids, [folio.id])
+
+    def test_removing_something_that_is_not_in_the_carpeta(self):
+        folder = self._create("Proyecto Sur")
+        with self.assertRaises(DocumentNotFoundException):
+            RemoveDocumentFromRegisteredFolderUseCase(self.folders, self.service).execute(
+                folder.id, "arq-1", self._reviewed().id
+            )
+
+    def test_deleting_the_carpeta_keeps_its_documents(self):
+        folio = self._reviewed()
+        folder = self._create("Proyecto Sur", ids=[folio.id])
+        DeleteRegisteredFolderUseCase(self.folders, self.service).execute(folder.id, "arq-1")
+        self.assertEqual(ListRegisteredFoldersUseCase(self.folders).execute("arq-1"), [])
+        self.assertEqual(self.documents.get(folio.id, "arq-1").status, DocumentStatus.REVIEWED)
+
+    def test_another_user_cannot_delete_the_carpeta(self):
+        folder = self._create("Proyecto Sur")
+        with self.assertRaises(RegisteredFolderNotFoundException):
+            DeleteRegisteredFolderUseCase(self.folders, self.service).execute(folder.id, "arq-2")
+
+    # -------------------------------------------------------------------- list
+
+    def test_the_list_is_alphabetical_and_only_the_users_own(self):
+        self._create("Zona Sur")
+        self._create("Achumani")
+        self._create("Ajena", user_sub="arq-2")
+        self.assertEqual(
+            [f.name for f in ListRegisteredFoldersUseCase(self.folders).execute("arq-1")],
+            ["Achumani", "Zona Sur"],
+        )
+
+    def test_a_carpeta_carries_the_saved_data_of_its_documents(self):
+        """The screen shows the matrícula under each row, so the data travels
+        with the carpeta instead of asking for every document."""
+        folio = self._reviewed()
+        folder = self._create("Proyecto Sur", ids=[folio.id])
+        self.assertEqual(folder.documents[0].reviewed_data, {"registration_number": "1.1.1"})
 
 if __name__ == "__main__":
     unittest.main()

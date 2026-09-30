@@ -22,12 +22,15 @@ router = APIRouter(tags=["Detección de construcciones — historial"])
 @router.get("/sectors", response_model=List[ProcessedSectorMapItem])
 def list_processed_sectors(
     campaign_id: Optional[int] = Query(None),
+    unassigned_only: bool = Query(False),
     use_case: ListProcessedSectorsUseCase = Depends(get_list_processed_sectors_use_case),
     _user: UserProfile = Depends(require_permission("detection.view")),
 ):
     """Every processed sector's polygon + summary, for the map overlay in
-    "Mapa y detección" and "Historial"."""
-    return use_case.execute(campaign_id=campaign_id)
+    "Mapa y detección" and "Historial". `unassigned_only` (ignored if
+    `campaign_id` is set) backs "Mapa y detección"'s "Sin campaña" filter --
+    sectors with no campaign at all, not "no filter"."""
+    return use_case.execute(campaign_id=campaign_id, unassigned_only=unassigned_only)
 
 
 @router.get("/sectors/{processed_sector_id}", response_model=ProcessedSectorDetail)

@@ -72,7 +72,7 @@ except Exception as exc:
     logger.warning("Could not load domain 'folder_analysis': %s", exc)
 
 try:
-    from app.domains.alignment.presentation.router import router as alignment_router
-    api_router.include_router(alignment_router, prefix="/alignment")
+    from app.domains.procedurereports.presentation.router import router as procedurereports_router
+    api_router.include_router(procedurereports_router, prefix="/procedurereports")
 except Exception as exc:
-    logger.warning("Could not load domain 'alignment': %s", exc)
+    logger.warning("Could not load domain 'procedurereports': %s", exc)

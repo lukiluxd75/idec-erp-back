@@ -3,7 +3,13 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from app.domains.folder_analysis.domain.entities import Capture, FolderDocument
+from app.domains.folder_analysis.domain.entities import (
+    MAX_NAME_LENGTH,
+    MAX_NOTES_LENGTH,
+    Capture,
+    FolderDocument,
+    RegisteredFolder,
+)
 
 DocType = Literal["folio", "tax_receipt", "plan"]
 
@@ -85,3 +91,52 @@ class AnalyzeRequest(BaseModel):
 
 class ReviewRequest(BaseModel):
     data: Dict[str, Any]
+
+
+# ---------------------------------------------------------- carpetas registradas
+
+
+class RegisteredFolderOut(BaseModel):
+    """A project folder with the documents filed in it, data included: the
+    screen lists a carpeta and its saved documents in one read."""
+
+    id: str
+    name: str
+    notes: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    documents: List[DocumentDetail]
+    document_count: int
+    counts_by_type: Dict[str, int]
+
+    @classmethod
+    def from_entity(cls, folder: RegisteredFolder) -> "RegisteredFolderOut":
+        return cls(
+            id=folder.id,
+            name=folder.name,
+            notes=folder.notes,
+            created_at=folder.created_at,
+            updated_at=folder.updated_at,
+            documents=[DocumentDetail.from_entity(d) for d in folder.documents],
+            document_count=len(folder.documents),
+            counts_by_type=folder.counts_by_type,
+        )
+
+
+class CreateRegisteredFolderRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=MAX_NAME_LENGTH)
+    notes: Optional[str] = Field(default=None, max_length=MAX_NOTES_LENGTH)
+    document_ids: List[str] = Field(default_factory=list)
+
+
+class UpdateRegisteredFolderRequest(BaseModel):
+    """`document_ids` left out keeps the carpeta's contents as they are; sent, it
+    becomes the whole content (an empty list empties the carpeta)."""
+
+    name: str = Field(min_length=1, max_length=MAX_NAME_LENGTH)
+    notes: Optional[str] = Field(default=None, max_length=MAX_NOTES_LENGTH)
+    document_ids: Optional[List[str]] = None
+
+
+class AddRegisteredFolderDocumentsRequest(BaseModel):
+    document_ids: List[str] = Field(min_length=1)

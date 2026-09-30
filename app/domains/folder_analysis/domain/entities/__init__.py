@@ -7,6 +7,12 @@ from app.domains.folder_analysis.domain.entities.folder_document import (
     PageStatus,
     QueuedJob,
 )
+from app.domains.folder_analysis.domain.entities.registered_folder import (
+    MAX_DOCUMENTS,
+    MAX_NAME_LENGTH,
+    MAX_NOTES_LENGTH,
+    RegisteredFolder,
+)
 
 __all__ = [
     "Capture",
@@ -16,6 +22,10 @@ __all__ = [
     "DocumentStatus",
     "DocumentType",
     "FolderDocument",
+    "MAX_DOCUMENTS",
+    "MAX_NAME_LENGTH",
+    "MAX_NOTES_LENGTH",
     "PageStatus",
     "QueuedJob",
+    "RegisteredFolder",
 ]

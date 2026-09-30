@@ -19,7 +19,7 @@ from app.domains.folder_analysis.domain.exceptions import (
     DocumentNotFoundException,
     InvalidDocumentRequestException,
 )
-from app.domains.folder_analysis.domain.extraction_profiles import PROFILES
+from app.domains.folder_analysis.domain.extraction_profiles import GENERIC_PROFILE, PROFILES
 from app.domains.folder_analysis.domain.ports import (
     CaptureRepositoryPort,
     DocumentRepositoryPort,
@@ -32,7 +32,11 @@ logger = logging.getLogger("uvicorn.error")
 MAX_PAGES = 10
 
 # How the lanes read on the server name themselves in a message to the architect.
-DOC_LABEL = {DocumentType.FOLIO: "el folio", DocumentType.TAX_RECEIPT: "el comprobante de impuestos"}
+DOC_LABEL = {
+    DocumentType.FOLIO: "el folio",
+    DocumentType.TAX_RECEIPT: "el comprobante de impuestos",
+    DocumentType.PLAN: "el plano",
+}
 
 
 def _require_document(repository: DocumentRepositoryPort, document_id: str, user_sub: str) -> FolderDocument:
@@ -140,7 +144,7 @@ class AnalyzeDocumentUseCase:
             self._documents.mark_submitted(document_id, {})
             return _require_document(self._documents, document_id, user_sub)
 
-        profile = PROFILES[document.doc_type]
+        profile = PROFILES.get(document.doc_type, GENERIC_PROFILE)
         job_ids: Dict[int, str] = {}
         for page in document.pages:
             image = self._captures.get_image(page.capture_id, user_sub)
@@ -287,6 +291,18 @@ class ListDocumentsUseCase:
         if doc_type is not None and doc_type not in DocumentType.ALL:
             raise InvalidDocumentRequestException("El tipo de documento no es válido.")
         return self._synchronizer.refresh(self._documents.list(user_sub, doc_type))
+
+
+class ListReviewedDocumentsUseCase:
+    """Lists only data explicitly saved by the user, optionally by document type."""
+
+    def __init__(self, documents: DocumentRepositoryPort):
+        self._documents = documents
+
+    def execute(self, user_sub: str, doc_type: Optional[str] = None) -> List[FolderDocument]:
+        if doc_type is not None and doc_type not in DocumentType.ALL:
+            raise InvalidDocumentRequestException("El tipo de documento no es válido.")
+        return self._documents.list_reviewed(user_sub, doc_type)
 
 
 class ReviewDocumentUseCase:
