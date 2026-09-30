@@ -27,10 +27,15 @@ class DetectChangesRequest(BaseModel):
 
 
 class CampaignCreateRequest(BaseModel):
-    """Backs the "+ Nueva campaña" quick-create on the detection start screen."""
+    """Backs the "+ Nueva campaña" quick-create on the detection start screen.
+    `year_a`/`year_b` are fixed for the campaign's whole life (see
+    doc/bdd.sql's 2026-09-29 patch) -- the frontend locks its year selectors
+    to them once this campaign is picked."""
 
     code: str = Field(..., max_length=30, examples=["2026-Q4"])
     name: str = Field(..., max_length=150, examples=["Cuarto trimestre 2026"])
+    year_a: int = Field(..., examples=[2018])
+    year_b: int = Field(..., examples=[2024])
     description: Optional[str] = None
     period_start: Optional[date] = None
     period_end: Optional[date] = None
@@ -46,21 +51,23 @@ class CampaignSummary(BaseModel):
     n_sectors: int
     n_affected_parcels: int
     description: Optional[str] = None
+    year_a: Optional[int] = None
+    year_b: Optional[int] = None
     period_start: Optional[date] = None
     period_end: Optional[date] = None
 
 
 class ReviewAffectedParcelRequest(BaseModel):
     """Confirm (with construction_type) or reject (with an optional audit
-    comment) an affected_parcel. See ReviewAffectedParcelUseCase's
-    ALLOWED_CONSTRUCTION_TYPES -- kept in sync with the pattern below."""
+    comment) an affected_parcel. construction_type is a short title -- either
+    one of ReviewAffectedParcelUseCase's ALLOWED_CONSTRUCTION_TYPES, or a
+    custom one the architect typed after picking "Otro" in the frontend's
+    dropdown (see CONSTRUCTION_TYPE_MAX_LENGTH there); not a fixed enum here
+    since that custom text is a real, valid value."""
 
     action: str = Field(..., pattern="^(confirm|reject)$")
     comment: Optional[str] = None
-    construction_type: Optional[str] = Field(
-        None,
-        pattern="^(nueva_construccion|ampliacion|cambio_techo|muro_nuevo|demolicion|otro)$",
-    )
+    construction_type: Optional[str] = Field(None, max_length=30)
 
 
 class ArchitectReviewSummary(BaseModel):

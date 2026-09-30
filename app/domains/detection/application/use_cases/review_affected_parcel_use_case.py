@@ -8,17 +8,25 @@ from app.domains.detection.domain.ports.affected_parcel_review_port import Affec
 # for it to be worth building) -- see AffectedParcelReviewPort's docstring.
 ALLOWED_ACTIONS = {"confirm", "reject"}
 
-# Fixed catalog for affected_parcel.construction_type, chosen with the
-# architect team: the real-world categories a confirmed change falls into.
-# Required when action == 'confirm'; stored for statistics/graphs.
+# Fixed catalog offered by the frontend's dropdown for affected_parcel.
+# construction_type -- the real-world categories a confirmed change usually
+# falls into. Not an exhaustive whitelist: picking "Otro" there reveals a
+# free-text field, and *that* short title is what actually gets sent and
+# stored here instead of the literal word "otro" (see
+# CONSTRUCTION_TYPE_MAX_LENGTH below) -- there is no dedicated column for it,
+# it goes straight into construction_type like every other value.
 ALLOWED_CONSTRUCTION_TYPES = {
     "nueva_construccion",
     "ampliacion",
     "cambio_techo",
     "muro_nuevo",
     "demolicion",
-    "otro",
 }
+
+# Matches affected_parcel.construction_type's VARCHAR(30) -- a short title,
+# not a description, whether it's one of the catalog values above or a
+# custom one typed under "Otro".
+CONSTRUCTION_TYPE_MAX_LENGTH = 30
 
 
 class ReviewAffectedParcelUseCase:
@@ -41,11 +49,14 @@ class ReviewAffectedParcelUseCase:
         if action not in ALLOWED_ACTIONS:
             raise ValueError(f"action must be one of {sorted(ALLOWED_ACTIONS)}, got {action!r}")
         if action == "confirm":
-            if construction_type not in ALLOWED_CONSTRUCTION_TYPES:
+            value = (construction_type or "").strip()
+            if not value:
+                raise ValueError("construction_type es obligatorio cuando action es 'confirm'.")
+            if len(value) > CONSTRUCTION_TYPE_MAX_LENGTH:
                 raise ValueError(
-                    f"construction_type must be one of {sorted(ALLOWED_CONSTRUCTION_TYPES)} "
-                    f"when action is 'confirm', got {construction_type!r}"
+                    f"construction_type no puede superar {CONSTRUCTION_TYPE_MAX_LENGTH} caracteres."
                 )
+            construction_type = value
         return self._repository.review(
             affected_parcel_id=affected_parcel_id,
             action=action,

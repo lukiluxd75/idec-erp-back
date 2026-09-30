@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Optional
 from urllib.parse import urljoin
@@ -118,6 +119,15 @@ class GpuDetectionClient(DetectionEnginePort):
         content_type = response.headers.get("Content-Type", "application/octet-stream")
         filename = clean.rsplit("/", 1)[-1]
         return EngineBinary(content=response.content, content_type=content_type, filename=filename)
+
+    def fetch_json(self, relative_path: str) -> dict[str, Any]:
+        """Like `fetch_path`, but for a persisted JSON artifact -- applies the
+        same URL rewriting `get_result` and friends get for free, so image
+        paths inside an old run's saved `reporte.json` resolve through the
+        browser-facing proxy too, not just a live job's result."""
+        binary = self.fetch_path(relative_path)
+        data = json.loads(binary.content)
+        return self.rewrite_urls(data) if isinstance(data, dict) else data
 
     def rewrite_urls(self, payload: Any) -> Any:
         """Rewrite absolute/relative engine URLs so the browser hits the ERP proxy."""

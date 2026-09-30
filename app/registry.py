@@ -70,3 +70,9 @@ try:
     api_router.include_router(folder_analysis_router, prefix="/folder-analysis")
 except Exception as exc:
     logger.warning("Could not load domain 'folder_analysis': %s", exc)
+
+try:
+    from app.domains.procedurereports.presentation.router import router as procedurereports_router
+    api_router.include_router(procedurereports_router, prefix="/procedurereports")
+except Exception as exc:
+    logger.warning("Could not load domain 'procedurereports': %s", exc)

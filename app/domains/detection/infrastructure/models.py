@@ -60,6 +60,8 @@ class CampaignModel(Base):
     code = Column(String(30), nullable=False, unique=True)
     name = Column(String(150), nullable=False)
     description = Column(Text)
+    year_a = Column(Integer)
+    year_b = Column(Integer)
     period_start = Column(Date)
     period_end = Column(Date)
     status = Column(String(20), nullable=False, server_default=text("'active'"))

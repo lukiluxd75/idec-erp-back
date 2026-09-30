@@ -1,8 +1,9 @@
 from abc import ABC, abstractmethod
 from typing import Any, List, Optional
 
+from app.domains.detection.domain.entities.affected_parcel_report_row import AffectedParcelReportRow
 from app.domains.detection.domain.entities.affected_parcel_summary import AffectedParcelSummary
-from app.domains.detection.domain.entities.processed_sector import ProcessedSector
+from app.domains.detection.domain.entities.processed_sector import ProcessedSector, SectorResumeContext
 
 
 class ProcessedSectorRepositoryPort(ABC):
@@ -69,6 +70,32 @@ class ProcessedSectorRepositoryPort(ABC):
         order/length of whatever `cambios[]`/`reporte_arquitecto[]` the latest
         `GET .../result` call returned, so index i here is index i there (see
         job_result's response enrichment)."""
+
+    @abstractmethod
+    def get_resume_context(self, processed_sector_id: int) -> Optional[SectorResumeContext]:
+        """The engine job_id behind the sector's most recent processing_run
+        (None if that run predates job_id being recorded) plus the sector's
+        current status -- see ResumeSectorValidationUseCase, which uses the
+        job_id to re-fetch that run's persisted `reporte.json` artifact
+        instead of needing the engine's job to still be tracked as "active".
+        `urls` is that run's own sector_artifact rows, keyed like the
+        frontend's asset gallery expects (aligned_a/aligned_b/panel_resultado/
+        align_check) -- reporte.json itself carries no `urls` field, so this
+        is what lets the resumed result still show its before/after images.
+        None if the sector itself doesn't exist."""
+
+    @abstractmethod
+    def list_report_rows(
+        self, campaign_id: Optional[int] = None, unassigned_only: bool = False
+    ) -> List[AffectedParcelReportRow]:
+        """Confirmed/rejected affected_parcel rows (never pending) across every
+        processed_sector of ONE campaign -- or of sectors with no campaign at
+        all when unassigned_only and no campaign_id, mirroring
+        ListProcessedSectorsUseCase's own scoping. Backs the "Exportar" report
+        button: always scoped to whatever campaign is active in the UI, never
+        a global export across campaigns (the engineer's call -- campaigns
+        exist precisely to keep a fixed year pair, so mixing them in one
+        report would mix year comparisons too)."""
 
     @abstractmethod
     def record_manual_alignment(
