@@ -13,11 +13,14 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    db_server: str = "172.16.67.100,1433"
-    db_name: str = "catastro"
-    db_user: str = "jPoloA"
-    db_password: str = ""
-    db_driver: str = "ODBC Driver 17 for SQL Server"
+    # REPORTS_DB_* -- prefixed like AVALUOS_DB_* (see core/config/settings.py) so
+    # this never silently binds to the main app's own DB_USER/DB_PASSWORD/DB_NAME
+    # (this is a second, unrelated SQL Server connection, read from the same .env).
+    db_server: str = Field("172.16.67.100,1433", validation_alias="REPORTS_DB_SERVER")
+    db_name: str = Field("catastro", validation_alias="REPORTS_DB_NAME")
+    db_user: str = Field("jPoloA", validation_alias="REPORTS_DB_USER")
+    db_password: str = Field("", validation_alias="REPORTS_DB_PASSWORD")
+    db_driver: str = Field("ODBC Driver 17 for SQL Server", validation_alias="REPORTS_DB_DRIVER")
     unit_id: int = Field(102116, validation_alias="UNIDAD_ID")
     unit_name: str = Field("AREA TECNICA CARTOGRAFIA", validation_alias="UNIDAD_NOMBRE")
     central_district_id: int = Field(7, validation_alias="COMUNA_CENTRAL_ID")
