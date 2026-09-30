@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.database.connection import get_db
 from app.domains.detection.application.use_cases import (
     CreateCampaignUseCase,
+    ExportCampaignReportUseCase,
     GetProcessedSectorDetailUseCase,
     IngestDetectionResultUseCase,
     ListCampaignsUseCase,
@@ -102,3 +103,9 @@ def get_resume_sector_validation_use_case(
     repository: ProcessedSectorRepositoryPort = Depends(get_processed_sector_repository),
 ) -> ResumeSectorValidationUseCase:
     return ResumeSectorValidationUseCase(engine=engine, repository=repository)
+
+
+def get_export_campaign_report_use_case(
+    repository: ProcessedSectorRepositoryPort = Depends(get_processed_sector_repository),
+) -> ExportCampaignReportUseCase:
+    return ExportCampaignReportUseCase(repository=repository)

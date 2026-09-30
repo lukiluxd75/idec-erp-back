@@ -1,13 +1,19 @@
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 
 from app.domains.detection.application.use_cases import (
+    ExportCampaignReportUseCase,
     GetProcessedSectorDetailUseCase,
     ListProcessedSectorsUseCase,
     ResumeSectorValidationUseCase,
 )
+from app.domains.detection.domain.ports.campaign_repository_port import CampaignRepositoryPort
+from app.domains.detection.infrastructure.export_excel import build_campaign_report_excel
 from app.domains.detection.presentation.deps import (
+    get_campaign_repository,
+    get_export_campaign_report_use_case,
     get_list_processed_sectors_use_case,
     get_processed_sector_detail_use_case,
     get_resume_sector_validation_use_case,
@@ -33,6 +39,34 @@ def list_processed_sectors(
     `campaign_id` is set) backs "Mapa y detección"'s "Sin campaña" filter --
     sectors with no campaign at all, not "no filter"."""
     return use_case.execute(campaign_id=campaign_id, unassigned_only=unassigned_only)
+
+
+@router.get("/sectors/export/excel")
+def export_campaign_report(
+    campaign_id: Optional[int] = Query(None),
+    unassigned_only: bool = Query(False),
+    use_case: ExportCampaignReportUseCase = Depends(get_export_campaign_report_use_case),
+    campaign_repository: CampaignRepositoryPort = Depends(get_campaign_repository),
+    _user: UserProfile = Depends(require_permission("detection.view")),
+):
+    """"Exportar" on the detection map: confirmed/rejected parcels of the
+    CURRENTLY SELECTED campaign only (or unassigned sectors when none is
+    selected) -- see list_report_rows for why this never spans campaigns."""
+    rows = use_case.execute(campaign_id=campaign_id, unassigned_only=unassigned_only)
+
+    if campaign_id:
+        campaign = next((c for c in campaign_repository.list_active() if c.id == campaign_id), None)
+        campaign_label = f"Campaña {campaign.code} · {campaign.name}" if campaign else f"Campaña #{campaign_id}"
+    else:
+        campaign_label = "Sin campaña"
+
+    content = build_campaign_report_excel(rows, campaign_label)
+    filename = f"reporte-predios-{campaign_id or 'sin-campania'}.xlsx"
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/sectors/{processed_sector_id}", response_model=ProcessedSectorDetail)

@@ -1,4 +1,3 @@
-import json
 import logging
 from typing import Any, Optional
 
@@ -29,11 +28,16 @@ class ResumeSectorValidationUseCase:
         if context is None or not context.job_id:
             return None
 
-        binary = self._engine.fetch_path(f"/outputs/{context.job_id}/result/reporte.json")
-        result = json.loads(binary.content)
+        result = self._engine.fetch_json(f"/outputs/{context.job_id}/result/reporte.json")
 
         result["processed_sector_id"] = processed_sector_id
         result["processed_sector_status"] = context.status
+        # reporte.json has no `urls` field (that only exists on the engine's
+        # live job-result response) -- without this the frontend's asset
+        # gallery has nothing to hydrate and the before/after images are
+        # simply blank on a resumed sector.
+        if context.urls:
+            result["urls"] = context.urls
 
         # Same positional enrichment as job_result's own response (see
         # endpoints/detection.py) -- list_affected_parcels() returns rows in

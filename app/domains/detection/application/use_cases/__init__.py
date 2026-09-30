@@ -22,6 +22,9 @@ from app.domains.detection.application.use_cases.get_processed_sector_detail_use
 from app.domains.detection.application.use_cases.resume_sector_validation_use_case import (
     ResumeSectorValidationUseCase,
 )
+from app.domains.detection.application.use_cases.export_campaign_report_use_case import (
+    ExportCampaignReportUseCase,
+)
 
 __all__ = [
     "StartDetectionJobUseCase",
@@ -32,4 +35,5 @@ __all__ = [
     "ListProcessedSectorsUseCase",
     "GetProcessedSectorDetailUseCase",
     "ResumeSectorValidationUseCase",
+    "ExportCampaignReportUseCase",
 ]
