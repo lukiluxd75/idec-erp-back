@@ -4,10 +4,12 @@ from sqlalchemy.orm import Session
 from app.core.database.connection import get_db
 from app.domains.detection.application.use_cases import (
     CreateCampaignUseCase,
+    ExportCampaignReportUseCase,
     GetProcessedSectorDetailUseCase,
     IngestDetectionResultUseCase,
     ListCampaignsUseCase,
     ListProcessedSectorsUseCase,
+    ResumeSectorValidationUseCase,
     ReviewAffectedParcelUseCase,
     StartDetectionJobUseCase,
 )
@@ -94,3 +96,16 @@ def get_processed_sector_detail_use_case(
     repository: SectorHistoryPort = Depends(get_sector_history_repository),
 ) -> GetProcessedSectorDetailUseCase:
     return GetProcessedSectorDetailUseCase(repository=repository)
+
+
+def get_resume_sector_validation_use_case(
+    engine: GpuDetectionClient = Depends(get_detection_engine),
+    repository: ProcessedSectorRepositoryPort = Depends(get_processed_sector_repository),
+) -> ResumeSectorValidationUseCase:
+    return ResumeSectorValidationUseCase(engine=engine, repository=repository)
+
+
+def get_export_campaign_report_use_case(
+    repository: ProcessedSectorRepositoryPort = Depends(get_processed_sector_repository),
+) -> ExportCampaignReportUseCase:
+    return ExportCampaignReportUseCase(repository=repository)

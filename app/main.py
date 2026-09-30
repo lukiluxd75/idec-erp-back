@@ -31,6 +31,10 @@ def create_application() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        # File-download endpoints (e.g. the detection report export) set
+        # this so the browser knows the suggested filename -- not exposed by
+        # default under CORS, so `fetch()` can't read it cross-origin without this.
+        expose_headers=["Content-Disposition"],
     )
 
     # Register domain exception handlers

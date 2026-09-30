@@ -9,13 +9,8 @@ sqlalchemy>=2.0.30
 psycopg2-binary>=2.9.9
 ldap3==2.9.1
 
-<<<<<<< requirements.txt
-# detection/alignment domains — map PostGIS geometry columns in schemas
-# detection_results/alignment_results
-=======
-# detection domain — maps PostGIS geometry columns in schema detection_results;
-# xlsxwriter also backs procedurereports' export
->>>>>>> requirements.txt
+# detection/alignment domains — map PostGIS geometry columns in schemas detection_results/alignment_results
+# xlsxwriter backs the campaign parcels report export (.xlsx) and procedurereports' export
 geoalchemy2>=0.14
 xlsxwriter>=3.2
 

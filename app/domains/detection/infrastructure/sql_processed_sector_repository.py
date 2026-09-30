@@ -9,10 +9,12 @@ from datetime import datetime
 from typing import Any, List, Optional
 
 from geoalchemy2.elements import WKTElement
+from geoalchemy2.shape import to_shape
 from sqlalchemy.orm import Session
 
+from app.domains.detection.domain.entities.affected_parcel_report_row import AffectedParcelReportRow
 from app.domains.detection.domain.entities.affected_parcel_summary import AffectedParcelSummary
-from app.domains.detection.domain.entities.processed_sector import ProcessedSector
+from app.domains.detection.domain.entities.processed_sector import ProcessedSector, SectorResumeContext
 from app.domains.detection.domain.ports.processed_sector_repository_port import (
     ProcessedSectorRepositoryPort,
 )
@@ -20,6 +22,7 @@ from app.domains.detection.infrastructure import gpu_result_mapper as mapper
 from app.domains.detection.infrastructure.models import (
     AffectedParcelModel,
     AlignmentModel,
+    ArchitectReviewModel,
     CampaignModel,
     ControlPointModel,
     DetectionModel,
@@ -29,7 +32,7 @@ from app.domains.detection.infrastructure.models import (
     ProcessingRunModel,
     SectorArtifactModel,
 )
-from app.domains.detection.infrastructure.user_lookup import resolve_user_id
+from app.domains.detection.infrastructure.user_lookup import resolve_user_id, resolve_usernames
 
 _SRID = 4326
 # Statuses a sector can be in before a result has ever been ingested for it.
@@ -151,6 +154,114 @@ class SqlProcessedSectorRepository(ProcessedSectorRepositoryPort):
             )
             for r in rows
         ]
+
+    def get_resume_context(self, processed_sector_id: int) -> Optional[SectorResumeContext]:
+        sector = self._db.query(ProcessedSectorModel).filter(
+            ProcessedSectorModel.id == processed_sector_id
+        ).first()
+        if sector is None:
+            return None
+        run = self._latest_processing_run(processed_sector_id)
+        job_id = (run.params or {}).get("job_id") if run else None
+
+        # sector_artifact.kind only distinguishes 4 named kinds ("other" is a
+        # lossy catch-all for everything else the engine's `urls` map had --
+        # see doc/bdd.sql's ck_sector_artifact_kind) -- fine here since those
+        # 4 are exactly the before/after images the Hallazgos gallery needs.
+        urls: dict = {}
+        if run is not None:
+            kind_to_key = {
+                "aligned_a": "aligned_a",
+                "aligned_b": "aligned_b",
+                "result_panel": "panel_resultado",
+                "checkerboard": "align_check",
+            }
+            artifacts = (
+                self._db.query(SectorArtifactModel)
+                .filter(SectorArtifactModel.processing_run_id == run.id)
+                .all()
+            )
+            for artifact in artifacts:
+                key = kind_to_key.get(artifact.kind)
+                if key:
+                    urls[key] = artifact.path
+
+        return SectorResumeContext(job_id=job_id, status=sector.status, urls=urls)
+
+    def list_report_rows(
+        self, campaign_id: Optional[int] = None, unassigned_only: bool = False
+    ) -> List[AffectedParcelReportRow]:
+        query = (
+            self._db.query(AffectedParcelModel, ProcessedSectorModel, CampaignModel)
+            .join(ProcessedSectorModel, ProcessedSectorModel.id == AffectedParcelModel.processed_sector_id)
+            .outerjoin(CampaignModel, CampaignModel.id == ProcessedSectorModel.campaign_id)
+            .filter(AffectedParcelModel.validation_status.in_(("confirmed", "rejected")))
+        )
+        if campaign_id:
+            query = query.filter(ProcessedSectorModel.campaign_id == campaign_id)
+        elif unassigned_only:
+            query = query.filter(ProcessedSectorModel.campaign_id.is_(None))
+        rows = query.order_by(ProcessedSectorModel.id.asc(), AffectedParcelModel.id.asc()).all()
+
+        parcel_ids = [ap.id for ap, _, _ in rows]
+        detection_ids = [ap.detection_id for ap, _, _ in rows if ap.detection_id]
+        detections_by_id = (
+            {d.id: d for d in self._db.query(DetectionModel).filter(DetectionModel.id.in_(detection_ids)).all()}
+            if detection_ids
+            else {}
+        )
+
+        # Most recent "reject" review's comment, if any -- the architect's
+        # stated reason a finding was dismissed (see ReviewAffectedParcelUseCase).
+        rejection_comments: dict[int, str] = {}
+        if parcel_ids:
+            for rv in (
+                self._db.query(ArchitectReviewModel)
+                .filter(
+                    ArchitectReviewModel.affected_parcel_id.in_(parcel_ids),
+                    ArchitectReviewModel.action == "reject",
+                )
+                .order_by(ArchitectReviewModel.id.desc())
+                .all()
+            ):
+                rejection_comments.setdefault(rv.affected_parcel_id, rv.comment)
+
+        usernames = resolve_usernames(self._db, (ap.validated_by for ap, _, _ in rows))
+
+        def _username(uid) -> Optional[str]:
+            return usernames.get(str(uid)) if uid else None
+
+        result: List[AffectedParcelReportRow] = []
+        for ap, sector, campaign in rows:
+            detection = detections_by_id.get(ap.detection_id)
+            lon, lat = (None, None)
+            if ap.parcel_geom is not None:
+                centroid = to_shape(ap.parcel_geom).centroid
+                lon, lat = centroid.x, centroid.y
+            result.append(
+                AffectedParcelReportRow(
+                    sector_id=sector.id,
+                    sector_name=sector.name,
+                    year_a=sector.year_a,
+                    year_b=sector.year_b,
+                    campaign_code=campaign.code if campaign else None,
+                    cadastral_code=ap.cadastral_code,
+                    change_type=ap.change_type,
+                    construction_type=ap.construction_type,
+                    validation_status=ap.validation_status,
+                    rejection_comment=rejection_comments.get(ap.id),
+                    probability_pct=(
+                        round(float(detection.probability) * 100)
+                        if detection is not None and detection.probability is not None
+                        else None
+                    ),
+                    validated_by_username=_username(ap.validated_by),
+                    validated_at=ap.validated_at,
+                    lon=lon,
+                    lat=lat,
+                )
+            )
+        return result
 
     def is_ingested(self, processed_sector_id: int) -> bool:
         sector = self._db.query(ProcessedSectorModel).filter(
