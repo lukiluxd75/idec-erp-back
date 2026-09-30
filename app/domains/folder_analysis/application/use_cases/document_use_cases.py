@@ -18,25 +18,34 @@ from app.domains.folder_analysis.domain.exceptions import (
     DocumentBusyException,
     DocumentNotFoundException,
     InvalidDocumentRequestException,
+    RegisteredFolderNotFoundException,
 )
-from app.domains.folder_analysis.domain.extraction_profiles import GENERIC_PROFILE, PROFILES
+from app.domains.folder_analysis.domain.extraction_profiles import profile_for
+from app.domains.folder_analysis.domain.folder_types import (
+    DOCUMENT_TYPES,
+    FieldSource,
+    document_fields,
+    folder_type,
+)
+from app.domains.folder_analysis.domain.services.field_harvest import harvest, observation
 from app.domains.folder_analysis.domain.ports import (
     CaptureRepositoryPort,
     DocumentRepositoryPort,
     ExtractionQueuePort,
+    RegisteredFolderRepositoryPort,
     ServerReadingPort,
 )
 
 logger = logging.getLogger("uvicorn.error")
 
-MAX_PAGES = 10
+# Cuántas fotos admite un documento. Una declaración jurada protocolizada o un
+# avalúo pasan holgadamente de diez hojas, así que el tope vive acá y no en el
+# largo que tenía el folio cuando era el único carril.
+MAX_PAGES = 20
 
-# How the lanes read on the server name themselves in a message to the architect.
-DOC_LABEL = {
-    DocumentType.FOLIO: "el folio",
-    DocumentType.TAX_RECEIPT: "el comprobante de impuestos",
-    DocumentType.PLAN: "el plano",
-}
+# How the lanes read on the server name themselves in a message to the architect,
+# taken from the catalogue so a document type is named in one place only.
+DOC_LABEL = {key: spec.noun for key, spec in DOCUMENT_TYPES.items()}
 
 
 def _require_document(repository: DocumentRepositoryPort, document_id: str, user_sub: str) -> FolderDocument:
@@ -64,20 +73,56 @@ def _require_inbox_captures(captures: CaptureRepositoryPort, capture_ids: List[s
 
 
 class CreateDocumentUseCase:
-    """The architect dropped photos onto one of the three sections."""
+    """The architect dropped photos onto one of the lanes.
 
-    def __init__(self, documents: DocumentRepositoryPort, captures: CaptureRepositoryPort):
+    Inside a carpeta, the lanes are the ones its kind holds, so a document of a
+    type that carpeta does not work with is refused here and not only hidden on
+    screen. Dropped on the loose board (no carpeta), any known type goes."""
+
+    def __init__(
+        self,
+        documents: DocumentRepositoryPort,
+        captures: CaptureRepositoryPort,
+        folders: Optional[RegisteredFolderRepositoryPort] = None,
+    ):
         self._documents = documents
         self._captures = captures
+        self._folders = folders
 
-    def execute(self, doc_type: str, capture_ids: List[str], user_sub: str) -> FolderDocument:
+    def execute(
+        self,
+        doc_type: str,
+        capture_ids: List[str],
+        user_sub: str,
+        folder_id: Optional[str] = None,
+        folder_type_key: Optional[str] = None,
+    ) -> FolderDocument:
         if doc_type not in DocumentType.ALL:
             raise InvalidDocumentRequestException("El tipo de documento no es válido.")
+        folder = self._require_folder(folder_id, user_sub) if folder_id else None
+        # Inside a carpeta its kind wins over anything the screen sent: the
+        # document is in it, and that is what it will be read as.
+        kind = folder_type(folder.folder_type if folder else folder_type_key)
+        if folder is not None and not kind.holds(doc_type):
+            raise InvalidDocumentRequestException(
+                f'La carpeta "{folder.name}" no trabaja con ese tipo de documento.'
+            )
         ids = _validate_capture_ids(capture_ids)
         _require_inbox_captures(self._captures, ids, user_sub)
-        document = self._documents.create(user_sub, doc_type, ids)
+        document = self._documents.create(user_sub, doc_type, ids, kind.key)
         self._captures.set_status(ids, CaptureStatus.ASSIGNED)
+        if folder is not None:
+            # It joins the carpeta as a draft: it was opened in it, so it belongs
+            # to it from the start and not once its review is saved.
+            self._folders.file_document(folder.id, document.id)
+            document = _require_document(self._documents, document.id, user_sub)
         return document
+
+    def _require_folder(self, folder_id: str, user_sub: str):
+        folder = self._folders.get(folder_id, user_sub) if self._folders else None
+        if folder is None:
+            raise RegisteredFolderNotFoundException()
+        return folder
 
 
 class SetDocumentPagesUseCase:
@@ -144,7 +189,7 @@ class AnalyzeDocumentUseCase:
             self._documents.mark_submitted(document_id, {})
             return _require_document(self._documents, document_id, user_sub)
 
-        profile = PROFILES.get(document.doc_type, GENERIC_PROFILE)
+        profile = profile_for(document.doc_type)
         job_ids: Dict[int, str] = {}
         for page in document.pages:
             image = self._captures.get_image(page.capture_id, user_sub)
@@ -175,10 +220,12 @@ class RunServerReadingUseCase:
         documents: DocumentRepositoryPort,
         captures: CaptureRepositoryPort,
         extractors: Mapping[str, ServerReadingPort],
+        folders: Optional[RegisteredFolderRepositoryPort] = None,
     ):
         self._documents = documents
         self._captures = captures
         self._extractors = extractors
+        self._folders = folders
 
     def execute(self, document_id: str, user_sub: str) -> None:
         document = self._documents.get(document_id, user_sub)
@@ -222,11 +269,64 @@ class RunServerReadingUseCase:
             )
             return
 
+        data = self._with_harvested_values(document, data, observations)
+
         logger.info(
             "Folder analysis: %s %s leído con %d observación(es)",
             document.doc_type, document_id, len(observations),
         )
         self._save(document_id, pages, PageStatus.DONE, DocumentStatus.EXTRACTED, data, None)
+        self._feed_folder_sheet(document, user_sub, data)
+
+    def _with_harvested_values(
+        self, document: FolderDocument, data: Dict[str, Any], observations: List[str]
+    ) -> Dict[str, Any]:
+        """The values the carpeta asks for, pulled out of what was read.
+
+        A folio and a comprobante are read by parsers that know their layout and
+        already answer with named values. The rest -- a plano, a declaración
+        jurada -- are read generically, so what the carpeta needs is looked up by
+        the label it is printed with, and stored under `values` next to the text.
+        Nothing replaces the reading: what was not found stays empty and is named
+        in the observations.
+        """
+        specs = document_fields(document.folder_type, document.doc_type)
+        if not specs or not isinstance(data, dict):
+            return data
+        values, missing = harvest(data, specs)
+        note = observation(missing)
+        if note:
+            observations.append(note)
+            reading = data.get("reading")
+            if isinstance(reading, dict):
+                reading.setdefault("observations", []).append(note)
+        return {**data, "values": values}
+
+    def _feed_folder_sheet(
+        self, document: FolderDocument, user_sub: str, data: Dict[str, Any]
+    ) -> None:
+        """Copies what was just read into the carpeta's own sheet.
+
+        Only the fields the carpeta declares as coming from this document, and
+        only the ones still empty: what the architect typed is theirs and is
+        never overwritten by a re-reading.
+        """
+        values = data.get("values") if isinstance(data, dict) else None
+        if not values or not self._folders or not document.folder_id:
+            return
+        folder = self._folders.get(document.folder_id, user_sub)
+        if folder is None:
+            return
+        sheet = dict(folder.data or {})
+        filled = False
+        for field in folder_type(folder.folder_type).fields:
+            if field.source != FieldSource.DOCUMENT or field.from_document != document.doc_type:
+                continue
+            if not sheet.get(field.key) and values.get(field.key):
+                sheet[field.key] = values[field.key]
+                filled = True
+        if filled:
+            self._folders.update_details(folder.id, folder.name, folder.notes, sheet)
 
     def _page_done(self, document_id: str, pages: List[DocumentPage]) -> Callable[[int], None]:
         """Marks each photo as read as soon as it is, so the screen can show how
@@ -287,10 +387,15 @@ class ListDocumentsUseCase:
         self._documents = documents
         self._synchronizer = synchronizer
 
-    def execute(self, user_sub: str, doc_type: Optional[str] = None) -> List[FolderDocument]:
+    def execute(
+        self,
+        user_sub: str,
+        doc_type: Optional[str] = None,
+        folder_id: Optional[str] = None,
+    ) -> List[FolderDocument]:
         if doc_type is not None and doc_type not in DocumentType.ALL:
             raise InvalidDocumentRequestException("El tipo de documento no es válido.")
-        return self._synchronizer.refresh(self._documents.list(user_sub, doc_type))
+        return self._synchronizer.refresh(self._documents.list(user_sub, doc_type, folder_id))
 
 
 class ListReviewedDocumentsUseCase:
@@ -299,10 +404,15 @@ class ListReviewedDocumentsUseCase:
     def __init__(self, documents: DocumentRepositoryPort):
         self._documents = documents
 
-    def execute(self, user_sub: str, doc_type: Optional[str] = None) -> List[FolderDocument]:
+    def execute(
+        self,
+        user_sub: str,
+        doc_type: Optional[str] = None,
+        folder_id: Optional[str] = None,
+    ) -> List[FolderDocument]:
         if doc_type is not None and doc_type not in DocumentType.ALL:
             raise InvalidDocumentRequestException("El tipo de documento no es válido.")
-        return self._documents.list_reviewed(user_sub, doc_type)
+        return self._documents.list_reviewed(user_sub, doc_type, folder_id)
 
 
 class ReviewDocumentUseCase:

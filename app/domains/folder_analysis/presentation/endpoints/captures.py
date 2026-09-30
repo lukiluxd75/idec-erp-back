@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, File, Request, Response, UploadFile, sta
 from app.domains.folder_analysis.domain.entities import CaptureVariant
 
 from app.domains.folder_analysis.application.use_cases import (
+    ClearInboxUseCase,
     DeleteCaptureUseCase,
     GetCaptureImageUseCase,
     ListInboxUseCase,
@@ -12,11 +13,15 @@ from app.domains.folder_analysis.application.use_cases import (
 )
 from app.domains.folder_analysis.presentation.deps import (
     get_capture_image_use_case,
+    get_clear_inbox_use_case,
     get_delete_capture_use_case,
     get_list_inbox_use_case,
     get_upload_captures_use_case,
 )
-from app.domains.folder_analysis.presentation.schemas.folder_analysis_schema import CaptureOut
+from app.domains.folder_analysis.presentation.schemas.folder_analysis_schema import (
+    CaptureOut,
+    ClearedInboxOut,
+)
 from app.domains.security.contracts import UserProfile, require_permission
 
 router = APIRouter(prefix="/captures", tags=["Folder analysis · Captures"])
@@ -90,6 +95,16 @@ def get_thumbnail(
     user: UserProfile = Depends(require_permission("folder-analysis.view")),
 ):
     return _cached_image(request, use_case, capture_id, user.sub, CaptureVariant.THUMBNAIL)
+
+
+@router.delete("", response_model=ClearedInboxOut)
+def clear_inbox(
+    use_case: ClearInboxUseCase = Depends(get_clear_inbox_use_case),
+    user: UserProfile = Depends(require_permission("folder-analysis.edit")),
+):
+    """Empties the bandeja: every photo still unsorted is deleted for good.
+    The ones already classified in a document are left alone."""
+    return ClearedInboxOut(deleted=use_case.execute(user.sub))
 
 
 @router.delete("/{capture_id}", status_code=status.HTTP_204_NO_CONTENT)

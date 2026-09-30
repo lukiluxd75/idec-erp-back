@@ -93,6 +93,20 @@ class SqlCaptureRepository(CaptureRepositoryPort):
         self._db.execute(update(CaptureModel).where(CaptureModel.id.in_(parsed)).values(status=status))
         self._db.commit()
 
+    def delete_many(self, capture_ids: List[str], user_sub: str) -> int:
+        parsed = [i for i in (parse_uuid(c) for c in capture_ids) if i is not None]
+        if not parsed:
+            return 0
+        # user_sub in the WHERE as well as the ids: an id that is not this
+        # architect's deletes nothing instead of somebody else's photo.
+        result = self._db.execute(
+            delete(CaptureModel).where(
+                CaptureModel.id.in_(parsed), CaptureModel.user_sub == user_sub
+            )
+        )
+        self._db.commit()
+        return result.rowcount or 0
+
     def delete(self, capture_id: str, user_sub: str) -> None:
         parsed = parse_uuid(capture_id)
         if parsed is None:

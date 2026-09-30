@@ -4,7 +4,14 @@ the architects' PCs together with the JSON template it must fill. Keys are Engli
 (internal identifiers, CLAUDE.md §1); the web maps them to Spanish labels.
 
 A plan has no profile yet (fields to be defined): it gets the generic digitization
-(full text, labeled fields and tables).
+(full text, labeled fields and tables), and so does every document the carpeta de
+poseedores brought in until someone writes down what to pull out of it.
+
+What to extract is not the document's business alone: two carpetas can both hold
+a folio and need different data out of it, so a carpeta may override the profile
+of one of its documents (FOLDER_PROFILES). The profile of a pair is asked for
+with profile_for(); PROFILES stays the base, what a document yields when its
+carpeta says nothing about it.
 
 Only the plan is still sent to the PCs. The folio and the tax receipt are read on
 this server with OCR + rules (see the folios contract and fur_parser), so their
@@ -13,7 +20,7 @@ shape those lanes store, and the instructions still say, in one place, what each
 form is expected to yield.
 """
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from app.domains.folder_analysis.domain.entities import DocumentType
 
@@ -132,3 +139,20 @@ PROFILES: Dict[str, ExtractionProfile] = {
 # A lane with nothing to declare gets the queue's generic digitization (text,
 # fields and tables) -- what the plano was sent with before it was read here.
 GENERIC_PROFILE = ExtractionProfile(None, None)
+
+
+# What a carpeta asks for instead of the base profile, keyed by (carpeta,
+# document). Empty on purpose: the carpeta de poseedores has its documents
+# declared (domain/folder_types.py) but not yet the fields to pull out of them,
+# so every carpeta is still read with the base profile of each document. An
+# entry here is how a carpeta stops sharing the reading of a document with the
+# rest -- e.g. ("possessors", DocumentType.FOLIO).
+FOLDER_PROFILES: Dict[Tuple[str, str], ExtractionProfile] = {}
+
+
+def profile_for(doc_type: str, folder_type: Optional[str] = None) -> ExtractionProfile:
+    """What to extract from a document of this type inside a carpeta of that kind:
+    the carpeta's own profile when it declared one, the document's base profile
+    otherwise, and the generic digitization when the document declares nothing."""
+    override = FOLDER_PROFILES.get((folder_type, doc_type)) if folder_type else None
+    return override or PROFILES.get(doc_type, GENERIC_PROFILE)

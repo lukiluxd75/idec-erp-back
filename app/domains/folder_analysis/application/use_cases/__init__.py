@@ -1,4 +1,5 @@
 from app.domains.folder_analysis.application.use_cases.capture_use_cases import (
+    ClearInboxUseCase,
     DeleteCaptureUseCase,
     GetCaptureImageUseCase,
     ListInboxUseCase,
@@ -27,6 +28,7 @@ from app.domains.folder_analysis.application.use_cases.registered_folder_use_cas
 )
 
 __all__ = [
+    "ClearInboxUseCase",
     "AddDocumentsToRegisteredFolderUseCase",
     "AnalyzeDocumentUseCase",
     "CreateDocumentUseCase",

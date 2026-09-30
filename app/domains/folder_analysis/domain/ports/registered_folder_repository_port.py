@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from app.domains.folder_analysis.domain.entities import RegisteredFolder
 
@@ -10,7 +10,13 @@ class RegisteredFolderRepositoryPort(ABC):
 
     @abstractmethod
     def create(
-        self, user_sub: str, name: str, notes: Optional[str], document_ids: List[str]
+        self,
+        user_sub: str,
+        name: str,
+        notes: Optional[str],
+        folder_type: str,
+        data: Dict[str, Any],
+        document_ids: List[str],
     ) -> RegisteredFolder: ...
 
     @abstractmethod
@@ -22,7 +28,17 @@ class RegisteredFolderRepositoryPort(ABC):
         """The user's carpetas A->Z by name, each with its documents."""
 
     @abstractmethod
-    def rename(self, folder_id: str, name: str, notes: Optional[str]) -> None: ...
+    def update_details(
+        self, folder_id: str, name: str, notes: Optional[str], data: Dict[str, Any]
+    ) -> None:
+        """The carpeta's name, its note and its own sheet. Its kind is not here:
+        it is chosen when the carpeta is opened and does not change afterwards,
+        because the documents already inside it were classified under it."""
+
+    @abstractmethod
+    def file_document(self, folder_id: str, document_id: str) -> None:
+        """Files one document at the end of the carpeta. This is how a document
+        opened inside a carpeta joins it, before it has been analyzed."""
 
     @abstractmethod
     def set_documents(self, folder_id: str, document_ids: List[str]) -> None:

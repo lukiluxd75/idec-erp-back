@@ -6,6 +6,7 @@ from fastapi import APIRouter, FastAPI
 from app.core.database.connection import engine
 from app.domains.folder_analysis.infrastructure.models import create_schema_and_tables
 from app.domains.folder_analysis.presentation.endpoints.captures import router as captures_router
+from app.domains.folder_analysis.presentation.endpoints.catalog import router as catalog_router
 from app.domains.folder_analysis.presentation.endpoints.documents import router as documents_router
 from app.domains.folder_analysis.presentation.endpoints.registered_folders import (
     router as registered_folders_router,
@@ -29,6 +30,7 @@ async def lifespan(_app: FastAPI):
 
 
 router = APIRouter(lifespan=lifespan)
+router.include_router(catalog_router)
 router.include_router(captures_router)
 router.include_router(documents_router)
 router.include_router(registered_folders_router)

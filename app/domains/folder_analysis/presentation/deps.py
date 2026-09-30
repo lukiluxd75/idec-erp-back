@@ -12,6 +12,7 @@ from app.domains.folder_analysis.application.use_cases import (
     AnalyzeDocumentUseCase,
     CreateDocumentUseCase,
     CreateRegisteredFolderUseCase,
+    ClearInboxUseCase,
     DeleteCaptureUseCase,
     DeleteDocumentUseCase,
     DeleteRegisteredFolderUseCase,
@@ -112,13 +113,20 @@ def get_plan_extractor() -> ServerReadingPort:
 
 @lru_cache()
 def get_server_readers() -> Dict[str, ServerReadingPort]:
-    """The three lanes, all read here with PaddleOCR and OpenCV instead of on
-    the architects' PCs."""
-    return {
-        DocumentType.FOLIO: get_folio_extractor(),
-        DocumentType.TAX_RECEIPT: get_tax_extractor(),
-        DocumentType.PLAN: get_plan_extractor(),
-    }
+    """Every lane is read here with PaddleOCR and OpenCV instead of on the
+    architects' PCs.
+
+    A folio and a comprobante have rules that know their layout. The rest -- the
+    plano and the documents the carpeta de poseedores brought in -- have no rules
+    yet, so they get the same generic reading the plano already used: the sheet's
+    text, its labelled values and its tables, with the meaning left to the
+    architect. When one of them gets its own reader, it replaces its entry here.
+    """
+    generic = get_plan_extractor()
+    readers = {doc_type: generic for doc_type in DocumentType.ALL}
+    readers[DocumentType.FOLIO] = get_folio_extractor()
+    readers[DocumentType.TAX_RECEIPT] = get_tax_extractor()
+    return readers
 
 
 def run_server_reading(document_id: str, user_sub: str) -> None:
@@ -131,6 +139,7 @@ def run_server_reading(document_id: str, user_sub: str) -> None:
             documents=SqlDocumentRepository(db),
             captures=SqlCaptureRepository(db),
             extractors=get_server_readers(),
+            folders=SqlRegisteredFolderRepository(db),
         ).execute(document_id, user_sub)
     finally:
         db.close()
@@ -165,11 +174,18 @@ def get_delete_capture_use_case(
     return DeleteCaptureUseCase(captures)
 
 
+def get_clear_inbox_use_case(
+    captures: CaptureRepositoryPort = Depends(get_capture_repository),
+) -> ClearInboxUseCase:
+    return ClearInboxUseCase(captures)
+
+
 def get_create_document_use_case(
     documents: DocumentRepositoryPort = Depends(get_document_repository),
     captures: CaptureRepositoryPort = Depends(get_capture_repository),
+    folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
 ) -> CreateDocumentUseCase:
-    return CreateDocumentUseCase(documents, captures)
+    return CreateDocumentUseCase(documents, captures, folders)
 
 
 def get_set_pages_use_case(

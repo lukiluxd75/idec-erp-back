@@ -26,3 +26,9 @@ class CaptureRepositoryPort(ABC):
 
     @abstractmethod
     def delete(self, capture_id: str, user_sub: str) -> None: ...
+
+    @abstractmethod
+    def delete_many(self, capture_ids: List[str], user_sub: str) -> int:
+        """Deletes those of the user's photos in one go and says how many went.
+        Emptying a bandeja of eighty photos one delete at a time is eighty round
+        trips for something the architect asked for once."""
