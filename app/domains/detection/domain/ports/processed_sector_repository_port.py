@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Any, List, Optional
 
 from app.domains.detection.domain.entities.affected_parcel_summary import AffectedParcelSummary
-from app.domains.detection.domain.entities.processed_sector import ProcessedSector
+from app.domains.detection.domain.entities.processed_sector import ProcessedSector, SectorResumeContext
 
 
 class ProcessedSectorRepositoryPort(ABC):
@@ -69,6 +69,15 @@ class ProcessedSectorRepositoryPort(ABC):
         order/length of whatever `cambios[]`/`reporte_arquitecto[]` the latest
         `GET .../result` call returned, so index i here is index i there (see
         job_result's response enrichment)."""
+
+    @abstractmethod
+    def get_resume_context(self, processed_sector_id: int) -> Optional[SectorResumeContext]:
+        """The engine job_id behind the sector's most recent processing_run
+        (None if that run predates job_id being recorded) plus the sector's
+        current status -- see ResumeSectorValidationUseCase, which uses the
+        job_id to re-fetch that run's persisted `reporte.json` artifact
+        instead of needing the engine's job to still be tracked as "active".
+        None if the sector itself doesn't exist."""
 
     @abstractmethod
     def record_manual_alignment(

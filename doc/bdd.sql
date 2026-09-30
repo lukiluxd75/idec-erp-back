@@ -21,6 +21,14 @@
 --     (ver security/infrastructure/models.py), no BIGINT; el comentario
 --     "pendiente: FK real al autenticador del ERP" de la v5 original queda
 --     resuelto.
+--
+-- Parche 2026-09-29 (aplicado, ver scripts/migrate_detection_results_campaign_years.sql):
+--   - Decisión revertida a pedido del ingeniero: campaign SÍ vuelve a guardar
+--     year_a/year_b. Una campaña ahora fija un único par de años para toda su
+--     vida (el selector de años del frontend se bloquea con esos valores en
+--     cuanto se elige la campaña) -- ya no puede agrupar sectores con distintos
+--     pares de años como decía el comentario original de arriba. Nullable
+--     para no romper las campañas ya existentes, creadas antes de este patch.
 -- =============================================================================
 
 DROP SCHEMA IF EXISTS detection_results CASCADE;
@@ -35,6 +43,8 @@ CREATE TABLE detection_results.campaign (
     code                 VARCHAR(30) NOT NULL,
     name                 VARCHAR(150) NOT NULL,
     description          TEXT,
+    year_a               INTEGER,  -- fijo para toda la campaña; nullable solo por campañas pre-patch 2026-09-29
+    year_b               INTEGER,
     period_start         DATE,
     period_end           DATE,
     status               VARCHAR(20) NOT NULL DEFAULT 'active',

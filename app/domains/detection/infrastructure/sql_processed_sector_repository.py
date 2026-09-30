@@ -12,7 +12,7 @@ from geoalchemy2.elements import WKTElement
 from sqlalchemy.orm import Session
 
 from app.domains.detection.domain.entities.affected_parcel_summary import AffectedParcelSummary
-from app.domains.detection.domain.entities.processed_sector import ProcessedSector
+from app.domains.detection.domain.entities.processed_sector import ProcessedSector, SectorResumeContext
 from app.domains.detection.domain.ports.processed_sector_repository_port import (
     ProcessedSectorRepositoryPort,
 )
@@ -151,6 +151,16 @@ class SqlProcessedSectorRepository(ProcessedSectorRepositoryPort):
             )
             for r in rows
         ]
+
+    def get_resume_context(self, processed_sector_id: int) -> Optional[SectorResumeContext]:
+        sector = self._db.query(ProcessedSectorModel).filter(
+            ProcessedSectorModel.id == processed_sector_id
+        ).first()
+        if sector is None:
+            return None
+        run = self._latest_processing_run(processed_sector_id)
+        job_id = (run.params or {}).get("job_id") if run else None
+        return SectorResumeContext(job_id=job_id, status=sector.status)
 
     def is_ingested(self, processed_sector_id: int) -> bool:
         sector = self._db.query(ProcessedSectorModel).filter(

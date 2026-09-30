@@ -19,10 +19,15 @@ class CampaignRepositoryPort(ABC):
         self,
         code: str,
         name: str,
+        year_a: int,
+        year_b: int,
         description: Optional[str] = None,
         period_start: Optional[date] = None,
         period_end: Optional[date] = None,
         created_by_sub: Optional[str] = None,
     ) -> Campaign:
         """Create a new campaign (status defaults to 'active' -- created
-        ready to use, see the frontend's "+ Nueva campaña" quick-create)."""
+        ready to use, see the frontend's "+ Nueva campaña" quick-create).
+        `year_a`/`year_b` are fixed for the campaign's whole life -- the
+        frontend locks its year selectors to them once this campaign is
+        picked (see doc/bdd.sql's 2026-09-29 patch)."""

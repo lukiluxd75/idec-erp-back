@@ -21,3 +21,13 @@ class ProcessedSector:
     n_changed_parcels: int = 0
     created_at: Optional[datetime] = None
     processed_at: Optional[datetime] = None
+
+
+@dataclass
+class SectorResumeContext:
+    """What ResumeSectorValidationUseCase needs to re-fetch a sector's most
+    recent run's persisted `reporte.json` artifact -- see
+    ProcessedSectorRepositoryPort.get_resume_context."""
+
+    job_id: Optional[str]
+    status: str

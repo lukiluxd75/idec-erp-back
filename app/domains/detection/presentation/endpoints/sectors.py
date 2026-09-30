@@ -5,10 +5,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.domains.detection.application.use_cases import (
     GetProcessedSectorDetailUseCase,
     ListProcessedSectorsUseCase,
+    ResumeSectorValidationUseCase,
 )
 from app.domains.detection.presentation.deps import (
     get_list_processed_sectors_use_case,
     get_processed_sector_detail_use_case,
+    get_resume_sector_validation_use_case,
 )
 from app.domains.detection.presentation.schemas.sector_history_schema import (
     ProcessedSectorDetail,
@@ -45,3 +47,23 @@ def get_processed_sector_detail(
     if detail is None:
         raise HTTPException(status_code=404, detail="Sector no encontrado.")
     return detail
+
+
+@router.get("/sectors/{processed_sector_id}/resume-validation")
+def resume_sector_validation(
+    processed_sector_id: int,
+    use_case: ResumeSectorValidationUseCase = Depends(get_resume_sector_validation_use_case),
+    _user: UserProfile = Depends(require_permission("detection.view")),
+):
+    """Backs "Continuar validación": the sector's persisted `reporte.json`
+    (its most recent run's full engine result, with affected_parcel_id/
+    validation_status attached same as job_result) -- so the frontend can
+    load it straight into the same Hallazgos table/photos a live job uses,
+    no separate view needed. No response_model, same as job_result: it's the
+    engine's own result shape, passed through."""
+    result = use_case.execute(processed_sector_id)
+    if result is None:
+        raise HTTPException(
+            status_code=404, detail="No hay un resultado guardado para reanudar en este sector."
+        )
+    return result

@@ -16,6 +16,8 @@ class CreateCampaignUseCase:
         self,
         code: str,
         name: str,
+        year_a: int,
+        year_b: int,
         description: Optional[str] = None,
         period_start: Optional[date] = None,
         period_end: Optional[date] = None,
@@ -24,6 +26,8 @@ class CreateCampaignUseCase:
         return self._repository.create(
             code=code,
             name=name,
+            year_a=year_a,
+            year_b=year_b,
             description=description,
             period_start=period_start,
             period_end=period_end,
