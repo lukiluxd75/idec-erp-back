@@ -21,6 +21,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.engine import Engine
@@ -183,6 +184,65 @@ class ReviewedPlanModel(FolderAnalysisBase):
     reviewed_data = Column(JSONB, nullable=False)
     reviewed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     created_at, updated_at = _timestamps()
+
+
+class RegisteredFolderModel(FolderAnalysisBase):
+    """A project's folder. The unique index is on `lower(name)` so the list never
+    shows two carpetas the architect cannot tell apart."""
+
+    __tablename__ = "registered_folders"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_sub = Column(String(64), nullable=False)
+    name = Column(String(120), nullable=False)
+    notes = Column(Text)
+    created_at, updated_at = _timestamps()
+
+    items = relationship(
+        "RegisteredFolderItemModel",
+        back_populates="folder",
+        cascade="all, delete-orphan",
+        order_by="RegisteredFolderItemModel.position",
+        lazy="selectin",
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_folder_analysis_registered_folders_user_name",
+            "user_sub",
+            text("lower(name)"),
+            unique=True,
+        ),
+        Index("ix_folder_analysis_registered_folders_user", "user_sub", "name"),
+    )
+
+
+class RegisteredFolderItemModel(FolderAnalysisBase):
+    """One reviewed document filed in a carpeta. `document_id` is unique across
+    the table, not only inside the carpeta: a document is filed once, the way the
+    paper it came from sits in a single folder. Deleting the document (which
+    returns its photos to the inbox) takes its row with it."""
+
+    __tablename__ = "registered_folder_items"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    folder_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.registered_folders.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    document_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.documents.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    position = Column(Integer, nullable=False)
+    created_at, updated_at = _timestamps()
+
+    folder = relationship("RegisteredFolderModel", back_populates="items")
+
+    __table_args__ = (UniqueConstraint("folder_id", "position"),)
 
 
 def create_schema_and_tables(engine: Engine) -> None:

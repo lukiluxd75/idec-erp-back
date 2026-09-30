@@ -8,18 +8,26 @@ from app.core.database.connection import SessionLocal, get_db
 from app.domains.digitization.contracts import get_borrow_host, get_worker_host_picker
 from app.domains.folder_analysis.application.document_synchronizer import DocumentSynchronizer
 from app.domains.folder_analysis.application.use_cases import (
+    AddDocumentsToRegisteredFolderUseCase,
     AnalyzeDocumentUseCase,
     CreateDocumentUseCase,
+    CreateRegisteredFolderUseCase,
     DeleteCaptureUseCase,
     DeleteDocumentUseCase,
+    DeleteRegisteredFolderUseCase,
     GetCaptureImageUseCase,
     GetDocumentUseCase,
+    GetRegisteredFolderUseCase,
     ListDocumentsUseCase,
     ListReviewedDocumentsUseCase,
     ListInboxUseCase,
+    ListRegisteredFoldersUseCase,
+    RegisteredFolderService,
+    RemoveDocumentFromRegisteredFolderUseCase,
     ReviewDocumentUseCase,
     RunServerReadingUseCase,
     SetDocumentPagesUseCase,
+    UpdateRegisteredFolderUseCase,
     UploadCapturesUseCase,
 )
 from app.domains.folder_analysis.domain.entities import DocumentType
@@ -29,6 +37,7 @@ from app.domains.folder_analysis.domain.ports import (
     ExtractionQueuePort,
     FolioExtractionPort,
     PdfRasterizerPort,
+    RegisteredFolderRepositoryPort,
     ServerReadingPort,
     TaxExtractionPort,
     TaxStructurerPort,
@@ -43,6 +52,9 @@ from app.domains.folder_analysis.infrastructure.opencv_thumbnail import OpenCvTh
 from app.domains.folder_analysis.infrastructure.pdfium_rasterizer import PdfiumRasterizer
 from app.domains.folder_analysis.infrastructure.sql_capture_repository import SqlCaptureRepository
 from app.domains.folder_analysis.infrastructure.sql_document_repository import SqlDocumentRepository
+from app.domains.folder_analysis.infrastructure.sql_registered_folder_repository import (
+    SqlRegisteredFolderRepository,
+)
 
 
 @lru_cache()
@@ -61,6 +73,12 @@ def get_capture_repository(db: Session = Depends(get_db)) -> CaptureRepositoryPo
 
 def get_document_repository(db: Session = Depends(get_db)) -> DocumentRepositoryPort:
     return SqlDocumentRepository(db)
+
+
+def get_registered_folder_repository(
+    db: Session = Depends(get_db),
+) -> RegisteredFolderRepositoryPort:
+    return SqlRegisteredFolderRepository(db)
 
 
 def get_queue(db: Session = Depends(get_db)) -> ExtractionQueuePort:
@@ -200,3 +218,61 @@ def get_review_document_use_case(
     documents: DocumentRepositoryPort = Depends(get_document_repository),
 ) -> ReviewDocumentUseCase:
     return ReviewDocumentUseCase(documents)
+
+
+# --------------------------------------------------------- carpetas registradas
+
+
+def get_registered_folder_service(
+    folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
+    documents: DocumentRepositoryPort = Depends(get_document_repository),
+) -> RegisteredFolderService:
+    """The rules every carpeta write shares (free name, filable documents)."""
+    return RegisteredFolderService(folders, documents)
+
+
+def get_list_registered_folders_use_case(
+    folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
+) -> ListRegisteredFoldersUseCase:
+    return ListRegisteredFoldersUseCase(folders)
+
+
+def get_get_registered_folder_use_case(
+    service: RegisteredFolderService = Depends(get_registered_folder_service),
+) -> GetRegisteredFolderUseCase:
+    return GetRegisteredFolderUseCase(service)
+
+
+def get_create_registered_folder_use_case(
+    folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
+    service: RegisteredFolderService = Depends(get_registered_folder_service),
+) -> CreateRegisteredFolderUseCase:
+    return CreateRegisteredFolderUseCase(folders, service)
+
+
+def get_update_registered_folder_use_case(
+    folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
+    service: RegisteredFolderService = Depends(get_registered_folder_service),
+) -> UpdateRegisteredFolderUseCase:
+    return UpdateRegisteredFolderUseCase(folders, service)
+
+
+def get_add_folder_documents_use_case(
+    folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
+    service: RegisteredFolderService = Depends(get_registered_folder_service),
+) -> AddDocumentsToRegisteredFolderUseCase:
+    return AddDocumentsToRegisteredFolderUseCase(folders, service)
+
+
+def get_remove_folder_document_use_case(
+    folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
+    service: RegisteredFolderService = Depends(get_registered_folder_service),
+) -> RemoveDocumentFromRegisteredFolderUseCase:
+    return RemoveDocumentFromRegisteredFolderUseCase(folders, service)
+
+
+def get_delete_registered_folder_use_case(
+    folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
+    service: RegisteredFolderService = Depends(get_registered_folder_service),
+) -> DeleteRegisteredFolderUseCase:
+    return DeleteRegisteredFolderUseCase(folders, service)
