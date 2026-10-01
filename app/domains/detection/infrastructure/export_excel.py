@@ -1,39 +1,25 @@
 """Builds the "Exportar" .xlsx for a campaign's parcels report (see
 ExportCampaignReportUseCase). Same xlsxwriter approach as
 app/domains/procedurereports/application/use_cases/export_excel.py."""
-from datetime import datetime
 from io import BytesIO
-from typing import List, Optional
+from typing import List
 
 import xlsxwriter
 
 from app.domains.detection.domain.entities.affected_parcel_report_row import AffectedParcelReportRow
+from app.domains.detection.infrastructure.export_labels import (
+    CHANGE_TYPE_LABEL,
+    VALIDATION_STATUS_LABEL,
+    change_detail_label,
+    fmt_datetime,
+)
 
 PURPLE = "#341A67"
 GRAY = "#6B7280"
-
-CHANGE_TYPE_LABEL = {
-    "new": "Nueva",
-    "removed": "Eliminada",
-    "modified": "Cambio",
-    "unchanged": "Sin cambio",
-}
-
-# Kept in sync with ParcelValidationModal's CONSTRUCTION_TYPES -- "otro" never
-# reaches here as the literal word, only as the architect's free-text label
-# (see ReviewAffectedParcelUseCase), so it needs no entry of its own.
-CONSTRUCTION_TYPE_LABEL = {
-    "nueva_construccion": "Construcción nueva",
-    "ampliacion": "Ampliación",
-    "cambio_techo": "Cambio de techo",
-    "muro_nuevo": "Muro nuevo",
-    "demolicion": "Demolición",
-}
-
-VALIDATION_STATUS_LABEL = {
-    "confirmed": "Confirmado",
-    "rejected": "Rechazado",
-}
+# Soft tints so a long list reads at a glance -- confirmed vs rejected --
+# without the pure red/green eye-strain pure colors would cause on a whole row.
+CONFIRMED_TINT = "#EAF7EF"
+REJECTED_TINT = "#FDECEC"
 
 HEADERS = [
     "Nº",
@@ -53,10 +39,6 @@ HEADERS = [
 ]
 
 
-def _fmt_datetime(value: Optional[datetime]) -> str:
-    return value.strftime("%d/%m/%Y %H:%M") if value else ""
-
-
 def build_campaign_report_excel(rows: List[AffectedParcelReportRow], campaign_label: str) -> bytes:
     buf = BytesIO()
     wb = xlsxwriter.Workbook(buf, {"in_memory": True})
@@ -66,9 +48,22 @@ def build_campaign_report_excel(rows: List[AffectedParcelReportRow], campaign_la
     header = wb.add_format(
         {"bold": True, "font_color": "white", "bg_color": PURPLE, "border": 1, "align": "center", "text_wrap": True}
     )
-    cell = wb.add_format({"border": 1})
-    num = wb.add_format({"border": 1, "num_format": "#,##0"})
-    coord = wb.add_format({"border": 1, "num_format": "0.000000"})
+
+    def tinted(status: str, **extra):
+        bg = CONFIRMED_TINT if status == "confirmed" else REJECTED_TINT if status == "rejected" else None
+        spec = {"border": 1, **extra}
+        if bg:
+            spec["bg_color"] = bg
+        return wb.add_format(spec)
+
+    cells_by_status = {
+        status: {
+            "cell": tinted(status),
+            "num": tinted(status, num_format="#,##0"),
+            "coord": tinted(status, num_format="0.000000"),
+        }
+        for status in ("confirmed", "rejected", "")
+    }
 
     sheet = wb.add_worksheet("Predios")
     widths = [6, 16, 20, 14, 22, 14, 32, 16, 16, 14, 20, 18, 14, 14]
@@ -85,16 +80,13 @@ def build_campaign_report_excel(rows: List[AffectedParcelReportRow], campaign_la
 
     for r, row in enumerate(rows, start=1):
         excel_row = header_row + r
-        # construction_type can be set on a confirmed finding of ANY
-        # change_type (new/removed/modified), not just "modified" ones --
-        # verified against real data (e.g. a "removed" finding classified
-        # with the architect's own free-text label).
-        change_detail = CONSTRUCTION_TYPE_LABEL.get(row.construction_type, row.construction_type or "")
+        fmts = cells_by_status.get(row.validation_status, cells_by_status[""])
+        cell, num, coord = fmts["cell"], fmts["num"], fmts["coord"]
         sheet.write_number(excel_row, 0, r, cell)
         sheet.write(excel_row, 1, row.sector_name or f"Sector #{row.sector_id}", cell)
         sheet.write(excel_row, 2, row.cadastral_code or "", cell)
         sheet.write(excel_row, 3, CHANGE_TYPE_LABEL.get(row.change_type, row.change_type), cell)
-        sheet.write(excel_row, 4, change_detail, cell)
+        sheet.write(excel_row, 4, change_detail_label(row), cell)
         sheet.write(excel_row, 5, VALIDATION_STATUS_LABEL.get(row.validation_status, row.validation_status), cell)
         sheet.write(excel_row, 6, row.rejection_comment or "", cell)
         sheet.write(excel_row, 7, f"{row.year_a} → {row.year_b}", cell)
@@ -104,7 +96,7 @@ def build_campaign_report_excel(rows: List[AffectedParcelReportRow], campaign_la
         else:
             sheet.write(excel_row, 9, "", cell)
         sheet.write(excel_row, 10, row.validated_by_username or "", cell)
-        sheet.write(excel_row, 11, _fmt_datetime(row.validated_at), cell)
+        sheet.write(excel_row, 11, fmt_datetime(row.validated_at), cell)
         if row.lon is not None and row.lat is not None:
             sheet.write_number(excel_row, 12, row.lon, coord)
             sheet.write_number(excel_row, 13, row.lat, coord)
