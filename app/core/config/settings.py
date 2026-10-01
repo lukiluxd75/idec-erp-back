@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     DETECTION_ENGINE_API_KEY: str = ""
     DETECTION_ENGINE_TIMEOUT_SECONDS: float = 120.0
 
+    # Cadastral GIS of the municipality (the IDE): predios, vias. Read-only; used by
+    # folder_analysis to place a poseedores plano on the map from its code catastral.
+    CADASTRAL_GIS_URL: str = "https://gs.catastrocbba.com"
+    CADASTRAL_GIS_TIMEOUT_SECONDS: float = 30.0
+
     # Appraisal-review domain — read-mostly connection to catastro_operativo, the
     # external Avalúos system's own DB (never idec_erp; separate server/login)
     AVALUOS_DB_HOST: str = "localhost"
