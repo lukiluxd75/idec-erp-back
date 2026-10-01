@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from fastapi import WebSocket
 
 from app.core.presence import CHANNEL_GEOEXTRACTION
-from app.core.presence.socket import is_mobile_present
+from app.core.presence.socket import is_phone_connected
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -81,7 +81,7 @@ class CapturesConnectionManager:
         # "no conectado" cuando el celular estaba en otro worker -- y ese push
         # contradecia al poll, que ya lee lo correcto. Se lee en un hilo porque
         # SQLAlchemy aqui es bloqueante y esto corre en el event loop.
-        mobile_connected = await asyncio.to_thread(is_mobile_present, user_sub, CHANNEL_GEOEXTRACTION)
+        mobile_connected = await asyncio.to_thread(is_phone_connected, user_sub, CHANNEL_GEOEXTRACTION)
         payload = {"type": "presence", "mobile_connected": mobile_connected}
         dropped = []
         for conn in peers:

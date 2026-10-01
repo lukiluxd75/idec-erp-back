@@ -11,7 +11,7 @@ from app.domains.folder_analysis.application.use_cases import (
     ListInboxUseCase,
     UploadCapturesUseCase,
 )
-from app.core.presence import CHANNEL_FOLDER_ANALYSIS, CHANNEL_SESSION, SqlPresenceStore
+from app.core.presence import CHANNEL_FOLDER_ANALYSIS, SqlPresenceStore
 from app.domains.folder_analysis.presentation.deps import (
     get_capture_image_use_case,
     get_clear_inbox_use_case,
@@ -127,9 +127,7 @@ def get_presence(
     False on the other three, and the badge flipped every few seconds.
     """
     return PhonePresenceOut(
-        mobile_connected=presence.is_mobile_present_any(
-            user.sub, (CHANNEL_SESSION, CHANNEL_FOLDER_ANALYSIS)
-        )
+        mobile_connected=presence.is_phone_connected(user.sub, CHANNEL_FOLDER_ANALYSIS)
     )
 
 
@@ -148,9 +146,7 @@ def heartbeat(
     update; from a desktop User-Agent it is a no-op (see record_mobile_presence).
     """
     return PhonePresenceOut(
-        mobile_connected=presence.is_mobile_present_any(
-            user.sub, (CHANNEL_SESSION, CHANNEL_FOLDER_ANALYSIS)
-        )
+        mobile_connected=presence.is_phone_connected(user.sub, CHANNEL_FOLDER_ANALYSIS)
     )
 
 

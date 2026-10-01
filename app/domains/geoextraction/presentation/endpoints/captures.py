@@ -97,6 +97,10 @@ def get_presence(
     """Polled every few seconds by useCapturasUpdates.js to keep
     PhoneConnectedBadge accurate.
 
+    Se enciende tanto si la app movil tiene sesion abierta (CHANNEL_SESSION,
+    que dura toda la sesion) como si hay un socket vivo de este modulo -- ver
+    SqlPresenceStore.is_phone_connected.
+
     Answered from the shared presence store (app/core/presence), not from this
     worker's socket registry. That was the bug: the phone's socket lives on ONE
     of the four workers while this endpoint is load-balanced per request, so
@@ -104,7 +108,7 @@ def get_presence(
     alternated every 3 seconds forever. Postgres is shared by the four
     processes, so now every one of them answers the same.
     """
-    return {"mobile_connected": SqlPresenceStore(db).is_mobile_present(user.sub, CHANNEL_GEOEXTRACTION)}
+    return {"mobile_connected": SqlPresenceStore(db).is_phone_connected(user.sub, CHANNEL_GEOEXTRACTION)}
 
 
 @router.websocket("/ws")
