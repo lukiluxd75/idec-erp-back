@@ -20,13 +20,18 @@ OK = "ok"
 DIFFERS = "differs"
 MISSING = "missing"
 
-_NEXT = r"(?=\s+(?:SUB\s*-?\s*DISTRITO|DISTRITO|MANZANA|LOTE|VIA|ZONA)\s*[:;.]|\s+PROCESAMIENTO|\s*$)"
-_SEP = r"\s*[:;.]\s*"
+# The OCR reads this box badly: colons go missing ("SUB DISTRITO33"), a word is
+# misspelled ("MANZANO 432") and the zone runs into the next label
+# ("KHARA KHARAARRUMANI"). So the separator is optional, the numbers must follow
+# the label directly (which keeps "LOTE N: 5" of the drawing out of it) and a
+# value ends where the next label starts.
+_NEXT = r"(?=\s+(?:SUB\s*-?\s*DISTRITO|DISTRITO|MANZAN[AO]|LOTE|VIA|ZONA)\b|\s+PROCESAMIENTO|\s*$)"
+_SEP = r"\s*[:;.]?\s*"
 _FIELDS = {
     "zone": re.compile(r"\bZONA" + _SEP + r"(.+?)" + _NEXT),
     "subdistrict": re.compile(r"\bSUB\s*-?\s*DISTRITO" + _SEP + r"(\d+)"),
     "district": re.compile(r"(?<!SUB )(?<!SUB)(?<!SUB-)\bDISTRITO" + _SEP + r"(\d+)"),
-    "block": re.compile(r"\bMANZANA" + _SEP + r"(\d+)"),
+    "block": re.compile(r"\bMANZAN[AO]" + _SEP + r"(\d+)"),
     "lot": re.compile(r"\bLOTE" + _SEP + r"(\d+)"),
     "street": re.compile(r"\bVIA" + _SEP + r"(.+?)" + _NEXT),
 }
@@ -37,8 +42,10 @@ def read_location_block(text: str) -> Dict[str, Optional[str]]:
     prose = normalize(text or "")
     found: Dict[str, Optional[str]] = {}
     for key, pattern in _FIELDS.items():
-        match = pattern.search(prose)
-        found[key] = match.group(1).strip(" .") if match else None
+        # The box is the last thing on the sheet that says these words: the first
+        # "ZONA" or "LOTE" can belong to the drawing or to its coordinates table.
+        matches = list(pattern.finditer(prose))
+        found[key] = matches[-1].group(1).strip(" .") if matches else None
     return found
 
 

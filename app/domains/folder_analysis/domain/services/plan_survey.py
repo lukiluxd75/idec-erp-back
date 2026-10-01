@@ -23,8 +23,9 @@ _CODE_PRINTED = re.compile(
 _POINT = re.compile(
     r"\bP\s*(\d{1,2})\b[^0-9]{0,8}(\d{6}(?:[.,]\d+)?)[^0-9]{1,10}(\d{7}(?:[.,]\d+)?)", re.IGNORECASE
 )
+# "SUPERFICIE TOTAL UTIL", as the OCR misreads it ("TTAL").
 _SURFACE = re.compile(
-    r"SUPERFICIE\s+TOTAL\s+UTIL[^0-9]{0,40}(\d[\d.,]*)|SUP\.?\s*TOTAL\s+UTIL[^0-9]{0,40}(\d[\d.,]*)", re.IGNORECASE
+    r"SUP(?:ERFICIE|\.)?\s*(?:T[A-Z]{2,4}\s+)?UTIL[^0-9]{0,40}(\d[\d.,]*)", re.IGNORECASE
 )
 
 
@@ -55,9 +56,8 @@ def declared_surface(text: str) -> Optional[float]:
     match = _SURFACE.search(text or "")
     if not match:
         return None
-    raw = next(group for group in match.groups() if group)
     try:
-        return float(raw.rstrip(".,").replace(",", "."))
+        return float(match.group(1).rstrip(".,").replace(",", "."))
     except ValueError:
         return None
 

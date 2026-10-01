@@ -5,6 +5,7 @@ from app.domains.folder_analysis.application.use_cases import (
     LookupCadastralParcelUseCase,
 )
 from app.domains.folder_analysis.domain.exceptions import (
+    CadastralLookupFailedException,
     CadastralParcelNotFoundException,
     InvalidDocumentRequestException,
 )
@@ -188,6 +189,57 @@ class PlanChecksTest(unittest.TestCase):
         self.assertEqual(set(checks.values()), {"missing"})
 
 
+# What the OCR really made of the plano of the example (a photo of a printed sheet):
+# no colons, "MANZANO", a zone glued to its neighbour word, "TTAL" for "TOTAL".
+OCR_TEXT = """
+LOTE N: 5 to CALLE DE 12.50 MTS.
+COORDENADAS UTM-WCS-84ZONA19
+P1 E 806132.14N 8063496.75
+P2 E 806141.45N 8063487.34 BLOQUESUP.mTIPOLOGiA ANO DE CONSTRUCCION
+P3 E806124.22 N8063474.20 80 8.00m2 INTERES SOCIAL 2020
+P4 E806112.27N8063481.58
+Código Catastral: 00-33-432-012-0-00-000-000
+SUP.S/MENSURA....
+.294.66m2
+SUPERFICIE TTAL UTIL...... ..294.66m2
+ZONA
+KHARA KHARAARRUMANI
+DISTRITO :15
+SUB DISTRITO33
+REGISHRAACIUNTU7
+MANZANO 432
+LOTE 002
+VIA
+Calle de 9.00 mts.
+PROCESAMIENTOVB
+"""
+
+
+class OcrNoiseTest(unittest.TestCase):
+    def test_the_box_is_read_through_the_ocr_noise(self):
+        box = plan_checks.read_location_block(OCR_TEXT)
+        self.assertEqual(box["zone"], "KHARA KHARAARRUMANI")
+        self.assertEqual(box["district"], "15")
+        self.assertEqual(box["subdistrict"], "33")
+        self.assertEqual(box["block"], "432")
+        # Not the "LOTE N: 5" of the drawing, nor the "ZONA19" of the coordinates.
+        self.assertEqual(box["lot"], "002")
+        self.assertEqual(box["street"], "CALLE DE 9.00 MTS")
+
+    def test_the_zone_glued_to_its_neighbour_still_matches_the_gis(self):
+        gis = {"zone": "KHARA KHARA ARRUMANI", "district": 15, "subdistrict": "33", "block": "432", "lot": "012"}
+        checks = {c["key"]: c["status"] for c in plan_checks.cross_check(plan_checks.read_location_block(OCR_TEXT), gis)}
+        self.assertEqual(checks, {"zone": "ok", "district": "ok", "subdistrict": "ok", "block": "ok", "lot": "differs"})
+
+    def test_the_surface_is_read_with_a_misspelled_label(self):
+        self.assertEqual(plan_survey.declared_surface(OCR_TEXT), 294.66)
+
+    def test_the_vertices_are_read_when_the_letters_stick_to_the_numbers(self):
+        survey = plan_survey.read_plan(OCR_TEXT)["survey"]
+        self.assertEqual([v["name"] for v in survey["vertices"]], ["P1", "P2", "P3", "P4"])
+        self.assertEqual(survey["sides"][0]["length_m"], 13.24)
+
+
 class UtmTest(unittest.TestCase):
     def test_converts_to_cochabamba(self):
         lat, lng = utm_to_wgs84(806132.14, 8063496.75)
@@ -266,6 +318,23 @@ class LookupUseCaseTest(unittest.TestCase):
     def test_a_code_the_gis_does_not_have(self):
         with self.assertRaises(CadastralParcelNotFoundException):
             LookupCadastralParcelUseCase(FakeGis(None)).execute("33432999000000000")
+
+
+class BrokenGis(FakeGis):
+    def find_parcel(self, gis_code):
+        raise KeyError("boom")
+
+
+class UnexpectedFailureTest(unittest.TestCase):
+    def test_an_unexpected_error_becomes_a_message_not_a_dropped_connection(self):
+        with self.assertRaises(CadastralLookupFailedException) as raised:
+            LookupCadastralParcelUseCase(BrokenGis(None)).execute("33432012000000000")
+        self.assertIn("KeyError", raised.exception.message)
+        self.assertEqual(raised.exception.http_status, 502)
+
+    def test_a_known_failure_keeps_its_own_status(self):
+        with self.assertRaises(CadastralParcelNotFoundException):
+            LookupCadastralParcelUseCase(FakeGis(None)).execute("33432012000000000")
 
 
 if __name__ == "__main__":
