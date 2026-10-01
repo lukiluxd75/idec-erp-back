@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 
 from app.domains.folder_analysis.application.use_cases import (
     GenerateCadastralCroquisUseCase,
@@ -335,6 +336,71 @@ class UnexpectedFailureTest(unittest.TestCase):
     def test_a_known_failure_keeps_its_own_status(self):
         with self.assertRaises(CadastralParcelNotFoundException):
             LookupCadastralParcelUseCase(FakeGis(None)).execute("33432012000000000")
+
+
+class ParcelEndpointTest(unittest.TestCase):
+    """GET /cadastral/parcel with the plano of a document, through FastAPI."""
+
+    def setUp(self):
+        import inspect
+        from datetime import datetime
+
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from app.core.errors import register_exception_handlers
+        from app.domains.folder_analysis.domain.entities import FolderDocument
+        from app.domains.folder_analysis.presentation import deps
+        from app.domains.folder_analysis.presentation.endpoints import cadastral
+
+        now = datetime(2026, 10, 1)
+        self.document = FolderDocument(
+            "d1", "u1", "plan", "extracted", now, now, folder_type="possessors",
+            extracted_data={"full_text": PLAN_TEXT + LOCATION_BOX},
+        )
+        gis = FakeGis(GisParcel("33432012000000000", REAL_RING, {
+            "Nro_predio": "012", "Nro_manzan": "432", "Sbdist_Nro": "33", "distrito": 15, "Sbdistrito": "KHARA KHARA ARRUMANI",
+        }))
+        document = self.document
+
+        class Documents:
+            def execute(self, document_id, user_sub):
+                return document
+
+        app = FastAPI()
+        register_exception_handlers(app)
+        app.include_router(cadastral.router)
+        app.dependency_overrides[inspect.signature(cadastral.lookup_parcel).parameters["user"].default.dependency] = lambda: SimpleNamespace(sub="u1")
+        app.dependency_overrides[deps.get_cadastral_gis] = lambda: gis
+        app.dependency_overrides[deps.get_get_document_use_case] = lambda: Documents()
+        self.client = TestClient(app)
+
+    def test_compares_the_plano_of_the_document_with_the_gis(self):
+        response = self.client.get(
+            "/cadastral/parcel", params={"code": "00-33-432-012-0-00-000-000", "document_id": "d1"}
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        checks = {c["key"]: c["status"] for c in response.json()["plan"]["checks"]}
+        self.assertEqual(checks["block"], "ok")
+        self.assertEqual(checks["lot"], "differs")
+
+    def test_works_without_a_document(self):
+        response = self.client.get("/cadastral/parcel", params={"code": "00-33-432-012-0-00-000-000"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIsNone(response.json()["plan"])
+
+    def test_falls_back_to_the_saved_review_when_nothing_was_extracted(self):
+        self.document.reviewed_data, self.document.extracted_data = {"full_text": PLAN_TEXT}, None
+        response = self.client.get(
+            "/cadastral/parcel", params={"code": "00-33-432-012-0-00-000-000", "document_id": "d1"}
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["plan"]["declared_area_m2"], 294.66)
+
+    def test_a_bad_code_is_a_422_with_a_message(self):
+        response = self.client.get("/cadastral/parcel", params={"code": "12"})
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("19 dígitos", response.json()["detail"])
 
 
 if __name__ == "__main__":
