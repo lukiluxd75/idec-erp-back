@@ -84,5 +84,12 @@ class CadastralGisUnavailableException(FolderAnalysisException):
     http_status = 503
 
 
+class CadastralLookupFailedException(FolderAnalysisException):
+    """Something unexpected broke while looking a predio up. Raised so the screen
+    gets a message (and the log a traceback) instead of a dropped connection."""
+
+    http_status = 502
+
+
 class CadastralParcelNotFoundException(FolderAnalysisException):
     http_status = 404

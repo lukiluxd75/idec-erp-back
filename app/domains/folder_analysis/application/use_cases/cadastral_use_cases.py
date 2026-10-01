@@ -1,7 +1,10 @@
+import logging
 from typing import Any, Dict, List, Optional, Sequence
 
 from app.domains.folder_analysis.domain.exceptions import (
     CadastralGisUnavailableException,
+    CadastralLookupFailedException,
+    FolderAnalysisException,
     CadastralParcelNotFoundException,
 )
 from app.domains.folder_analysis.domain.ports import CadastralGisPort
@@ -14,6 +17,8 @@ from app.domains.folder_analysis.domain.services.parcel_geometry import (
     polygon_of,
 )
 from app.domains.folder_analysis.domain.services.utm import utm_to_wgs84
+
+logger = logging.getLogger("uvicorn.error")
 
 # How far from the predio to look for the ones next to it: the cadastre never
 # lines two lots up to the centimetre.
@@ -43,6 +48,18 @@ class LookupCadastralParcelUseCase:
         self._gis = gis
 
     def execute(self, code: str, plan_text: Optional[str] = None) -> Dict[str, Any]:
+        try:
+            return self._lookup(code, plan_text)
+        except FolderAnalysisException:
+            raise
+        except Exception as exc:  # noqa: BLE001 -- see CadastralLookupFailedException
+            logger.exception("Folder analysis: falló la búsqueda del predio %s", code)
+            raise CadastralLookupFailedException(
+                f"Error inesperado al buscar el predio en el IDE ({exc.__class__.__name__}). "
+                "Intente de nuevo o avise al administrador."
+            ) from exc
+
+    def _lookup(self, code: str, plan_text: Optional[str]) -> Dict[str, Any]:
         gis_code = cadastral_code.to_gis_code(code)
         parcel = self._gis.find_parcel(gis_code)
         if parcel is None:
@@ -184,6 +201,17 @@ class GenerateCadastralCroquisUseCase:
         self._gis = gis
 
     def execute(self, code: str) -> bytes:
+        try:
+            return self._draw(code)
+        except FolderAnalysisException:
+            raise
+        except Exception as exc:  # noqa: BLE001 -- see CadastralLookupFailedException
+            logger.exception("Folder analysis: falló el croquis del predio %s", code)
+            raise CadastralLookupFailedException(
+                f"Error inesperado al generar el croquis ({exc.__class__.__name__})."
+            ) from exc
+
+    def _draw(self, code: str) -> bytes:
         gis_code = cadastral_code.to_gis_code(code)
         parcel = self._gis.find_parcel(gis_code)
         if parcel is None:

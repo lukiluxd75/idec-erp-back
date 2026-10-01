@@ -398,6 +398,8 @@ DOCUMENT_FIELDS: Dict[Tuple[str, str], Tuple[DocumentField, ...]] = {
             "usable_area",
             "Superficie útil",
             ("SUPERFICIE UTIL", "SUP. UTIL", "SUP UTIL", "AREA UTIL", "SUPERFICIE"),
+            # "SUPERFICIE TOTAL UTIL......294.66m2" (or "TTAL": the OCR drops letters).
+            patterns=(r"SUP(?:ERFICIE|\.)?\s*(?:T[A-Z]{2,4}\s+)?UTIL\W{0,40}?(\d[\d.,]*\s*M2?)",),
         ),
     ),
     (POSSESSORS_KEY, DocumentType.SWORN_STATEMENT): NOTARIAL_FIELDS,
