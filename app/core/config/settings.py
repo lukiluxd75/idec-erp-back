@@ -103,6 +103,11 @@ class Settings(BaseSettings):
     FOLIOS_OCR_API_URL: str = "https://ocr.catastrocbba.com"
     FOLIOS_OCR_TIMEOUT_SECONDS: float = 90.0
     FOLIOS_OCR_POLL_INTERVAL_SECONDS: float = 1.5
+    # A page that fails on a transient error (connection dropped, timeout, 5xx, job
+    # failed) is sent again this many times, waiting longer each time, before the
+    # whole reading is given up.
+    FOLIOS_OCR_RETRIES: int = 2
+    FOLIOS_OCR_RETRY_DELAY_SECONDS: float = 3.0
     FOLIOS_CONFIDENCE_THRESHOLD: float = 0.85
     FOLIOS_OLLAMA_URL: str = ""
     FOLIOS_LLM_MODEL: str = "gemma4:e4b"
