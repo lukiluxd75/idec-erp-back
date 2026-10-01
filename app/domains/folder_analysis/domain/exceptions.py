@@ -75,3 +75,14 @@ class DocumentAlreadyFiledException(FolderAnalysisException):
     """A document sits in a single carpeta, like the paper it came from."""
 
     http_status = 409
+
+
+class CadastralGisUnavailableException(FolderAnalysisException):
+    """The cadastral GIS (the IDE) did not answer. Nothing is lost: the sheet can
+    still be filled by hand, as before."""
+
+    http_status = 503
+
+
+class CadastralParcelNotFoundException(FolderAnalysisException):
+    http_status = 404

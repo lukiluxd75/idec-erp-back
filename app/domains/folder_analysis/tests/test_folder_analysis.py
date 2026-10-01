@@ -1658,9 +1658,13 @@ class CosechaDeCamposTests(unittest.TestCase):
             "CONTRA FRENTE 12.50 M\n"
             "FONDO 25.00 M\n"
             "FONDO 2 24.80 M\n"
-            "SUPERFICIE UTIL 240.00 M2"
+            "SUPERFICIE UTIL 240.00 M2\n"
+            "Código Catastral: 00-33-432-012-0-00-000-000"
         )
         values, missing = harvest(reading, self.PLAN)
+        self.assertEqual(values["cadastral_code"], "00-33-432-012-0-00-000-000")
+        # Lo que se copia del IDE no se busca en la hoja: no es un rótulo faltante.
+        self.assertIsNone(values["street"])
         self.assertEqual(values["frontage"], "12.50 M")
         self.assertEqual(values["rear_frontage"], "12.50 M")
         self.assertEqual(values["depth"], "25.00 M")
@@ -1927,7 +1931,8 @@ class CatalogoDeCarpetasTests(unittest.TestCase):
         self.assertEqual(
             [field.key for field in poseedores.fields],
             [
-                "street", "boundaries", "frontage", "rear_frontage", "depth", "depth_2", "usable_area",
+                "cadastral_code", "street", "boundaries", "frontage", "rear_frontage", "depth", "depth_2",
+                "usable_area",
                 "notary_number", "property_number", "owner_name", "statement_dates", "legal_status",
             ],
         )

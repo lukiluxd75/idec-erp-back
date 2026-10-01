@@ -171,6 +171,13 @@ POSSESSORS = FolderTypeSpec(
             title="Datos de plano",
             fields=(
                 FolderField(
+                    key="cadastral_code",
+                    label="Código catastral",
+                    source=FieldSource.DOCUMENT,
+                    from_document=DocumentType.PLAN,
+                    hint="Lo impreso en el plano; con él se ubica el predio en el IDE.",
+                ),
+                FolderField(
                     key="street",
                     label="Dirección / calle",
                     source=FieldSource.IDE,
@@ -326,6 +333,10 @@ class DocumentField:
     # Post-processing of what the pattern matched. Today only "spanish_date",
     # which turns a date written in words into dd/mm/aaaa.
     transform: Optional[str] = None
+    # The value comes from the IDE lookup on the review screen, not from the text
+    # of the sheet: the reading has nothing to search for and its absence is not
+    # a missing label.
+    from_ide: bool = False
 
 
 # Lo que se le saca a un acta notarial. No tiene rótulos: el número del notario,
@@ -366,6 +377,19 @@ NOTARIAL_FIELDS: Tuple["DocumentField", ...] = (
 # its labelled values and its cuadros.
 DOCUMENT_FIELDS: Dict[Tuple[str, str], Tuple[DocumentField, ...]] = {
     (POSSESSORS_KEY := "possessors", DocumentType.PLAN): (
+        DocumentField(
+            "cadastral_code",
+            "Código catastral",
+            printed=("CODIGO CATASTRAL", "COD CATASTRAL", "COD. CATASTRAL"),
+            # 00-33-432-012-0-00-000-000, with whatever the OCR made of the dashes.
+            patterns=(
+                r"(\d{2}\s*[-.]\s*\d{2}\s*[-.]\s*\d{3}\s*[-.]\s*\d{3}\s*[-.]\s*\d\s*[-.]\s*\d{2}\s*[-.]\s*\d{3}\s*[-.]\s*\d{3})",
+            ),
+        ),
+        # What the sheet copies from the IDE: filled from the lookup of the code.
+        DocumentField("street", "Dirección / calle", from_ide=True),
+        DocumentField("boundaries", "Colindancias", from_ide=True),
+        DocumentField("property_number", "Número de predio", from_ide=True),
         DocumentField("frontage", "Frente", ("FRENTE",)),
         DocumentField("rear_frontage", "Contra frente", ("CONTRA FRENTE", "CONTRAFRENTE")),
         DocumentField("depth", "Fondo", ("FONDO",)),

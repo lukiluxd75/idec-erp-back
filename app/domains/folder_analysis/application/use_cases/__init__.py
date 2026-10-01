@@ -1,3 +1,7 @@
+from app.domains.folder_analysis.application.use_cases.cadastral_use_cases import (
+    GenerateCadastralCroquisUseCase,
+    LookupCadastralParcelUseCase,
+)
 from app.domains.folder_analysis.application.use_cases.capture_use_cases import (
     ClearInboxUseCase,
     DeleteCaptureUseCase,
@@ -28,6 +32,8 @@ from app.domains.folder_analysis.application.use_cases.registered_folder_use_cas
 )
 
 __all__ = [
+    "GenerateCadastralCroquisUseCase",
+    "LookupCadastralParcelUseCase",
     "ClearInboxUseCase",
     "AddDocumentsToRegisteredFolderUseCase",
     "AnalyzeDocumentUseCase",

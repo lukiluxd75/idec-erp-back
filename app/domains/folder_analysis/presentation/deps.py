@@ -22,7 +22,9 @@ from app.domains.folder_analysis.application.use_cases import (
     ListDocumentsUseCase,
     ListReviewedDocumentsUseCase,
     ListInboxUseCase,
+    GenerateCadastralCroquisUseCase,
     ListRegisteredFoldersUseCase,
+    LookupCadastralParcelUseCase,
     RegisteredFolderService,
     RemoveDocumentFromRegisteredFolderUseCase,
     ReviewDocumentUseCase,
@@ -35,6 +37,7 @@ from app.domains.folder_analysis.domain.entities import DocumentType
 from app.domains.folder_analysis.domain.ports import (
     CaptureRepositoryPort,
     DocumentRepositoryPort,
+    CadastralGisPort,
     ExtractionQueuePort,
     FolioExtractionPort,
     PdfRasterizerPort,
@@ -44,6 +47,7 @@ from app.domains.folder_analysis.domain.ports import (
     TaxStructurerPort,
     ThumbnailPort,
 )
+from app.domains.folder_analysis.infrastructure.arcgis_cadastral_gis import ArcGisCadastralGis
 from app.domains.folder_analysis.infrastructure.digitization_queue import DigitizationQueue
 from app.domains.folder_analysis.infrastructure.folios_extractor import FoliosExtractor
 from app.domains.folder_analysis.infrastructure.ocr_plan_extractor import OcrPlanExtractor
@@ -292,3 +296,20 @@ def get_delete_registered_folder_use_case(
     service: RegisteredFolderService = Depends(get_registered_folder_service),
 ) -> DeleteRegisteredFolderUseCase:
     return DeleteRegisteredFolderUseCase(folders, service)
+
+
+@lru_cache()
+def get_cadastral_gis() -> CadastralGisPort:
+    return ArcGisCadastralGis()
+
+
+def get_lookup_cadastral_parcel_use_case(
+    gis: CadastralGisPort = Depends(get_cadastral_gis),
+) -> LookupCadastralParcelUseCase:
+    return LookupCadastralParcelUseCase(gis)
+
+
+def get_generate_cadastral_croquis_use_case(
+    gis: CadastralGisPort = Depends(get_cadastral_gis),
+) -> GenerateCadastralCroquisUseCase:
+    return GenerateCadastralCroquisUseCase(gis)
