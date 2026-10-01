@@ -30,6 +30,19 @@ from app.core.presence.models import DevicePresenceModel
 
 logger = logging.getLogger("uvicorn.error")
 
+# --- canales -----------------------------------------------------------------
+#
+# Constantes y no cadenas sueltas, para que un typo no haga que un escritor y un
+# lector dejen de verse en silencio (el indicador simplemente no se encenderia).
+# Viven aqui y no en __init__ porque is_phone_connected() necesita CHANNEL_SESSION.
+CHANNEL_GEOEXTRACTION = "geoextraction"
+CHANNEL_RESOLUTIONS = "resolutions"
+CHANNEL_FOLDER_ANALYSIS = "folder-analysis"
+# Canal transversal: "la app movil tiene sesion abierta con el ERP". No pertenece
+# a ningun modulo -- lo escribe el login/refresh/logout (dominio security) y lo
+# cuenta el indicador de cualquier modulo.
+CHANNEL_SESSION = "session"
+
 # --- lifetimes ---------------------------------------------------------------
 
 # Websocket-backed presence. Sized against the heartbeat below, not picked
@@ -183,6 +196,25 @@ class SqlPresenceStore:
             .limit(1)
         ).first()
         return row is not None
+
+    def is_phone_connected(self, user_sub: str, module_channel: str) -> bool:
+        """La pregunta que hace el indicador "Celular conectado" de CUALQUIER
+        modulo. Es cierta por dos motivos distintos, y basta uno:
+
+          * CHANNEL_SESSION -- el arquitecto inicio sesion en la app movil y no
+            la ha cerrado. Es el motivo principal: dura toda la sesion, asi que
+            el indicador queda encendido tambien mientras no esta haciendo nada
+            en ese modulo concreto.
+          * `module_channel` -- presencia propia del modulo: un websocket vivo
+            (geoextraction, resolutions) o actividad reciente (folder analysis).
+
+        Un unico metodo y no la tupla repetida en cada endpoint porque hay SEIS
+        sitios que leen presencia -- tres endpoints REST y dos broadcasts por
+        websocket -- y si uno contesta distinto que otro vuelve el parpadeo que
+        todo esto venia a quitar: el push diria "no conectado" justo despues de
+        que el poll dijera que si.
+        """
+        return self.is_mobile_present_any(user_sub, (CHANNEL_SESSION, module_channel))
 
     def is_mobile_present_any(self, user_sub: str, channels) -> bool:
         """True si hay celular en CUALQUIERA de `channels`. Una pantalla puede

@@ -142,6 +142,10 @@ def get_presence(
     """Polled every few seconds by useResolutionsUpdates.js to keep
     PhoneConnectedBadge accurate.
 
+    Se enciende tanto si la app movil tiene sesion abierta (CHANNEL_SESSION,
+    que dura toda la sesion) como si hay un socket vivo de este modulo -- ver
+    SqlPresenceStore.is_phone_connected.
+
     Answered from the shared presence store (app/core/presence), not from this
     worker's socket registry. That was the bug: the phone's socket lives on ONE
     of the four workers while this endpoint is load-balanced per request, so
@@ -152,7 +156,7 @@ def get_presence(
     registration order, so "presence" would otherwise be swallowed as a
     resolution_id by that path-param route instead of reaching this one.
     """
-    return {"mobile_connected": SqlPresenceStore(db).is_mobile_present(user.sub, CHANNEL_RESOLUTIONS)}
+    return {"mobile_connected": SqlPresenceStore(db).is_phone_connected(user.sub, CHANNEL_RESOLUTIONS)}
 
 
 @router.get("/{resolution_id}", response_model=ResolutionDetail)

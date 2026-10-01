@@ -16,6 +16,10 @@ from app.core.database.connection import Base
 from app.core.presence import models as presence_models  # noqa: F401  (registers the table)
 from app.core.presence.store import (
     ACTIVITY_TTL,
+    CHANNEL_FOLDER_ANALYSIS,
+    CHANNEL_GEOEXTRACTION,
+    CHANNEL_RESOLUTIONS,
+    CHANNEL_SESSION,
     SOCKET_TTL,
     SqlPresenceStore,
     device_id_for_request,
@@ -165,6 +169,65 @@ class PresenceStoreTests(unittest.TestCase):
 
     def test_device_id_handles_missing_user_agent(self):
         self.assertTrue(device_id_for_request(USER, None).startswith("ua-"))
+
+    # --- el indicador de un modulo (is_phone_connected) -----------------------
+
+    MODULOS = (CHANNEL_GEOEXTRACTION, CHANNEL_RESOLUTIONS, CHANNEL_FOLDER_ANALYSIS)
+
+    def test_session_lights_every_module(self):
+        """Lo que pidio el usuario: con sesion abierta en la app, los tres
+        modulos muestran "Celular conectado", sin que haga falta actividad
+        propia de cada uno."""
+        self.store.open_session(USER, CHANNEL_SESSION, "ua-app")
+        for canal in self.MODULOS:
+            with self.subTest(modulo=canal):
+                self.assertTrue(self.store.is_phone_connected(USER, canal))
+
+    def test_module_presence_alone_also_lights_it(self):
+        """Sin sesion registrada, la presencia propia del modulo basta: es el
+        respaldo para una app que todavia no llame a /api/presence/session."""
+        self.store.enter(USER, CHANNEL_GEOEXTRACTION, "ws-1", is_mobile=True)
+        self.assertTrue(self.store.is_phone_connected(USER, CHANNEL_GEOEXTRACTION))
+        # ...y no enciende los otros modulos, que no tienen nada.
+        self.assertFalse(self.store.is_phone_connected(USER, CHANNEL_RESOLUTIONS))
+
+    def test_nothing_registered_lights_nothing(self):
+        for canal in self.MODULOS:
+            with self.subTest(modulo=canal):
+                self.assertFalse(self.store.is_phone_connected(USER, canal))
+
+    def test_logout_turns_off_every_module(self):
+        """Cerrar sesion en la app apaga los tres a la vez."""
+        self.store.open_session(USER, CHANNEL_SESSION, "ua-app")
+        self.store.enter(USER, CHANNEL_GEOEXTRACTION, "ws-1", is_mobile=True)
+        self.store.touch_activity(USER, CHANNEL_FOLDER_ANALYSIS, "ua-x")
+
+        self.store.close_all_mobile(USER)
+        for canal in self.MODULOS:
+            with self.subTest(modulo=canal):
+                self.assertFalse(self.store.is_phone_connected(USER, canal))
+
+    def test_a_desktop_socket_never_lights_a_module(self):
+        self.store.enter(USER, CHANNEL_RESOLUTIONS, "ws-pc", is_mobile=False)
+        self.assertFalse(self.store.is_phone_connected(USER, CHANNEL_RESOLUTIONS))
+
+    def test_every_reader_gives_the_same_answer(self):
+        """El poll REST y el push por websocket leen por caminos distintos. Si
+        discrepan vuelve el parpadeo, asi que tienen que coincidir siempre."""
+        from app.core.presence import socket as socket_mod
+
+        self.store.open_session(USER, CHANNEL_SESSION, "ua-app")
+        original = socket_mod.SessionLocal
+        socket_mod.SessionLocal = self.Session
+        try:
+            for canal in self.MODULOS:
+                with self.subTest(modulo=canal):
+                    via_rest = self.store.is_phone_connected(USER, canal)
+                    via_socket = socket_mod.is_phone_connected(USER, canal)
+                    self.assertEqual(via_rest, via_socket)
+                    self.assertTrue(via_rest)
+        finally:
+            socket_mod.SessionLocal = original
 
     # --- esquema --------------------------------------------------------------
 

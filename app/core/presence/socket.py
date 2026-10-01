@@ -46,16 +46,26 @@ class SocketPresence:
     def _write(self, action: str) -> None:
         """One short-lived session, closed before returning. Runs in a worker
         thread (see `_in_thread`): SQLAlchemy here is blocking, and doing it on
-        the event loop would stall every other socket on this worker."""
-        db = SessionLocal()
+        the event loop would stall every other socket on this worker.
+
+        Todo dentro del try, incluido abrir la sesion: si la BD no esta, pedirla
+        ya lanza, y esto se llama desde el camino de conexion del websocket --
+        una presencia que no se puede escribir no puede impedir que el
+        arquitecto abra la pantalla.
+        """
+        db = None
         try:
+            db = SessionLocal()
             store = SqlPresenceStore(db)
             if action == "leave":
                 store.leave(self.user_sub, self.channel, self.device_id)
             else:
                 store.heartbeat(self.user_sub, self.channel, self.device_id, self.is_mobile)
+        except Exception:
+            logger.warning("presence: no se pudo %s en %s", action, self.channel, exc_info=True)
         finally:
-            db.close()
+            if db is not None:
+                db.close()
 
     async def _in_thread(self, action: str) -> None:
         await asyncio.to_thread(self._write, action)
@@ -90,15 +100,27 @@ class SocketPresence:
         await self._in_thread("leave")
 
 
-def is_mobile_present(user_sub: str, channel: str) -> bool:
-    """Synchronous read on its own short session, for callers without one (the
-    websocket path). REST endpoints should take `get_db` and use
-    SqlPresenceStore directly instead of this."""
-    db = SessionLocal()
+def is_phone_connected(user_sub: str, module_channel: str) -> bool:
+    """Lectura sincrona con su propia sesion corta, para quien no tiene una (el
+    camino del websocket). Los endpoints REST deben tomar `get_db` y usar
+    SqlPresenceStore directamente.
+
+    Misma pregunta que hace el endpoint REST del modulo -- sesion de la app O
+    presencia propia -- porque el push por websocket y el poll tienen que
+    contestar lo mismo: si discrepan, el indicador vuelve a parpadear.
+    """
+    db = None
     try:
-        return SqlPresenceStore(db).is_mobile_present(user_sub, channel)
+        db = SessionLocal()
+        return SqlPresenceStore(db).is_phone_connected(user_sub, module_channel)
     except Exception:
-        logger.warning("presence: no se pudo leer %s", channel, exc_info=True)
+        # Tambien cubre el fallo al ABRIR la sesion, no solo la consulta: esto
+        # se llama desde el broadcast de presencia, que corre dentro de
+        # manager.connect(); si lanzara, tumbaria la conexion del websocket.
+        # Ante la duda, "no conectado": apagar el indicador es mejor que
+        # afirmar un celular del que no se sabe nada.
+        logger.warning("presence: no se pudo leer %s", module_channel, exc_info=True)
         return False
     finally:
-        db.close()
+        if db is not None:
+            db.close()
