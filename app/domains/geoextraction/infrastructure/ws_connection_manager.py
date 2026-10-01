@@ -1,8 +1,12 @@
+import asyncio
 import logging
 import re
 from dataclasses import dataclass
 
 from fastapi import WebSocket
+
+from app.core.presence import CHANNEL_GEOEXTRACTION
+from app.core.presence.socket import is_mobile_present
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -39,8 +43,11 @@ class CapturesConnectionManager:
     the page" — see useCapturasUpdates.js on the frontend, which already assumes
     simple reconnect and not a 100% reliable channel. Fixing this properly (notify
     regardless of worker) needs something like Redis pub/sub between processes —
-    not set up today. The same per-process limitation applies to the "phone
-    connected" presence broadcast below.
+    not set up today.
+
+    The "phone connected" indicator used to share that limitation and no longer
+    does: presence moved to app/core/presence, backed by the same Postgres the
+    four processes share. Only the `update` hint below is still per-process.
     """
 
     def __init__(self):
@@ -62,24 +69,19 @@ class CapturesConnectionManager:
         re-fetch the pending captures list — see useCapturasUpdates.js)."""
         await self._broadcast_all({"type": "update"})
 
-    def is_mobile_connected(self, user_sub: str) -> bool:
-        """Snapshot for the GET /captures/presence poll: whether THIS worker's
-        registry currently has a phone socket for `user_sub`. Kept separate from
-        the WS presence push (which only reaches sockets already open on this
-        same worker) so the frontend can poll it directly without tearing down
-        and reopening the main WS every few seconds -- a naive "reconnect often
-        to refresh presence" approach throttles in the browser and drops the
-        update channel along with it. A REST poll is naturally load-balanced
-        across workers request by request, so it catches up within a few polls
-        without ever closing the long-lived socket."""
-        return any(c.is_mobile for c in self._connections.values() if c.user_sub == user_sub)
 
     async def _broadcast_presence(self, user_sub: str) -> None:
-        """Tells every open socket of `user_sub` whether at least one of that
-        account's other connections is a phone — see PhoneConnectedBadge on the
-        frontend."""
+        """Tells every open socket of `user_sub` whether a phone of that account
+        is connected — see PhoneConnectedBadge on the frontend. Instant, but
+        only reaches sockets already open on THIS worker; the frontend's poll
+        of GET .../presence is what makes the indicator right everywhere."""
         peers = [c for c in self._connections.values() if c.user_sub == user_sub]
-        mobile_connected = any(c.is_mobile for c in peers)
+        # La verdad sale del store compartido, no de `peers`: este proceso solo
+        # ve sus propios sockets, asi que preguntarle a `peers` empujaba
+        # "no conectado" cuando el celular estaba en otro worker -- y ese push
+        # contradecia al poll, que ya lee lo correcto. Se lee en un hilo porque
+        # SQLAlchemy aqui es bloqueante y esto corre en el event loop.
+        mobile_connected = await asyncio.to_thread(is_mobile_present, user_sub, CHANNEL_GEOEXTRACTION)
         payload = {"type": "presence", "mobile_connected": mobile_connected}
         dropped = []
         for conn in peers:

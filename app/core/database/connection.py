@@ -1,3 +1,4 @@
+import logging
 from typing import Generator
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
@@ -88,6 +89,9 @@ def init_db_tables() -> bool:
     Automatically create database tables if they do not exist.
     """
     try:
+        # Shared "phone connected" presence (app/core/presence): one table in
+        # `public`, used by geoextraction, resolutions and folder analysis.
+        from app.core.presence import models as presence_models  # noqa: F401
         from app.domains.security.infrastructure import models  # noqa: F401
         # The 'resolutions' domain's MIRRORED models (resolutions/resolution_pages,
         # owned by the mobile app) are deliberately NOT imported here — see
@@ -108,9 +112,24 @@ def init_db_tables() -> bool:
                 conn.execute(CreateSchema(chatbot_models.SCHEMA, if_not_exists=True))
                 conn.execute(CreateSchema(folios_models.SCHEMA, if_not_exists=True))
         Base.metadata.create_all(bind=engine)
+
+        if not db_uri.startswith("sqlite"):
+            # create_all() no altera tablas existentes, y a `device_presence` le
+            # cambió una columna después de su primera versión. Se registra
+            # aparte y con nivel error: si esto falla, el indicador "Celular
+            # conectado" queda apagado en silencio, que es muy difícil de
+            # diagnosticar desde la pantalla.
+            try:
+                presence_models.ensure_schema(engine)
+            except Exception as exc:
+                logging.getLogger("uvicorn.error").error(
+                    "No se pudo poner al dia la tabla device_presence: %s. "
+                    "El indicador 'Celular conectado' quedara apagado hasta que se resuelva.",
+                    exc,
+                    exc_info=True,
+                )
         return True
     except Exception as exc:
-        import logging
         logging.getLogger("uvicorn.error").warning(f"Aviso al inicializar tablas en la BD: {exc}")
         return False
 

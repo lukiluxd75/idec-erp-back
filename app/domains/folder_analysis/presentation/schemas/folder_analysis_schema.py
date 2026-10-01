@@ -49,6 +49,15 @@ class ClearedInboxOut(BaseModel):
     deleted: int
 
 
+class PhonePresenceOut(BaseModel):
+    """Whether a phone of this account is connected right now, for the
+    indicator on the web (PhoneConnectedBadge). Same field name the equivalent
+    endpoints of geoextraction and resolutions already return, so the frontend
+    reads all three the same way."""
+
+    mobile_connected: bool
+
+
 class PageOut(BaseModel):
     capture_id: str
     page_index: int

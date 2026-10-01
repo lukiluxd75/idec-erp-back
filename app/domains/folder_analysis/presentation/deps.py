@@ -1,10 +1,18 @@
+import logging
 from functools import lru_cache
 from typing import Dict
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
 from app.core.database.connection import SessionLocal, get_db
+from app.core.presence import (
+    CHANNEL_FOLDER_ANALYSIS,
+    SqlPresenceStore,
+    device_id_for_request,
+)
+from app.core.utils.user_agent import looks_like_phone
+from app.domains.security.contracts import UserProfile, get_current_user
 from app.domains.digitization.contracts import get_borrow_host, get_worker_host_picker
 from app.domains.folder_analysis.application.document_synchronizer import DocumentSynchronizer
 from app.domains.folder_analysis.application.use_cases import (
@@ -313,3 +321,55 @@ def get_generate_cadastral_croquis_use_case(
     gis: CadastralGisPort = Depends(get_cadastral_gis),
 ) -> GenerateCadastralCroquisUseCase:
     return GenerateCadastralCroquisUseCase(gis)
+
+
+# --- "Celular conectado" -------------------------------------------------------
+#
+# Este dominio no tiene websocket (ver usePollWhile.js y el contrato en
+# docs/FOLDER_ANALYSIS_API_MOVIL.md: la app solo hace POST /captures), así que su
+# presencia es del tipo "actividad": cada petición que llega desde un celular
+# refresca la fila. El estado vive en Postgres, no en memoria del proceso, para
+# que los 4 workers respondan lo mismo -- ver app/core/presence.
+
+
+def get_presence_store(db: Session = Depends(get_db)) -> SqlPresenceStore:
+    """Sesión por petición, no singleton: el estado es compartido, no del proceso."""
+    return SqlPresenceStore(db=db)
+
+
+def record_mobile_presence(
+    request: Request,
+    user: UserProfile = Depends(get_current_user),
+    presence: SqlPresenceStore = Depends(get_presence_store),
+) -> None:
+    """Marca "celular conectado" cuando la petición viene de un celular.
+
+    Se cuelga de los endpoints que la app móvil usa. El filtro por User-Agent es
+    lo que impide que una subida hecha desde el escritorio (el arquitecto puede
+    arrastrar archivos, ver captureUpload.js) encienda el indicador.
+
+    Depende de `get_current_user` y no de `require_permission` a propósito: el
+    endpoint al que se engancha ya exige su permiso, y repetirlo aquí solo
+    duplicaría la consulta de permisos en cada subida.
+    """
+    user_agent = request.headers.get("user-agent", "")
+    # looks_like_phone y no is_mobile_user_agent: ese solo reconoce NAVEGADORES
+    # de celular, y la app movil es nativa -- manda `okhttp/4.12.0` o
+    # `Dart/3.3 (dart:io)`, que no contienen "Mobi" ni "Android". Por eso la
+    # foto llegaba pero el indicador nunca se encendia.
+    if not looks_like_phone(user_agent):
+        # Se registra el User-Agent descartado porque este indicador falla
+        # callado por naturaleza: si no se enciende, no hay nada en pantalla
+        # que diga por que. Con esta linea, una subida que el servidor tomo por
+        # escritorio deja constancia de con que se identifico.
+        logging.getLogger("uvicorn.error").info(
+            "presence: subida a folder-analysis tomada como escritorio, "
+            "no enciende el indicador. User-Agent=%r",
+            user_agent,
+        )
+        return
+    presence.touch_activity(
+        user.sub,
+        CHANNEL_FOLDER_ANALYSIS,
+        device_id_for_request(user.sub, user_agent),
+    )
