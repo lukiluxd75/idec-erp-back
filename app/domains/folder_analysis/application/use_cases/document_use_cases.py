@@ -66,6 +66,23 @@ def _validate_capture_ids(capture_ids: List[str]) -> List[str]:
     return unique
 
 
+def _file_without_reading(documents: DocumentRepositoryPort, document: FolderDocument) -> None:
+    """Deja el documento guardado y terminado, sin leerlo.
+
+    El carril de otros documentos no tiene nada que extraer: lo que se guarda son
+    sus fotos. Queda en FILED desde que se crea, así que la pantalla no ofrece
+    analizarlo y ningún lector lo toca. Se vuelve a llamar cuando le cambian las
+    páginas, porque eso lo devuelve a borrador (ver replace_pages).
+    """
+    documents.save_progress(
+        document.id,
+        [replace(page, status=PageStatus.DONE, error=None) for page in document.pages],
+        DocumentStatus.FILED,
+        None,
+        None,
+    )
+
+
 def _require_inbox_captures(captures: CaptureRepositoryPort, capture_ids: List[str], user_sub: str) -> None:
     found = {c.id: c for c in captures.get_many(capture_ids, user_sub)}
     if len(found) != len(capture_ids):
@@ -113,12 +130,119 @@ class CreateDocumentUseCase:
         _require_inbox_captures(self._captures, ids, user_sub)
         document = self._documents.create(user_sub, doc_type, ids, kind.key)
         self._captures.set_status(ids, CaptureStatus.ASSIGNED)
+        if doc_type in DocumentType.NOT_READ:
+            _file_without_reading(self._documents, document)
+            document = _require_document(self._documents, document.id, user_sub)
         if folder is not None:
             # It joins the carpeta as a draft: it was opened in it, so it belongs
             # to it from the start and not once its review is saved.
             self._folders.file_document(folder.id, document.id)
             document = _require_document(self._documents, document.id, user_sub)
         return document
+
+    def _require_folder(self, folder_id: str, user_sub: str):
+        folder = self._folders.get(folder_id, user_sub) if self._folders else None
+        if folder is None:
+            raise RegisteredFolderNotFoundException()
+        return folder
+
+
+class ConsolidateDocumentsUseCase:
+    """Todo lo suelto en un solo documento del carril que no se lee.
+
+    Un poseedor trae un montón de respaldos --carnets, recibos, cartas-- que no
+    son un trámite cada uno sino el mismo legajo. Clasificarlos de a una foto
+    deja el carril con veinte tarjetas de una página. Esto junta lo que quedó en
+    la bandeja con las tarjetas que ya están en el carril y deja un documento con
+    todas las páginas.
+
+    Solo para DocumentType.NOT_READ: ahí juntar es pegar fotos y nada más. Un
+    carril que se lee tiene resultados que habría que fusionar también, y qué
+    significa fusionar dos lecturas no lo decide un botón.
+
+    Se hace acá y no encadenando llamadas desde la web porque las fotos de una
+    tarjeta tienen que dejar de ser suyas antes de ser de otra (capture_id es
+    único entre páginas): encadenado desde el navegador, una ventana cerrada en
+    el medio deja las fotos fuera de todo documento. Acá es un solo pedido --
+    aunque cada método del repositorio confirme por su cuenta, así que si el
+    rearmado falla las fotos se devuelven a la bandeja a mano, más abajo.
+    """
+
+    def __init__(
+        self,
+        documents: DocumentRepositoryPort,
+        captures: CaptureRepositoryPort,
+        folders: Optional[RegisteredFolderRepositoryPort] = None,
+    ):
+        self._documents = documents
+        self._captures = captures
+        self._folders = folders
+
+    def execute(
+        self,
+        doc_type: str,
+        user_sub: str,
+        folder_id: Optional[str] = None,
+        folder_type_key: Optional[str] = None,
+    ) -> FolderDocument:
+        if doc_type not in DocumentType.NOT_READ:
+            raise InvalidDocumentRequestException(
+                "Solo se pueden juntar los documentos que la carpeta guarda sin leer."
+            )
+        folder = self._require_folder(folder_id, user_sub) if folder_id else None
+        kind = folder_type(folder.folder_type if folder else folder_type_key)
+        if folder is not None and not kind.holds(doc_type):
+            raise InvalidDocumentRequestException(
+                f'La carpeta "{folder.name}" no trabaja con ese tipo de documento.'
+            )
+
+        # El más viejo manda: es el que ya estaba en la carpeta, así que conserva
+        # su número y las demás se le suman detrás, en el orden en que entraron.
+        # Se ordena acá por fecha en vez de confiar en el orden en que vengan.
+        existing = sorted(
+            self._documents.list(user_sub, doc_type=doc_type, folder_id=folder_id),
+            key=lambda document: document.created_at,
+        )
+        loose = [c.id for c in self._captures.list_by_status(user_sub, CaptureStatus.INBOX)]
+        pages = [p.capture_id for d in existing for p in sorted(d.pages, key=lambda p: p.page_index)]
+        ids = list(dict.fromkeys(pages + loose))
+        if not ids:
+            raise InvalidDocumentRequestException(
+                "No hay fotos sueltas en la bandeja ni documentos en el carril para juntar."
+            )
+        # El tope es por documento, así que juntar es justo donde se alcanza. Se
+        # dice cuántas son y cuántas entran, que es lo que hace falta para
+        # decidir qué dejar afuera; partirlas por la mitad no lo decide un botón.
+        if len(ids) > MAX_PAGES:
+            raise InvalidDocumentRequestException(
+                f"Son {len(ids)} fotos y un documento admite {MAX_PAGES}. "
+                "Deje fuera las que sobren o repártalas en dos documentos."
+            )
+
+        target = existing[0] if existing else None
+        # Las demás tarjetas se borran ANTES de rearmar la que queda: sus páginas
+        # tienen tomado el capture_id y chocarían con las nuevas.
+        merged = [p.capture_id for d in existing[1:] for p in d.pages]
+        for document in existing[1:]:
+            self._documents.delete(document.id)
+
+        try:
+            if target is None:
+                target = self._documents.create(user_sub, doc_type, ids, kind.key)
+            else:
+                self._documents.replace_pages(target.id, ids)
+        except Exception:
+            # Las tarjetas que se borraron ya no están y sus fotos quedaron sin
+            # dueño: a la bandeja, donde se ven y se pueden volver a clasificar.
+            # Perderlas de vista sería peor que el error que trajo hasta acá.
+            self._captures.set_status(merged, CaptureStatus.INBOX)
+            raise
+        self._captures.set_status(loose, CaptureStatus.ASSIGNED)
+        target = _require_document(self._documents, target.id, user_sub)
+        _file_without_reading(self._documents, target)
+        if folder is not None:
+            self._folders.file_document(folder.id, target.id)
+        return _require_document(self._documents, target.id, user_sub)
 
     def _require_folder(self, folder_id: str, user_sub: str):
         folder = self._folders.get(folder_id, user_sub) if self._folders else None
@@ -148,7 +272,13 @@ class SetDocumentPagesUseCase:
         self._documents.replace_pages(document_id, ids)
         self._captures.set_status(added, CaptureStatus.ASSIGNED)
         self._captures.set_status(removed, CaptureStatus.INBOX)
-        return _require_document(self._documents, document_id, user_sub)
+        document = _require_document(self._documents, document_id, user_sub)
+        # replace_pages lo devuelve a borrador para que se vuelva a analizar; el
+        # carril que no se lee no tiene a qué volver, así que queda archivado.
+        if document.doc_type in DocumentType.NOT_READ:
+            _file_without_reading(self._documents, document)
+            document = _require_document(self._documents, document_id, user_sub)
+        return document
 
 
 class DeleteDocumentUseCase:
@@ -178,6 +308,12 @@ class AnalyzeDocumentUseCase:
 
     def execute(self, document_id: str, user_sub: str, force: bool = False) -> FolderDocument:
         document = _require_document(self._documents, document_id, user_sub)
+        # El carril que no se lee no se analiza ni a pedido: se guarda y listo.
+        # La pantalla ya no ofrece el botón, pero la regla vive acá -- una
+        # petición vieja o repetida no puede mandarlo al OCR por la ventana.
+        if document.doc_type in DocumentType.NOT_READ:
+            _file_without_reading(self._documents, document)
+            return _require_document(self._documents, document_id, user_sub)
         if document.status in DocumentStatus.IN_PROGRESS:
             raise DocumentBusyException("El documento ya se está analizando.")
         if document.status == DocumentStatus.REVIEWED and not force:
@@ -233,6 +369,8 @@ class RunServerReadingUseCase:
         document = self._documents.get(document_id, user_sub)
         # Gone, or the architect already changed its pages: this run is stale.
         if document is None or document.status not in DocumentStatus.IN_PROGRESS:
+            return
+        if document.doc_type in DocumentType.NOT_READ:
             return
         extractor = self._extractors.get(document.doc_type)
         if extractor is None:

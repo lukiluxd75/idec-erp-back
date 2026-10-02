@@ -19,6 +19,12 @@ class DocumentType:
     ID_CARD = "id_card"
 
     ALL = (FOLIO, TAX_RECEIPT, PLAN, APPRAISAL, FORM, SWORN_STATEMENT, ID_CARD)
+    # Lo que la carpeta guarda sin leer. Es el carril de "otros documentos": lo
+    # que el poseedor trae de respaldo y no tiene datos que sacarle, sino que
+    # acompaña a la carpeta. Se archiva con sus fotos y nada más -- ni OCR, ni
+    # cola, ni pantalla de revisión -- porque leerlo solo gastaría el servidor
+    # para guardar un texto que nadie va a mirar.
+    NOT_READ = (ID_CARD,)
     # Every lane is read here on the server, with the GAMC PaddleOCR service and
     # OpenCV (seconds), and none is queued to the architects' PCs for the vision
     # model any more (minutes per sheet). A folio and a comprobante are forms, so
@@ -26,7 +32,10 @@ class DocumentType:
     # its labelled values and its tables -- and that same generic reading is what
     # a document without rules gets. None of them carries a job id:
     # RunServerReadingUseCase writes their result.
-    SERVER_READ = ALL
+    # Los dos de arriba juntos son ALL, sin repetidos. Va escrito a mano porque
+    # dentro del cuerpo de una clase una comprensión no ve NOT_READ; hay un test
+    # que lo comprueba para que no se desincronicen al agregar un carril.
+    SERVER_READ = (FOLIO, TAX_RECEIPT, PLAN, APPRAISAL, FORM, SWORN_STATEMENT)
 
 
 class DocumentStatus:
@@ -36,6 +45,7 @@ class DocumentStatus:
     EXTRACTED = "extracted"    # every page done, merged result ready for review
     FAILED = "failed"          # a page could not be analyzed after its retries
     REVIEWED = "reviewed"      # the architect saved the corrected data
+    FILED = "filed"            # guardado con sus fotos, sin leer (DocumentType.NOT_READ)
 
     IN_PROGRESS = (QUEUED, PROCESSING)
 

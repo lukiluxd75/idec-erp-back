@@ -131,6 +131,24 @@ class CreateDocumentRequest(BaseModel):
         return _known_doc_type(value)
 
 
+class ConsolidateRequest(BaseModel):
+    """Juntar en un documento el carril que la carpeta guarda sin leer.
+
+    No lleva capture_ids: lo que se junta es todo lo que haya en ese carril y
+    todo lo que quede en la bandeja, y eso lo sabe el servidor. Mandarlo desde la
+    web dejaría fuera lo que llegó del celular mientras la pantalla miraba.
+    """
+
+    doc_type: DocType
+    folder_id: Optional[str] = None
+    folder_type: Optional[str] = None
+
+    @field_validator("doc_type")
+    @classmethod
+    def _check_doc_type(cls, value: str) -> str:
+        return _known_doc_type(value)
+
+
 class SetPagesRequest(BaseModel):
     capture_ids: List[str] = Field(min_length=1)
 
