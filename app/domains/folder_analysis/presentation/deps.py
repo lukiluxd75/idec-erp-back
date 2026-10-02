@@ -18,6 +18,7 @@ from app.domains.folder_analysis.application.document_synchronizer import Docume
 from app.domains.folder_analysis.application.use_cases import (
     AddDocumentsToRegisteredFolderUseCase,
     AnalyzeDocumentUseCase,
+    ConsolidateDocumentsUseCase,
     CreateDocumentUseCase,
     CreateRegisteredFolderUseCase,
     ClearInboxUseCase,
@@ -135,7 +136,7 @@ def get_server_readers() -> Dict[str, ServerReadingPort]:
     architect. When one of them gets its own reader, it replaces its entry here.
     """
     generic = get_plan_extractor()
-    readers = {doc_type: generic for doc_type in DocumentType.ALL}
+    readers = {doc_type: generic for doc_type in DocumentType.SERVER_READ}
     readers[DocumentType.FOLIO] = get_folio_extractor()
     readers[DocumentType.TAX_RECEIPT] = get_tax_extractor()
     return readers
@@ -198,6 +199,14 @@ def get_create_document_use_case(
     folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
 ) -> CreateDocumentUseCase:
     return CreateDocumentUseCase(documents, captures, folders)
+
+
+def get_consolidate_documents_use_case(
+    documents: DocumentRepositoryPort = Depends(get_document_repository),
+    captures: CaptureRepositoryPort = Depends(get_capture_repository),
+    folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
+) -> ConsolidateDocumentsUseCase:
+    return ConsolidateDocumentsUseCase(documents, captures, folders)
 
 
 def get_set_pages_use_case(

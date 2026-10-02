@@ -144,9 +144,9 @@ DOCUMENT_TYPES: Dict[str, DocumentTypeSpec] = {
     ),
     DocumentType.ID_CARD: DocumentTypeSpec(
         key=DocumentType.ID_CARD,
-        label="Carnets",
-        noun="el carnet",
-        hint="Carnets de identidad. Un documento por persona, anverso y reverso.",
+        label="Otros documentos",
+        noun="el documento",
+        hint="Respaldos que acompañan a la carpeta: carnets y cualquier otra hoja. Se guardan con sus fotos, no se leen.",
         multi_page=True,
     ),
 }
@@ -157,7 +157,7 @@ DOCUMENT_TYPES: Dict[str, DocumentTypeSpec] = {
 POSSESSORS = FolderTypeSpec(
     key="possessors",
     label="Registro catastral de poseedores",
-    description="Trámite de poseedores: avalúo, plano, formulario, declaración jurada y carnets.",
+    description="Trámite de poseedores: avalúo, plano, formulario, declaración jurada y otros documentos.",
     document_types=(
         DocumentType.APPRAISAL,
         DocumentType.PLAN,
@@ -219,10 +219,10 @@ POSSESSORS = FolderTypeSpec(
                 ),
                 FolderField(
                     key="owner_name",
-                    label="Nombre del propietario",
+                    label="Nombres de los poseedores",
                     source=FieldSource.DOCUMENT,
                     from_document=DocumentType.SWORN_STATEMENT,
-                    hint="Tal como figura en la declaración jurada.",
+                    hint="Todos los que firman, separados por coma, tal como figuran en la declaración jurada.",
                 ),
                 FolderField(
                     key="statement_dates",
@@ -345,6 +345,13 @@ class DocumentField:
     collect_all: bool = False
 
 
+# Cómo viene escrita la cédula detrás de un nombre. Es lo que marca dónde termina
+# el nombre, así que tiene que aguantar lo que el OCR hace con dos letras sueltas:
+# la I sale L o 1 ("CON C.L:5932821" por "con C.I: 5932821"), y los puntos y el
+# espacio aparecen o no según cómo salió la foto.
+_ID_CARD = r"(?:CEDULA DE IDENTIDAD|C\.?\s?[IL1]\.?)"
+
+
 # Lo que se le saca a un acta notarial. No tiene rótulos: el número del notario,
 # la persona y la fecha están dentro de su redacción, así que cada campo dice en
 # qué frase vive. Las etiquetas (`printed`) quedan igual para la hoja que sí las
@@ -355,16 +362,60 @@ NOTARIAL_FIELDS: Tuple["DocumentField", ...] = (
         "Notario (Nº)",
         printed=("NOTARIA DE FE PUBLICA", "NOTARIA", "NOTARIO"),
         number_only=True,
-        patterns=(r"NOTARI[AO] DE FE PUBLICA[,\s]*(?:N[°ºO]?[.\s]*)?(\d+)",),
+        patterns=(
+            # "Notario de Fe Pública N° 15", y sobre todo el sello, que es de
+            # donde sale el número cuando la minuta no lo escribe: redondo,
+            # girado y con el oficio en medio, el OCR lo devuelve hecho pedazos
+            # ("NOTARIA DEFE PULCA DEP.SMERA CLAN0.48", "NOTARIADEFE PURUCA
+            # DEPAIMERA CLASENo.48"). Por eso solo se exige "NOTARI(A|O) DE FE"
+            # --que sobrevive aun pegado-- y después, dentro de unos pocos
+            # caracteres de letras, el número con su marca.
+            #
+            # "PUBLICA" no se exige: sale "PULCA" o "PURUCA" casi siempre. La
+            # marca admite el cero que el OCR pone por O ("N0.48"); normalizado,
+            # "Nº" queda "NO" y "Nro." queda "NRO.".
+            #
+            # La marca no lleva límite de palabra delante a propósito: el sello
+            # sale con "CLASE No." pegado ("CLAN0.48", "CLASENO.48"), así que la
+            # N queda dentro de una palabra. Lo que sostiene el patrón es que
+            # detrás venga el número.
+            #
+            # Pedir "DE FE" es lo que distingue al notario de esta hoja del que
+            # reconoció el documento anterior ("ante Notario de Primera Clase
+            # Nro. 44"), que no lleva esas palabras.
+            r"NOTARI[AO]\s*DE\s*FE[A-Z\s,.-]{0,40}?(?:NRO|N[O0°])\.?\s*(\d{1,3})\b",
+        ),
     ),
     DocumentField(
         "owner_name",
-        "Nombre del propietario",
+        "Nombres de los poseedores",
         printed=("NOMBRE DEL PROPIETARIO", "PROPIETARIO", "DECLARANTE"),
+        # Todos los que firman, no el primero: una carpeta de poseedores casi
+        # siempre va a nombre de dos (los cónyuges), y quedarse con uno obligaba
+        # a copiar el otro a mano sin que nada avisara que faltaba. Van separados
+        # por coma, en el orden en que la hoja los enumera.
+        collect_all=True,
         patterns=(
             # "se hizo presente NOELIA ALMENDRAS RODRIGUEZ con Cédula de Identidad"
-            r"SE HIZO PRESENTE[,:\s]+(.+?)[,\s]+CON (?:CEDULA DE IDENTIDAD|C\.? ?I\.?)",
-            r"(?:COMPARECE|COMPARECIO)[,:\s]+(.+?)[,\s]+CON (?:CEDULA DE IDENTIDAD|C\.? ?I\.?)",
+            rf"SE HIZO PRESENTE[,:\s]+(.+?)[,\s]+CON {_ID_CARD}",
+            rf"(?:COMPARECE|COMPARECIO)[,:\s]+(.+?)[,\s]+CON {_ID_CARD}",
+            # Una minuta dirigida al notario no dice "compareció": enumera a las
+            # partes y cuelga la cédula de cada nombre ("1.- JUAN CHILE ARIAS.
+            # Con C.I:5918362", "2.- ROBERTA HUMACAYA MAMANI, con C.I: 5932821").
+            #
+            # Palabras de tres letras o más: el texto llega todo en mayúsculas,
+            # así que sin ese mínimo la prosa que a veces se mete entre el nombre
+            # y la cédula ("mayor de edad, con C.I.") pasaba por nombre. Cuando
+            # la cédula no sigue al nombre el campo queda vacío, que es lo que
+            # corresponde -- un nombre inventado nadie lo vuelve a mirar.
+            #
+            # El tratamiento queda fuera del nombre: la minuta nombra a la misma
+            # persona suelta al enumerarla y "el señor Fulano" más adelante, y sin
+            # descartarlo entraban las dos como si fueran dos poseedores. Ñ llega
+            # como N, que es lo que hace normalize().
+            r"\b(?:(?:EL|LA|LOS|LAS)\s+)?"
+            r"(?:(?:SENOR(?:A|ES|AS)?|SRA?|DON|DONA|DR|DRA|LIC|ING|ARQ)\.?\s+)?"
+            rf"([A-Z]{{3,}}(?:\s+[A-Z]{{3,}}){{1,3}})[,.\s]+CON {_ID_CARD}",
         ),
     ),
     DocumentField(
@@ -405,6 +456,7 @@ DOCUMENT_FIELDS: Dict[Tuple[str, str], Tuple[DocumentField, ...]] = {
             "Ancho de calle",
             patterns=(r"CALLE\s*DE\s*(\d+(?:[.,]\d+)?)\s*(?:MTS?|M)\b",),
             collect_all=True,
+            transform="metres",
         ),
         # Only the predio the plano says it is: whether it is the one of the code is
         # what the table under the croquis checks against the IDE.

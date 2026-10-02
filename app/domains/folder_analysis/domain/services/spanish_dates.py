@@ -83,26 +83,60 @@ def words_to_number(text: str) -> Optional[int]:
     return total + current if seen else None
 
 
+# Cifras que el OCR devuelve por letras dentro de una palabra impresa: el mes de
+# una minuta fotografiada sale "AGOST0" o "5EPTIEMBRE". Se aplica solo al nombre
+# del mes -- nunca al día ni al año, que son cifras de verdad y una confusión ahí
+# tiene que quedar a la vista del arquitecto.
+_LOOKALIKE_LETTERS = str.maketrans({"0": "O", "1": "I", "5": "S", "8": "B"})
+
+
+def month_number(month: str) -> Optional[int]:
+    """El número del mes por su nombre, en cifras o con la letra que el OCR
+    cambió por una cifra."""
+    name = (month or "").strip()
+    if not name:
+        return None
+    if name.isdigit():
+        return int(name)
+    return MONTHS.get(name) or MONTHS.get(name.translate(_LOOKALIKE_LETTERS))
+
+
 def to_iso_like(day: str, month: str, year: str) -> Optional[str]:
     """dd/mm/aaaa a partir de las tres partes como vienen escritas, en letras o
     en cifras. None si alguna no se entiende: una fecha a medias es peor que
     ninguna, porque nadie la va a volver a mirar."""
     day_number = words_to_number(day)
     year_number = words_to_number(year)
-    month_number = MONTHS.get((month or "").strip()) or (
-        int(month) if (month or "").strip().isdigit() else None
-    )
-    if not day_number or not month_number or not year_number:
+    month_number_value = month_number(month)
+    if not day_number or not month_number_value or not year_number:
         return None
-    if not 1 <= day_number <= 31 or not 1 <= month_number <= 12:
+    if not 1 <= day_number <= 31 or not 1 <= month_number_value <= 12:
         return None
     # Un año de dos cifras en un acta es de este siglo ("26" -> 2026).
     if year_number < 100:
         year_number += 2000
     if not 1900 <= year_number <= 2199:
         return None
-    return f"{day_number:02d}/{month_number:02d}/{year_number:04d}"
+    return f"{day_number:02d}/{month_number_value:02d}/{year_number:04d}"
 
+
+# El año va detrás de "de", "del" o "del año": una minuta cierra con "26 de
+# Agosto del 2014" tan seguido como con "de 2014", y sin la forma "del" esa
+# fecha no se leía.
+_OF_THE_YEAR = r"DE(?:L(?: ANO)?)?"
+
+# Lo que separa las palabras de una fecha en una hoja fotografiada. No es solo el
+# espacio: el OCR mete las rayas del renglón y los puntos de la línea de puntos
+# entre medio, y una fecha manuscrita sobre el renglón sale "26 de/Agosto del
+# 2014". Sin esto la fecha de cierre de la minuta no se leía.
+_SEP = r"[\s/.,·-]+"
+
+# La fecha en cifras, con el día, el mes y el año en los grupos que to_iso_like()
+# espera. El mes admite cifras porque el OCR cambia letras por números dentro de
+# la palabra ("AGOST0"); month_number() las devuelve a su letra.
+_FIGURES = (
+    rf"\b(?P<day>\d{{1,2}}){_SEP}DE{_SEP}(?P<month>[A-Z0-9]+){_SEP}{_OF_THE_YEAR}{_SEP}(?P<year>\d{{4}})\b"
+)
 
 # Cómo un acta escribe su fecha. Todas dejan el día, el mes y el año en los
 # grupos `day`, `month` y `year`, que es lo que to_iso_like() espera.
@@ -110,7 +144,14 @@ PATTERNS = (
     # "del día, lunes veintiun del mes de septiembre del año dos mil veintiseis"
     rf"DEL DIA[,\s]+(?:{_WEEKDAYS})?[,\s]*(?P<day>[A-Z ]+?) DEL MES DE (?P<month>[A-Z]+) DEL ANO (?P<year>[A-Z0-9 ]+?)(?=[,.;]|\s+ANTE|$)",
     # "a los veintiun días del mes de septiembre de dos mil veintiseis"
-    rf"A LOS (?P<day>[A-Z0-9 ]+?) DIAS? DEL MES DE (?P<month>[A-Z]+) DE(?:L ANO)? (?P<year>[A-Z0-9 ]+?)(?=[,.;]|\s+ANTE|$)",
-    # "21 de septiembre de 2026"
-    r"\b(?P<day>\d{1,2}) DE (?P<month>[A-Z]+) DE(?:L ANO)? (?P<year>\d{4})\b",
+    rf"A LOS (?P<day>[A-Z0-9 ]+?) DIAS? DEL MES DE (?P<month>[A-Z]+) {_OF_THE_YEAR} (?P<year>[A-Z0-9 ]+?)(?=[,.;]|\s+ANTE|$)",
+    # La fecha del acto antes que ninguna otra. Una minuta cita las fechas de los
+    # documentos que la anteceden ("sentencia de fecha 08 de Agosto de 1996",
+    # "según documento de fecha 29 de Agosto del 2007") y esas vienen primero en
+    # la hoja; la suya propia cierra el documento junto a la ciudad y no lleva
+    # "fecha" delante. Sin este orden se guardaba la del antecedente.
+    rf"(?<!FECHA ){_FIGURES}",
+    # Último recurso, para la hoja cuya única fecha va presentada como tal
+    # ("declaración jurada de fecha 12 de marzo de 2025").
+    _FIGURES,
 )

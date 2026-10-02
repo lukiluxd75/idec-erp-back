@@ -2,16 +2,18 @@ import unittest
 import uuid
 from unittest.mock import patch
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import cv2
 import numpy as np
 
 from app.domains.folder_analysis.application.document_synchronizer import DocumentSynchronizer
+from app.domains.folder_analysis.application.use_cases.document_use_cases import MAX_PAGES
 from app.domains.folder_analysis.application.use_cases import (
     AddDocumentsToRegisteredFolderUseCase,
     ClearInboxUseCase,
     AnalyzeDocumentUseCase,
+    ConsolidateDocumentsUseCase,
     CreateDocumentUseCase,
     CreateRegisteredFolderUseCase,
     DeleteCaptureUseCase,
@@ -156,9 +158,15 @@ class FakeCaptures(CaptureRepositoryPort):
 class FakeDocuments(DocumentRepositoryPort):
     def __init__(self):
         self.rows = {}
+        # Cada documento con su propia marca, como la pone la base: con NOW para
+        # todos, "el mas viejo" no se podia distinguir y un caso de uso que lo
+        # buscara pasaba los tests mirando el orden del diccionario.
+        self.clock = 0
 
     def create(self, user_sub, doc_type, capture_ids, folder_type=None):
-        doc = FolderDocument(str(uuid.uuid4()), user_sub, doc_type, DocumentStatus.DRAFT, NOW, NOW,
+        self.clock += 1
+        born = NOW + timedelta(seconds=self.clock)
+        doc = FolderDocument(str(uuid.uuid4()), user_sub, doc_type, DocumentStatus.DRAFT, born, born,
                              pages=[DocumentPage(c, i) for i, c in enumerate(capture_ids)],
                              folder_type=folder_type)
         self.rows[doc.id] = doc
@@ -169,9 +177,12 @@ class FakeDocuments(DocumentRepositoryPort):
         return doc if doc and doc.user_sub == user_sub else None
 
     def list(self, user_sub, doc_type=None, folder_id=None):
+        # Del mas nuevo al mas viejo, como el repositorio de verdad (su puerto lo
+        # dice: "Newest first"). El fake devolvia el orden de insercion, asi que
+        # un caso de uso que se apoyara en el orden pasaba los tests y fallaba.
         return [
             d
-            for d in self.rows.values()
+            for d in reversed(list(self.rows.values()))
             if d.user_sub == user_sub
             and (not doc_type or d.doc_type == doc_type)
             and (not folder_id or d.folder_id == folder_id)
@@ -1599,6 +1610,199 @@ class DocumentosDentroDeUnaCarpetaTests(unittest.TestCase):
         )
 
 
+class OtrosDocumentosNoSeLeenTests(unittest.TestCase):
+    """El carril de "otros documentos": lo que el poseedor trae de respaldo.
+
+    No tiene datos que sacarle, así que se guarda con sus fotos y nada más -- ni
+    OCR, ni cola, ni pantalla de revisión. Queda archivado desde que se suelta,
+    que es lo que hace que la pantalla no ofrezca analizarlo.
+    """
+
+    def setUp(self):
+        self.captures, self.documents, self.queue = FakeCaptures(), FakeDocuments(), FakeQueue()
+        self.folders = FakeRegisteredFolders(self.documents)
+        self.service = RegisteredFolderService(self.folders, self.documents)
+        self.photo = self.captures.create("arq-1", "p.png", "image/png", b"x", b"t")
+
+    def _create(self, doc_type=DocumentType.ID_CARD, ids=None):
+        return CreateDocumentUseCase(self.documents, self.captures, self.folders).execute(
+            doc_type, ids or [self.photo.id], "arq-1"
+        )
+
+    def _analyze(self, document):
+        return AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(
+            document.id, "arq-1"
+        )
+
+    def test_the_catalogue_and_the_lanes_agree_on_which_types_are_read(self):
+        """Los dos conjuntos tienen que cubrir ALL sin pisarse: si alguien agrega
+        un carril y se olvida de uno, se lee lo que no debía o al revés."""
+        self.assertEqual(
+            sorted(DocumentType.SERVER_READ + DocumentType.NOT_READ), sorted(DocumentType.ALL)
+        )
+        self.assertEqual(set(DocumentType.SERVER_READ) & set(DocumentType.NOT_READ), set())
+
+    def test_it_is_filed_the_moment_it_is_created(self):
+        document = self._create()
+        self.assertEqual(document.status, DocumentStatus.FILED)
+        self.assertEqual([p.status for p in document.pages], [PageStatus.DONE])
+
+    def test_its_photos_are_kept_assigned_to_it(self):
+        document = self._create()
+        self.assertEqual([p.capture_id for p in document.pages], [self.photo.id])
+        self.assertEqual(self.captures.list_by_status("arq-1", CaptureStatus.INBOX), [])
+
+    def test_asking_to_analyze_it_queues_nothing(self):
+        """La pantalla ya no ofrece el botón, pero la regla vive en el caso de
+        uso: una petición vieja no puede mandarlo al OCR por la ventana."""
+        document = self._analyze(self._create())
+        self.assertEqual(document.status, DocumentStatus.FILED)
+        self.assertEqual(self.queue.submitted, [])
+
+    def test_the_server_reading_leaves_it_alone(self):
+        document = self._create()
+        RunServerReadingUseCase(self.documents, self.captures, {}).execute(document.id, "arq-1")
+        self.assertEqual(
+            self.documents.get(document.id, "arq-1").status, DocumentStatus.FILED
+        )
+
+    def test_changing_its_pages_leaves_it_filed_again(self):
+        """replace_pages devuelve cualquier documento a borrador para que se
+        vuelva a analizar; este no tiene a qué volver."""
+        document = self._create()
+        other = self.captures.create("arq-1", "q.png", "image/png", b"x", b"t")
+        document = SetDocumentPagesUseCase(self.documents, self.captures).execute(
+            document.id, [self.photo.id, other.id], "arq-1"
+        )
+        self.assertEqual(document.status, DocumentStatus.FILED)
+        self.assertEqual(len(document.pages), 2)
+
+    def test_a_lane_that_is_read_is_untouched(self):
+        document = self._create(DocumentType.SWORN_STATEMENT)
+        self.assertEqual(document.status, DocumentStatus.DRAFT)
+
+    def test_it_is_named_otros_documentos_and_says_it_is_not_read(self):
+        spec = DOCUMENT_TYPES[DocumentType.ID_CARD]
+        self.assertEqual(spec.label, "Otros documentos")
+        self.assertIn("no se leen", spec.hint)
+
+
+class JuntarTodoEnUnDocumentoTests(unittest.TestCase):
+    """El botón del carril: lo suelto queda en un solo documento.
+
+    Un poseedor trae un montón de respaldos que no son un trámite cada uno sino
+    el mismo legajo. Esto junta las fotos que quedaron en la bandeja con las
+    tarjetas que ya están en el carril.
+    """
+
+    def setUp(self):
+        self.captures, self.documents = FakeCaptures(), FakeDocuments()
+        self.folders = FakeRegisteredFolders(self.documents)
+        self.service = RegisteredFolderService(self.folders, self.documents)
+
+    def _photo(self, name):
+        return self.captures.create("arq-1", name, "image/png", b"x", b"t")
+
+    def _folder(self):
+        return CreateRegisteredFolderUseCase(self.folders, self.service).execute(
+            "arq-1", "Poseedores Sarco", None, folder_type_key="possessors"
+        )
+
+    def _create(self, doc_type, capture_ids, folder_id=None):
+        return CreateDocumentUseCase(self.documents, self.captures, self.folders).execute(
+            doc_type, capture_ids, "arq-1", folder_id
+        )
+
+    def _consolidate(self, doc_type=DocumentType.ID_CARD, folder_id=None, folder_type_key="possessors"):
+        return ConsolidateDocumentsUseCase(self.documents, self.captures, self.folders).execute(
+            doc_type, "arq-1", folder_id, folder_type_key
+        )
+
+    def test_the_loose_photos_of_the_inbox_become_one_document(self):
+        photos = [self._photo(f"p{i}.png") for i in range(3)]
+        document = self._consolidate()
+        self.assertEqual(document.status, DocumentStatus.FILED)
+        self.assertEqual([p.capture_id for p in document.pages], [p.id for p in photos])
+        self.assertEqual(self.captures.list_by_status("arq-1", CaptureStatus.INBOX), [])
+
+    def test_the_cards_already_in_the_lane_are_merged_into_the_oldest(self):
+        first = self._create(DocumentType.ID_CARD, [self._photo("a.png").id])
+        second = self._create(DocumentType.ID_CARD, [self._photo("b.png").id])
+        document = self._consolidate()
+        self.assertEqual(document.id, first.id)
+        self.assertEqual(len(document.pages), 2)
+        self.assertIsNone(self.documents.get(second.id, "arq-1"))
+
+    def test_the_inbox_and_the_lane_go_into_the_same_one(self):
+        card = self._create(DocumentType.ID_CARD, [self._photo("a.png").id])
+        loose = self._photo("b.png")
+        document = self._consolidate()
+        self.assertEqual(document.id, card.id)
+        self.assertEqual([p.capture_id for p in document.pages][-1], loose.id)
+        self.assertEqual(len(document.pages), 2)
+
+    def test_the_pages_keep_their_order_and_the_loose_ones_go_last(self):
+        a, b = self._photo("a.png"), self._photo("b.png")
+        self._create(DocumentType.ID_CARD, [a.id])
+        self._create(DocumentType.ID_CARD, [b.id])
+        loose = self._photo("c.png")
+        self.assertEqual(
+            [p.capture_id for p in self._consolidate().pages], [a.id, b.id, loose.id]
+        )
+
+    def test_a_lane_that_is_read_is_refused(self):
+        self._photo("a.png")
+        with self.assertRaises(InvalidDocumentRequestException):
+            self._consolidate(DocumentType.SWORN_STATEMENT)
+
+    def test_with_nothing_to_gather_it_says_so(self):
+        with self.assertRaises(InvalidDocumentRequestException):
+            self._consolidate()
+
+    def test_more_photos_than_a_document_takes_is_refused_with_the_count(self):
+        for i in range(MAX_PAGES + 1):
+            self._photo(f"p{i}.png")
+        with self.assertRaises(InvalidDocumentRequestException) as caught:
+            self._consolidate()
+        self.assertIn(str(MAX_PAGES + 1), caught.exception.message)
+        # Nada a medias: las fotos siguen en la bandeja para repartirlas.
+        self.assertEqual(
+            len(self.captures.list_by_status("arq-1", CaptureStatus.INBOX)), MAX_PAGES + 1
+        )
+
+    def test_inside_a_carpeta_the_result_belongs_to_it_only_once(self):
+        folder = self._folder()
+        self._create(DocumentType.ID_CARD, [self._photo("a.png").id], folder.id)
+        self._photo("b.png")
+        document = self._consolidate(folder_id=folder.id)
+        self.assertEqual(
+            self.folders.get(folder.id, "arq-1").document_ids, [document.id]
+        )
+
+    def test_if_the_rebuild_fails_the_photos_go_back_to_the_inbox(self):
+        """Las tarjetas que se borraron ya no están. Sin esto sus fotos quedaban
+        asignadas a nada: fuera de la bandeja y fuera de todo documento, o sea
+        invisibles."""
+        a, b = self._photo("a.png"), self._photo("b.png")
+        self._create(DocumentType.ID_CARD, [a.id])
+        self._create(DocumentType.ID_CARD, [b.id])
+
+        def boom(*args, **kwargs):
+            raise RuntimeError("se cayó la base")
+
+        self.documents.replace_pages = boom
+        with self.assertRaises(RuntimeError):
+            self._consolidate()
+        self.assertIn(b.id, [c.id for c in self.captures.list_by_status("arq-1", CaptureStatus.INBOX)])
+
+    def test_it_does_not_touch_another_lane(self):
+        other = self._create(DocumentType.SWORN_STATEMENT, [self._photo("a.png").id])
+        self._photo("b.png")
+        self._consolidate()
+        kept = self.documents.get(other.id, "arq-1")
+        self.assertEqual([p.capture_id for p in kept.pages], [p.capture_id for p in other.pages])
+
+
 class VaciarLaBandejaTests(unittest.TestCase):
     """El botón de vaciar la bandeja: se borran de una vez las fotos que quedaron
     sin clasificar, sin tocar las que ya son página de un documento."""
@@ -1761,6 +1965,172 @@ class ActaNotarialTests(unittest.TestCase):
 
     def test_a_sheet_that_says_none_of_it_leaves_everything_empty(self):
         self.assertEqual(set(self._harvest("HOJA CUALQUIERA").values()), {None})
+
+
+class MinutaDirigidaAlNotarioTests(unittest.TestCase):
+    """La otra forma del mismo trámite: una minuta no es un acta.
+
+    No dice "ante mí" ni "compareció" -- va dirigida al notario ("SEÑOR NOTARIO
+    DE FE PÚBLICA, sírvase insertar"), enumera a las partes con su cédula
+    colgando del nombre, cita las fechas de los documentos que la anteceden y
+    recién al final, junto a la ciudad, pone la suya. El notario no se nombra en
+    el texto: está en el sello.
+
+    De una de estas (una guarda con cesión, cuatro hojas) salía el notario como
+    "DE FE", y el nombre y la fecha vacíos.
+    """
+
+    FIELDS = document_fields("possessors", DocumentType.FORM)
+
+    MINUTA = (
+        "IVON JANNET RICO LEDEZMA ABOGADO NOTARIA DE FE PUBLICA DE PRIMERA CLASE No. 48\n"
+        "Cochabamba - Bolivia\n"
+        "SEÑOR NOTARIO DE FE PÚBLICA\n"
+        "Entre los documentos de escrituras públicas que se encuentran a su cargo sírvase\n"
+        "insertar una de GUARDA DEFINITIVA Y / O TUTELA, DERECHO DE VISITA.\n"
+        "PRIMERA: (DE LAS PARTES) Dirá usted señor notario que son parte del presente documento:\n"
+        "1.- JUAN CHILE ARIAS. Con C.I:5918362 Cbba., quien es mayor de edad, hábil por ley\n"
+        "de nacionalidad boliviano, de ocupación Albañil, con domicilio en Pucara Molle Molle - Cbba.\n"
+        "2.- ROBERTA HUMACAYA MAMANI, con C.I: 5932821 Cbba., quien es mayor de edad.\n"
+        "SEGUNDA: (DE LOS ANTECEDENTES) según sentencia de fecha 08 de Agosto del presente año.\n"
+        "CUARTO: (DE LOS BIENES) compraron un lote de terreno Registrado en Derechos Reales a\n"
+        "Fs. 2542, Ptda. 2542, en fecha 08 de Agosto de 1996. Con una superficie de 10.116 m2.\n"
+        "Adquirido de su anterior dueño según documento de fecha 29 de Agosto del 2007, y\n"
+        "reconocido ante Notario de Primera Clase Nro. 44 Dr. Tatiana Céspedes Morales.\n"
+        "Ud. señor notario sirvase agregar las demás clausulas de estilo y seguridad.\n"
+        "Cochabamba 26 de Agosto del 2014\n"
+        "ADJUNTAR AL FORMULARIO DE RECONOCIMIENTO DE FIRMAS N° 3025076"
+    )
+
+    def _harvest(self, text, fields=None):
+        reading = {"full_text": text, "pages": [{"fields": fields or [], "tables": []}]}
+        return harvest(reading, self.FIELDS)[0]
+
+    def test_reads_the_three_values_out_of_the_minuta(self):
+        values = self._harvest(self.MINUTA)
+        self.assertEqual(values["notary_number"], "48")
+        self.assertEqual(values["owner_name"], "JUAN CHILE ARIAS, ROBERTA HUMACAYA MAMANI")
+        self.assertEqual(values["statement_dates"], "26/08/2014")
+
+    def test_every_poseedor_is_read_not_only_the_first(self):
+        """La carpeta va a nombre de los dos cónyuges: quedarse con el primero
+        obligaba a copiar el otro a mano sin que nada avisara que faltaba."""
+        self.assertEqual(
+            self._harvest(self.MINUTA)["owner_name"].split(", "),
+            ["JUAN CHILE ARIAS", "ROBERTA HUMACAYA MAMANI"],
+        )
+
+    def test_the_same_poseedor_named_twice_is_kept_once(self):
+        values = self._harvest(
+            "1.- JUAN CHILE ARIAS. Con C.I:5918362 Cbba. "
+            "Reitera el señor JUAN CHILE ARIAS, con C.I: 5918362 Cbba."
+        )
+        self.assertEqual(values["owner_name"], "JUAN CHILE ARIAS")
+
+    def test_a_looser_wording_does_not_add_a_second_reading_of_the_same_person(self):
+        """Un acta la lee la frase "se hizo presente"; el patrón suelto de la
+        minuta leería la misma persona arrastrando la palabra de antes, y las dos
+        lecturas quedaban juntas."""
+        values = self._harvest(
+            "se hizo presente NOELIA ALMENDRAS RODRIGUEZ con Cédula de Identidad N° 8806991"
+        )
+        self.assertEqual(values["owner_name"], "NOELIA ALMENDRAS RODRIGUEZ")
+
+    def test_the_notary_of_the_stamp_is_read_through_its_office(self):
+        """El sello mete el oficio entre el nombre del cargo y el número."""
+        self.assertEqual(
+            self._harvest("NOTARIA DE FE PUBLICA DE PRIMERA CLASE No. 48")["notary_number"], "48"
+        )
+
+    def test_the_notary_of_an_earlier_document_is_not_taken(self):
+        """La minuta nombra al notario que reconoció el documento anterior. Ese
+        no lleva "de fe pública" delante y no es el de esta hoja."""
+        self.assertIsNone(
+            self._harvest("reconocido ante Notario de Primera Clase Nro. 44")["notary_number"]
+        )
+
+    def test_the_heading_does_not_pass_as_the_number_of_the_notary(self):
+        """"NOTARIO" encabeza la hoja y le prestaba su línea a "DE FE PUBLICA",
+        que se guardaba como si fuera el número."""
+        values = self._harvest(
+            "SEÑOR NOTARIO DE FE PUBLICA", [{"name": "NOTARIO", "value": "DE FE"}]
+        )
+        self.assertIsNone(values["notary_number"])
+
+    def test_the_date_of_the_act_wins_over_the_ones_it_cites(self):
+        """1996 y 2007 son del antecedente y vienen antes en la hoja; 2014 es la
+        de la minuta y cierra el documento."""
+        self.assertEqual(self._harvest(self.MINUTA)["statement_dates"], "26/08/2014")
+
+    def test_a_year_written_after_del(self):
+        self.assertEqual(
+            self._harvest("Cochabamba 26 de Agosto del 2014")["statement_dates"], "26/08/2014"
+        )
+
+    def test_a_sheet_whose_only_date_is_presented_as_one_is_still_read(self):
+        """Si no hay otra, la fecha citada es la que hay."""
+        self.assertEqual(
+            self._harvest("Declaración jurada de fecha 12 de marzo de 2025")["statement_dates"],
+            "12/03/2025",
+        )
+
+    def test_the_name_is_cut_at_the_identity_card(self):
+        values = self._harvest("2.- ROBERTA HUMACAYA MAMANI, con C.I: 5932821 Cbba., mayor de edad")
+        self.assertEqual(values["owner_name"], "ROBERTA HUMACAYA MAMANI")
+
+
+class LoQueElOcrDevuelveDeVerdadTests(unittest.TestCase):
+    """Los mismos campos, pero sobre el texto tal como sale del OCR.
+
+    Las reglas se escribieron mirando el papel y por eso no encontraban nada: la
+    hoja llega fotografiada y PaddleOCR la devuelve rota. Los textos de abajo son
+    literales de la lectura de una minuta de cuatro hojas, no una transcripción
+    -- se perdían el notario, la fecha y la segunda poseedora.
+    """
+
+    FIELDS = document_fields("possessors", DocumentType.FORM)
+
+    def _harvest(self, text):
+        return harvest({"full_text": text, "pages": [{"fields": [], "tables": []}]}, self.FIELDS)[0]
+
+    def test_the_number_of_a_stamp_the_ocr_broke_apart(self):
+        """El sello es redondo y va girado: "NOTARIA DE FE PUBLICA DE PRIMERA
+        CLASE No. 48" vuelve partido, sin "PUBLICA", con "DE FE" pegado y con la
+        O del "No." cambiada por un cero."""
+        for read_as in (
+            "ABOGADO NOTARIA DEFE PULCA DEP.SMERA CLAN0.48",
+            "RICo AROGADO NOTARIADEFE PURUCA DEPAIMERA CLASENo.48",
+        ):
+            with self.subTest(read_as=read_as):
+                self.assertEqual(self._harvest(read_as)["notary_number"], "48")
+
+    def test_the_i_of_the_identity_card_read_as_an_l(self):
+        """"con C.I: 5932821" vuelve "CON C.L:5932821", y con la I exigida la
+        segunda poseedora no entraba."""
+        values = self._harvest("A. 2.-ROBERTA HUMACAYA MAMANI,CON C.L:5932821 Cbba.")
+        self.assertEqual(values["owner_name"], "ROBERTA HUMACAYA MAMANI")
+
+    def test_the_closing_date_written_over_the_ruled_line(self):
+        """La fecha va escrita sobre el renglón: el OCR mete barras donde hay
+        espacios y lee un cero en "Agosto"."""
+        values = self._harvest("Y SEGURIDAD. CHABAMBA/26 DE/AGOST0 DEL 2014 3025076")
+        self.assertEqual(values["statement_dates"], "26/08/2014")
+
+    def test_the_whole_reading_gives_the_three_values(self):
+        values = self._harvest(
+            "ABOGADO NOTARIA DEFE PULCA DEP.SMERA CLAN0.48 SENORNOTARIODEFEPUBLICA\n"
+            "Entre los dacumentos de escrituras publicas que se encuentran a su cargo\n"
+            "PRIMERA: (DE LAS PARTES) Dirä usted senor notario que son parte del\n"
+            "presente-documento: 1.-JUAN CHILE ARIAS.Con C.I:5918362 Cbba.,quien es mayor de edad,\n"
+            "2.-ROBERTA HUMACAYA MAMANI,con C.l:5932821 Cbba.,quien es mayor\n"
+            "segün sentencia de fecha 08 de Agosto del presente ano. tramitado. en el\n"
+            "reconocido ante Notario de Primera Clase Nro. 44 Dr. Tatiana Cespedes Morales\n"
+            "categoria de instrumento duplico y Ud. serior notario sirvase agregar las\n"
+            "demas clausulas.de estilo y seguridad. chabamba/26 de/Agost0 del 2014 3025076"
+        )
+        self.assertEqual(values["notary_number"], "48")
+        self.assertEqual(values["owner_name"], "JUAN CHILE ARIAS, ROBERTA HUMACAYA MAMANI")
+        self.assertEqual(values["statement_dates"], "26/08/2014")
 
 
 class FechasEnLetrasTests(unittest.TestCase):

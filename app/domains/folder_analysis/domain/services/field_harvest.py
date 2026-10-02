@@ -43,8 +43,17 @@ def _plain_number(match: "re.Match") -> Optional[str]:
     return str(int(match.group(1)))
 
 
+def _metres(match: "re.Match") -> Optional[str]:
+    # The width of a street as the carpeta writes it: "12,50" -> "12.50 m".
+    return f"{match.group(1).replace(',', '.')} m"
+
+
 # What a field can ask to be done with what its pattern matched.
-TRANSFORMS = {"spanish_date": _spanish_date, "plain_number": _plain_number}
+TRANSFORMS = {
+    "spanish_date": _spanish_date,
+    "plain_number": _plain_number,
+    "metres": _metres,
+}
 
 
 def _from_patterns(text: str, spec: Any) -> Optional[str]:
@@ -54,23 +63,31 @@ def _from_patterns(text: str, spec: Any) -> Optional[str]:
     date are inside its prose, and what identifies them is the wording around
     them. Searched on the whole normalized text -- one line, so a sentence that
     wraps is still one sentence.
+
+    The patterns are an order of preference, not a set: the first one that says
+    anything answers, because a field lists them from the wording that names it
+    most surely down to the one that only usually does.
     """
     transform = TRANSFORMS.get(getattr(spec, "transform", None))
-    if getattr(spec, "collect_all", False):
-        measures: List[str] = []
-        for pattern in getattr(spec, "patterns", ()):
-            for found in re.finditer(pattern, text):
-                measure = f"{found.group(1).replace(',', '.')} m"
-                if measure not in measures:
-                    measures.append(measure)
-        return ", ".join(measures) or None
+    collect_all = getattr(spec, "collect_all", False)
     for pattern in getattr(spec, "patterns", ()):
-        match = re.search(pattern, text)
-        if not match:
+        if not collect_all:
+            match = re.search(pattern, text)
+            value = (transform(match) if transform else clean_value(match.group(1))) if match else None
+            if value:
+                return value
             continue
-        value = transform(match) if transform else clean_value(match.group(1))
-        if value:
-            return value
+        # Every match of THIS pattern -- a plano faces more than one street and a
+        # minuta lists more than one poseedor. Kept to one pattern so a looser
+        # wording further down the list cannot add its reading of the same
+        # sentence next to the one that already named it.
+        values: List[str] = []
+        for found in re.finditer(pattern, text):
+            value = transform(found) if transform else clean_value(found.group(1))
+            if value and value not in values:
+                values.append(value)
+        if values:
+            return ", ".join(values)
     return None
 
 
@@ -215,10 +232,17 @@ def harvest(
 
 def _shaped(spec: Any, value: Optional[str]) -> Optional[str]:
     """What is stored: the value as printed, or only its number when the field
-    is the one the office asks for by number (the notary)."""
+    is the one the office asks for by number (the notary).
+
+    A field asked for by number and matched to something with no digits in it is
+    not that field: the heading "NOTARIO" of a minuta lends its line to "DE FE
+    PUBLICA", which was stored as if it were the number of the notary. Empty is
+    the honest answer -- it is named in the observations and typed by hand,
+    instead of reaching the carpeta sheet looking like a reading.
+    """
     if value and getattr(spec, "number_only", False):
         number = _FIRST_NUMBER.search(value)
-        return number.group(0) if number else value
+        return number.group(0) if number else None
     return value
 
 

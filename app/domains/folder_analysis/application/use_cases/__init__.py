@@ -18,6 +18,7 @@ from app.domains.folder_analysis.application.use_cases.document_use_cases import
     ListReviewedDocumentsUseCase,
     ReviewDocumentUseCase,
     RunServerReadingUseCase,
+    ConsolidateDocumentsUseCase,
     SetDocumentPagesUseCase,
 )
 from app.domains.folder_analysis.application.use_cases.registered_folder_use_cases import (
@@ -53,6 +54,7 @@ __all__ = [
     "RemoveDocumentFromRegisteredFolderUseCase",
     "ReviewDocumentUseCase",
     "RunServerReadingUseCase",
+    "ConsolidateDocumentsUseCase",
     "SetDocumentPagesUseCase",
     "UpdateRegisteredFolderUseCase",
     "UploadCapturesUseCase",
