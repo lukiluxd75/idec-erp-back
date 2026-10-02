@@ -59,6 +59,12 @@ class _PreviewCache:
 _previews = _PreviewCache()
 
 
+def forget_previews(capture_ids: List[str]) -> None:
+    """Drops the cached previews of photos that were deleted."""
+    for capture_id in capture_ids:
+        _previews.drop(capture_id)
+
+
 class UploadCapturesUseCase:
     """Photos sent from the mobile app, or picked on the web, land in the
     architect's inbox unsorted.

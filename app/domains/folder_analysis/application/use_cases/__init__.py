@@ -29,6 +29,7 @@ from app.domains.folder_analysis.application.use_cases.registered_folder_use_cas
     ListRegisteredFoldersUseCase,
     RegisteredFolderService,
     RemoveDocumentFromRegisteredFolderUseCase,
+    SaveBoardToFolderUseCase,
     UpdateRegisteredFolderUseCase,
 )
 
@@ -52,6 +53,7 @@ __all__ = [
     "ListRegisteredFoldersUseCase",
     "RegisteredFolderService",
     "RemoveDocumentFromRegisteredFolderUseCase",
+    "SaveBoardToFolderUseCase",
     "ReviewDocumentUseCase",
     "RunServerReadingUseCase",
     "ConsolidateDocumentsUseCase",

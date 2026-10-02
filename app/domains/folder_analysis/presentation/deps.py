@@ -36,6 +36,7 @@ from app.domains.folder_analysis.application.use_cases import (
     LookupCadastralParcelUseCase,
     RegisteredFolderService,
     RemoveDocumentFromRegisteredFolderUseCase,
+    SaveBoardToFolderUseCase,
     ReviewDocumentUseCase,
     RunServerReadingUseCase,
     SetDocumentPagesUseCase,
@@ -287,6 +288,14 @@ def get_create_registered_folder_use_case(
     return CreateRegisteredFolderUseCase(folders, service)
 
 
+def get_save_board_to_folder_use_case(
+    folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
+    documents: DocumentRepositoryPort = Depends(get_document_repository),
+    service: RegisteredFolderService = Depends(get_registered_folder_service),
+) -> SaveBoardToFolderUseCase:
+    return SaveBoardToFolderUseCase(folders, documents, service)
+
+
 def get_update_registered_folder_use_case(
     folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
     service: RegisteredFolderService = Depends(get_registered_folder_service),
@@ -304,15 +313,19 @@ def get_add_folder_documents_use_case(
 def get_remove_folder_document_use_case(
     folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
     service: RegisteredFolderService = Depends(get_registered_folder_service),
+    documents: DocumentRepositoryPort = Depends(get_document_repository),
+    captures: CaptureRepositoryPort = Depends(get_capture_repository),
 ) -> RemoveDocumentFromRegisteredFolderUseCase:
-    return RemoveDocumentFromRegisteredFolderUseCase(folders, service)
+    return RemoveDocumentFromRegisteredFolderUseCase(folders, service, documents, captures)
 
 
 def get_delete_registered_folder_use_case(
     folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
     service: RegisteredFolderService = Depends(get_registered_folder_service),
+    documents: DocumentRepositoryPort = Depends(get_document_repository),
+    captures: CaptureRepositoryPort = Depends(get_capture_repository),
 ) -> DeleteRegisteredFolderUseCase:
-    return DeleteRegisteredFolderUseCase(folders, service)
+    return DeleteRegisteredFolderUseCase(folders, service, documents, captures)
 
 
 @lru_cache()

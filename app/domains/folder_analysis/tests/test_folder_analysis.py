@@ -23,6 +23,7 @@ from app.domains.folder_analysis.application.use_cases import (
     ListRegisteredFoldersUseCase,
     RegisteredFolderService,
     RemoveDocumentFromRegisteredFolderUseCase,
+    SaveBoardToFolderUseCase,
     ReviewDocumentUseCase,
     RunServerReadingUseCase,
     SetDocumentPagesUseCase,
@@ -1456,34 +1457,50 @@ class TestRegisteredFolders(unittest.TestCase):
                 folder.id, "arq-1", [folio.id]
             )
 
-    def test_removing_leaves_the_document_saved_and_free_to_file_again(self):
-        folio = self._reviewed()
-        folder = self._create("Proyecto Sur", ids=[folio.id])
-        emptied = RemoveDocumentFromRegisteredFolderUseCase(self.folders, self.service).execute(
-            folder.id, "arq-1", folio.id
+    def _remover(self):
+        return RemoveDocumentFromRegisteredFolderUseCase(
+            self.folders, self.service, self.documents, self.captures
         )
-        self.assertEqual(emptied.document_ids, [])
-        self.assertEqual(self.documents.get(folio.id, "arq-1").status, DocumentStatus.REVIEWED)
-        self.assertEqual(self._create("Proyecto Norte", ids=[folio.id]).document_ids, [folio.id])
+
+    def test_removing_deletes_the_document_and_its_photos(self):
+        folio, plan = self._reviewed(), self._reviewed("plan")
+        folder = self._create("Proyecto Sur", ids=[folio.id, plan.id])
+        photo = folio.pages[0].capture_id
+        left = self._remover().execute(folder.id, "arq-1", folio.id)
+        self.assertEqual(left.document_ids, [plan.id])
+        self.assertIsNone(self.documents.get(folio.id, "arq-1"))
+        self.assertIsNone(self.captures.get(photo, "arq-1"))
+        self.assertIsNotNone(self.captures.get(plan.pages[0].capture_id, "arq-1"))
 
     def test_removing_something_that_is_not_in_the_carpeta(self):
         folder = self._create("Proyecto Sur")
         with self.assertRaises(DocumentNotFoundException):
-            RemoveDocumentFromRegisteredFolderUseCase(self.folders, self.service).execute(
+            self._remover().execute(
                 folder.id, "arq-1", self._reviewed().id
             )
 
-    def test_deleting_the_carpeta_keeps_its_documents(self):
-        folio = self._reviewed()
+    def _deleter(self):
+        return DeleteRegisteredFolderUseCase(self.folders, self.service, self.documents, self.captures)
+
+    def test_deleting_the_carpeta_deletes_its_documents_and_photos(self):
+        """They must not go back to the loose board as if they were the next folder's."""
+        folio, draft = self._reviewed(), self._draft()
+        kept = self._draft()
         folder = self._create("Proyecto Sur", ids=[folio.id])
-        DeleteRegisteredFolderUseCase(self.folders, self.service).execute(folder.id, "arq-1")
+        self.folders.file_document(folder.id, draft.id)
+        photos = [p.capture_id for d in (folio, draft) for p in d.pages]
+        self._deleter().execute(folder.id, "arq-1")
         self.assertEqual(ListRegisteredFoldersUseCase(self.folders).execute("arq-1"), [])
-        self.assertEqual(self.documents.get(folio.id, "arq-1").status, DocumentStatus.REVIEWED)
+        self.assertIsNone(self.documents.get(folio.id, "arq-1"))
+        self.assertIsNone(self.documents.get(draft.id, "arq-1"))
+        self.assertEqual(self.captures.get_many(photos, "arq-1"), [])
+        self.assertIsNotNone(self.documents.get(kept.id, "arq-1"))
+        self.assertEqual(len(self.captures.get_many([kept.pages[0].capture_id], "arq-1")), 1)
 
     def test_another_user_cannot_delete_the_carpeta(self):
         folder = self._create("Proyecto Sur")
         with self.assertRaises(RegisteredFolderNotFoundException):
-            DeleteRegisteredFolderUseCase(self.folders, self.service).execute(folder.id, "arq-2")
+            self._deleter().execute(folder.id, "arq-2")
 
     # -------------------------------------------------------------------- list
 
@@ -1553,6 +1570,43 @@ class TestRegisteredFolders(unittest.TestCase):
         folio = self._reviewed()
         folder = self._create("Proyecto Sur", ids=[folio.id])
         self.assertEqual(folder.documents[0].reviewed_data, {"registration_number": "1.1.1"})
+
+    # ------------------------------------------------- guardar tablero en carpeta
+
+    def _save_board(self, number="1520", ids=None, kind=None):
+        return SaveBoardToFolderUseCase(self.folders, self.documents, self.service).execute(
+            "arq-1", number, kind, ids or []
+        )
+
+    def test_the_board_goes_into_a_carpeta_named_after_its_number(self):
+        """Whatever state each document is in: the physical folder is saved whole."""
+        draft, reviewed = self._draft("plan"), self._reviewed("folio")
+        folder = self._save_board("  1520 ", [draft.id, reviewed.id])
+        self.assertEqual(folder.name, "1520")
+        self.assertEqual(folder.folder_type, "general")
+        self.assertEqual(folder.document_ids, [draft.id, reviewed.id])
+        self.assertEqual(self.documents.get(draft.id, "arq-1").folder_id, folder.id)
+
+    def test_saving_an_empty_board_is_refused(self):
+        with self.assertRaises(InvalidRegisteredFolderException):
+            self._save_board(ids=[])
+
+    def test_a_number_already_registered_is_refused(self):
+        self._create("1520")
+        with self.assertRaises(RegisteredFolderNameTakenException) as raised:
+            self._save_board("1520", [self._draft().id])
+        self.assertIn("1520", raised.exception.message)
+
+    def test_a_document_already_in_a_carpeta_is_not_moved(self):
+        draft = self._draft()
+        self._save_board("1520", [draft.id])
+        with self.assertRaises(DocumentAlreadyFiledException):
+            self._save_board("1521", [draft.id])
+
+    def test_a_document_outside_the_kinds_lanes_is_refused(self):
+        """The general kind has no carnet lane."""
+        with self.assertRaises(InvalidRegisteredFolderException):
+            self._save_board("1520", [self._draft("id_card").id])
 
 class DocumentosDentroDeUnaCarpetaTests(unittest.TestCase):
     """A document is opened inside a carpeta, so from the moment it is created it
@@ -1794,6 +1848,17 @@ class JuntarTodoEnUnDocumentoTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self._consolidate()
         self.assertIn(b.id, [c.id for c in self.captures.list_by_status("arq-1", CaptureStatus.INBOX)])
+
+    def test_on_the_loose_board_the_cards_already_in_a_carpeta_are_left_alone(self):
+        """Once the board is saved into a carpeta, its carnets belong there: the
+        next folder scanned on the loose board must not swallow them."""
+        folder = self._folder()
+        filed = self._create(DocumentType.ID_CARD, [self._photo("a.png").id])
+        self.folders.file_document(folder.id, filed.id)
+        self._photo("b.png")
+        document = self._consolidate()
+        self.assertNotEqual(document.id, filed.id)
+        self.assertEqual(len(self.documents.get(filed.id, "arq-1").pages), 1)
 
     def test_it_does_not_touch_another_lane(self):
         other = self._create(DocumentType.SWORN_STATEMENT, [self._photo("a.png").id])
