@@ -31,7 +31,7 @@ def build_analysis(
         include_details = "; ".join(f"{r['name']} {_format_number(r['pending'])}" for r in outliers)
         message = (
             f"Hay {_format_number(pending)} trámites pendientes en {district_label}. "
-            f"Concentran el backlog: {include_details}. El resto del equipo suma {_format_number(remaining)}."
+            f"Concentran la bandeja pendiente: {include_details}. El resto del equipo suma {_format_number(remaining)}."
         )
     else:
         message = f"Hay {_format_number(pending)} trámites pendientes en las bandejas de {district_label}."
@@ -66,7 +66,7 @@ def build_analysis(
     if pending and stale:
         pct_stale = round(stale / pending * 100, 1)
         bullets.append(
-            f"Backlog envejecido (más de 30 días): {_format_number(stale)} trámites ({pct_stale}% del pendiente)."
+            f"Pendientes con más de 30 días en bandeja: {_format_number(stale)} trámites ({pct_stale}% del total pendiente)."
         )
 
     groups = procedure_groups or []

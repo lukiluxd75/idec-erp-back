@@ -35,7 +35,8 @@ def build_excel(data: dict) -> bytes:
     res = wb.add_worksheet("Resumen")
     res.set_column("A:F", 22)
     res.merge_range("A1:F1", "Dirección de Administración Geográfica y Catastro", title)
-    res.merge_range("A2:F2", "Reporte gerencial · Área Técnica Cartografía", subtitle)
+    unit = meta.get("unit") or "Área Técnica Cartografía"
+    res.merge_range("A2:F2", f"Reporte gerencial de trámites · {unit}", subtitle)
     res.write("A3", f"Período: {_fmt_date(meta['startDate'])} al {_fmt_date(meta['endDate'])}")
     res.write("A4", f"Comuna: {meta.get('district') or 'Todas'}")
     procedure_types = meta.get("procedureTypes") or []

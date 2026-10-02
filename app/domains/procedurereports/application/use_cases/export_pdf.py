@@ -104,7 +104,7 @@ def build_pdf(data: dict) -> bytes:
         rightMargin=1.2 * cm,
         topMargin=1.2 * cm,
         bottomMargin=1.2 * cm,
-        title="Reporte gerencial Cartografía",
+        title="Reporte gerencial de trámites",
     )
     styles = getSampleStyleSheet()
     h1 = ParagraphStyle("H1", parent=styles["Title"], textColor=PURPLE, fontSize=16, alignment=TA_CENTER, spaceAfter=2)
