@@ -1,6 +1,6 @@
 import logging
 from typing import Generator
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 from sqlalchemy.schema import CreateSchema
 from app.core.config import settings
@@ -103,6 +103,7 @@ def init_db_tables() -> bool:
         from app.domains.geoextraction.infrastructure import models  # noqa: F401
         from app.domains.chatbot.infrastructure import models as chatbot_models  # noqa: F401
         from app.domains.folios.infrastructure import models as folios_models  # noqa: F401
+        from app.domains.cadastralviewer.infrastructure import models as cadastralviewer_models  # noqa: F401
 
         if not db_uri.startswith("sqlite"):
             # create_all() only creates tables, never the Postgres schema itself.
@@ -111,6 +112,8 @@ def init_db_tables() -> bool:
             with engine.begin() as conn:
                 conn.execute(CreateSchema(chatbot_models.SCHEMA, if_not_exists=True))
                 conn.execute(CreateSchema(folios_models.SCHEMA, if_not_exists=True))
+                conn.execute(CreateSchema(cadastralviewer_models.SCHEMA, if_not_exists=True))
+                conn.execute(text("DROP INDEX IF EXISTS cadastralviewer.ux_advertisement_one_active"))
         Base.metadata.create_all(bind=engine)
 
         if not db_uri.startswith("sqlite"):
