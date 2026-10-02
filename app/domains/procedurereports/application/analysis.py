@@ -1,10 +1,12 @@
 from datetime import date
 
 
-def _format_number(n: float | int) -> str:
-    if isinstance(n, float):
-        return f"{n:,.1f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    return f"{n:,}".replace(",", ".")
+def _format_number(n: float | int, digits: int | None = None) -> str:
+    if digits is None:
+        digits = 1 if isinstance(n, float) and not float(n).is_integer() else 0
+    if digits:
+        return f"{float(n):,.{digits}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"{int(n):,}".replace(",", ".")
 
 
 def build_analysis(
