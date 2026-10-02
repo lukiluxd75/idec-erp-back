@@ -236,6 +236,8 @@ class DocumentValueOut(BaseModel):
 
     key: str
     label: str
+    # Not asked on the review screen; the carpeta sheet still takes it from here.
+    hidden: bool = False
 
 
 class DocumentTypeOut(BaseModel):
@@ -271,7 +273,7 @@ class FolderTypeOut(BaseModel):
             document_types=list(spec.document_types),
             document_values={
                 doc_type: [
-                    DocumentValueOut(key=field.key, label=field.label)
+                    DocumentValueOut(key=field.key, label=field.label, hidden=field.hidden)
                     for field in document_fields(spec.key, doc_type)
                 ]
                 for doc_type in spec.document_types

@@ -1659,6 +1659,8 @@ class CosechaDeCamposTests(unittest.TestCase):
             "FONDO 25.00 M\n"
             "FONDO 2 24.80 M\n"
             "SUPERFICIE UTIL 240.00 M2\n"
+            "LOTE N: 5 to CALLE DE 12.50 MTS.\n"
+            "MANZANO 432\nLOTE 002\nVIA\nCalle de 9.00 mts.\n"
             "Código Catastral: 00-33-432-012-0-00-000-000"
         )
         values, missing = harvest(reading, self.PLAN)
@@ -1670,6 +1672,9 @@ class CosechaDeCamposTests(unittest.TestCase):
         self.assertEqual(values["depth"], "25.00 M")
         self.assertEqual(values["depth_2"], "24.80 M")
         self.assertEqual(values["usable_area"], "240.00 M2")
+        # Arriba va lo que el plano dice de sí mismo: el ancho de cada calle y su lote.
+        self.assertEqual(values["street_width"], "12.50 m, 9.00 m")
+        self.assertEqual(values["property_number"], "2")
         self.assertEqual(missing, [])
 
     def test_a_fondo_of_25_metres_is_not_read_as_the_second_fondo(self):

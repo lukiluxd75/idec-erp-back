@@ -147,6 +147,71 @@ class PlanSurveyTest(unittest.TestCase):
         self.assertEqual(sides[0], 13.24)
         self.assertEqual(sides[1], 21.67)
 
+    @staticmethod
+    def _lot(width=10.0, depth=20.0):
+        # A lot of width x depth with its frente on the south side, in UTM metres.
+        return plan_survey.survey(
+            [
+                {"name": "P1", "east": 0.0, "north": 0.0},
+                {"name": "P2", "east": width, "north": 0.0},
+                {"name": "P3", "east": width, "north": depth},
+                {"name": "P4", "east": 0.0, "north": depth},
+            ]
+        )
+
+    def test_frente_is_the_side_on_the_street_and_the_fondos_are_the_other_two(self):
+        street = [[[-30.0, -6.0], [40.0, -6.0]]]
+        got = plan_survey.measures(self._lot(), street, 200.0)
+        self.assertEqual(
+            got["values"],
+            {"frontage": "10.00 m", "rear_frontage": "10.00 m", "depth": "20.00 m", "depth_2": "20.00 m"},
+        )
+        self.assertIsNone(got["note"])
+
+    def test_the_frente_follows_the_street_not_the_order_of_the_points(self):
+        street = [[[-6.0, -30.0], [-6.0, 40.0]]]  # on the west side, 20 m long
+        got = plan_survey.measures(self._lot(), street, 200.0)
+        self.assertEqual(got["values"]["frontage"], "20.00 m")
+        self.assertEqual(got["values"]["depth"], "10.00 m")
+
+    def test_coordinates_that_do_not_give_the_declared_surface_are_not_trusted(self):
+        got = plan_survey.measures(self._lot(), [[[-30.0, -6.0], [40.0, -6.0]]], 150.0)
+        self.assertEqual(got["values"], {})
+        self.assertIn("150.0 m2", got["note"])
+
+    def test_a_corner_lot_leaves_the_frente_to_the_architect(self):
+        streets = [[[-30.0, -6.0], [40.0, -6.0]], [[-6.0, -30.0], [-6.0, 40.0]]]
+        got = plan_survey.measures(self._lot(20.0, 20.0), streets, 400.0)
+        self.assertEqual(got["values"], {})
+        self.assertIn("esquina", got["note"])
+
+    def test_without_a_street_or_with_other_than_four_sides_nothing_is_filled(self):
+        self.assertEqual(plan_survey.measures(self._lot(), [], 200.0)["values"], {})
+        triangle = plan_survey.survey(
+            [
+                {"name": "P1", "east": 0.0, "north": 0.0},
+                {"name": "P2", "east": 10.0, "north": 0.0},
+                {"name": "P3", "east": 0.0, "north": 10.0},
+            ]
+        )
+        self.assertEqual(plan_survey.measures(triangle, [[[0.0, -5.0], [10.0, -5.0]]], 50.0)["values"], {})
+        self.assertIsNone(plan_survey.measures(None, [], None)["values"].get("frontage"))
+
+    def test_the_plano_values_are_the_street_widths_and_the_predio_it_says(self):
+        from app.domains.folder_analysis.domain.folder_types import document_fields
+        from app.domains.folder_analysis.domain.services.field_harvest import harvest
+
+        values, _missing = harvest(
+            {
+                "full_text": "LOTE N: 5 to CALLE DE 12.50 MTS.\nMANZANO 432\nLOTE 002\nVIA\nCalle de 9.00 mts.",
+                "pages": [{"fields": []}],
+            },
+            document_fields("possessors", "plan"),
+        )
+        self.assertEqual(values["street_width"], "12.50 m, 9.00 m")
+        # "MANZANO 432 LOTE 002": the lote of the box, not the "LOTE N: 5" of the drawing.
+        self.assertEqual(values["property_number"], "2")
+
     def test_fewer_than_three_vertices_draw_nothing(self):
         self.assertIsNone(plan_survey.read_plan("P1 E 806132.14 N 8063496.75")["survey"])
 

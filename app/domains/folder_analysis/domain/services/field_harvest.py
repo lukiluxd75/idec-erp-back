@@ -38,8 +38,13 @@ def _spanish_date(match: "re.Match") -> Optional[str]:
     )
 
 
+def _plain_number(match: "re.Match") -> Optional[str]:
+    # "002" is lote 2: the draughtsmen pad the number and the GIS does not.
+    return str(int(match.group(1)))
+
+
 # What a field can ask to be done with what its pattern matched.
-TRANSFORMS = {"spanish_date": _spanish_date}
+TRANSFORMS = {"spanish_date": _spanish_date, "plain_number": _plain_number}
 
 
 def _from_patterns(text: str, spec: Any) -> Optional[str]:
@@ -51,6 +56,14 @@ def _from_patterns(text: str, spec: Any) -> Optional[str]:
     wraps is still one sentence.
     """
     transform = TRANSFORMS.get(getattr(spec, "transform", None))
+    if getattr(spec, "collect_all", False):
+        measures: List[str] = []
+        for pattern in getattr(spec, "patterns", ()):
+            for found in re.finditer(pattern, text):
+                measure = f"{found.group(1).replace(',', '.')} m"
+                if measure not in measures:
+                    measures.append(measure)
+        return ", ".join(measures) or None
     for pattern in getattr(spec, "patterns", ()):
         match = re.search(pattern, text)
         if not match:

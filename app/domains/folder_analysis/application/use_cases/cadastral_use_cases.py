@@ -89,7 +89,7 @@ class LookupCadastralParcelUseCase:
             "plan": None,
         }
         if plan_text:
-            result["plan"] = self._plan(plan_text, analysis.area_m2, result)
+            result["plan"] = self._plan(plan_text, analysis.area_m2, result, streets)
         return result
 
     def _surroundings(self, ring: Ring):
@@ -155,7 +155,7 @@ class LookupCadastralParcelUseCase:
         }
 
     @staticmethod
-    def _plan(text: str, gis_area: float, gis: Dict[str, Any]) -> Dict[str, Any]:
+    def _plan(text: str, gis_area: float, gis: Dict[str, Any], streets: Sequence[Any] = ()) -> Dict[str, Any]:
         reading = plan_survey.read_plan(text)
         # The box under the croquis, line by line against what the GIS says.
         location = plan_checks.read_location_block(text)
@@ -177,6 +177,11 @@ class LookupCadastralParcelUseCase:
         # What the architect compares: the surface of the plano (its vertices, and
         # what it prints) against the GIS one.
         area_plan = (survey or {}).get("area_m2") or reading["declared_area_m2"]
+        # Frente and fondos from the vertices, once the GIS says which side is on the
+        # street. Empty (with the reason) when the figures cannot be trusted.
+        reading["measures"] = plan_survey.measures(
+            survey, [path for street in streets for path in street.paths], reading["declared_area_m2"]
+        )
         reading["area_difference_m2"] = round(area_plan - gis_area, 2) if area_plan is not None else None
         return reading
 
