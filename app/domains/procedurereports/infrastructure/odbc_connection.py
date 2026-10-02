@@ -11,7 +11,17 @@ _PREFERRED_DRIVERS = (
     "ODBC Driver 18 for SQL Server",
     "ODBC Driver 17 for SQL Server",
     "FreeTDS",
+    # Last resorts on Windows: these ship with the OS (sqlsrv32.dll) or come with
+    # an old SQL Server install. They speak no modern TLS, but they do connect --
+    # without them a Windows box that never got ODBC 17/18 loses the reports
+    # module entirely even though it has a usable SQL Server driver installed.
+    "SQL Server Native Client 11.0",
+    "SQL Server",
 )
+
+# Keywords only the modern drivers understand. The legacy "SQL Server" driver
+# rejects the connection outright when it is handed Encrypt/TrustServerCertificate.
+_TLS_AWARE_PREFIXES = ("odbc driver ", "sql server native client")
 
 
 def _driver_index() -> dict[str, str]:
@@ -47,14 +57,19 @@ def resolve_odbc_driver(explicit: str) -> str:
         key = requested.lower()
         if key in available:
             return available[key]
-        for k, canonical in available.items():
-            if key in k or k in key:
+        # Only widen to the SQL Server family: the substring match used to reach
+        # across every installed driver, so a typo could land on the Access or
+        # Excel driver -- installed on any Windows with Office -- and fail later
+        # with an unrelated error instead of here.
+        for name in _PREFERRED_DRIVERS:
+            k = name.lower()
+            if k in available and (key in k or k in key):
                 logger.warning(
                     "REPORTS_DB_DRIVER=%r matched installed driver %r",
                     explicit,
-                    canonical,
+                    available[k],
                 )
-                return canonical
+                return available[k]
         logger.warning(
             "REPORTS_DB_DRIVER=%r not installed (%s); trying fallbacks",
             explicit,
@@ -69,7 +84,8 @@ def resolve_odbc_driver(explicit: str) -> str:
 
     raise RuntimeError(
         f"No SQL Server ODBC driver found (installed: {list(pyodbc.drivers())}). "
-        "On Linux set REPORTS_DB_DRIVER=FreeTDS after installing freetds/unixodbc."
+        "On Windows install the Microsoft ODBC Driver 18 for SQL Server; "
+        "on Linux set REPORTS_DB_DRIVER=FreeTDS after installing freetds/unixodbc."
     )
 
 
@@ -99,13 +115,15 @@ def build_reports_connection_string(
             "ClientCharset=UTF-8;"
         )
 
-    encrypt_flag = "yes" if encrypt else "no"
-    return (
+    base = (
         f"DRIVER={{{resolved}}};"
         f"SERVER={host},{port};"
         f"DATABASE={database};"
         f"UID={user};"
         f"PWD={password};"
-        "TrustServerCertificate=yes;"
-        f"Encrypt={encrypt_flag};"
     )
+    if not any(resolved.lower().startswith(p) for p in _TLS_AWARE_PREFIXES):
+        return base
+
+    encrypt_flag = "yes" if encrypt else "no"
+    return base + f"TrustServerCertificate=yes;Encrypt={encrypt_flag};"
