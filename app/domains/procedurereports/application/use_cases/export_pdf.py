@@ -104,7 +104,7 @@ def build_pdf(data: dict) -> bytes:
         rightMargin=1.2 * cm,
         topMargin=1.2 * cm,
         bottomMargin=1.2 * cm,
-        title="Reporte gerencial Cartografía",
+        title="Reporte gerencial de trámites",
     )
     styles = getSampleStyleSheet()
     h1 = ParagraphStyle("H1", parent=styles["Title"], textColor=PURPLE, fontSize=16, alignment=TA_CENTER, spaceAfter=2)
@@ -120,7 +120,8 @@ def build_pdf(data: dict) -> bytes:
 
     story = []
     story.append(Paragraph("DIRECCIÓN DE ADMINISTRACIÓN GEOGRÁFICA Y CATASTRO", h1))
-    story.append(Paragraph("Reporte gerencial · Área Técnica Cartografía", h2))
+    unit = meta.get("unit") or "Área Técnica Cartografía"
+    story.append(Paragraph(f"Reporte gerencial de trámites · {unit}", h2))
     story.append(Paragraph(
         f"Período {_fmt_date(meta['startDate'])} al {_fmt_date(meta['endDate'])} · Comuna: {meta.get('district') or 'Todas'}",
         small,

@@ -8,7 +8,7 @@ def pretty_name(raw: str) -> str:
     return " ".join(p[:1].upper() + p[1:].lower() for p in parts) or "Sin nombre"
 
 
-def load_staff(district_id: int | None = None) -> list[dict]:
+def load_staff(district_id: int | None = None, *, conn=None) -> list[dict]:
     sql = """
 SELECT f.idFuncionario,
        f.idPersona,
@@ -27,7 +27,7 @@ WHERE f.idUnidad = ?
         params.append(district_id)
     sql += " ORDER BY c.descripcion, nombre"
     rows = []
-    for row in fetchall(sql, params):
+    for row in fetchall(sql, params, conn=conn):
         rows.append(
             {
                 "staffId": int(row["staffId"]),
@@ -40,7 +40,7 @@ WHERE f.idUnidad = ?
     return rows
 
 
-def load_districts() -> list[dict]:
+def load_districts(*, conn=None) -> list[dict]:
     rows = fetchall(
         """
 SELECT f.idComuna,
@@ -53,6 +53,7 @@ GROUP BY f.idComuna, c.descripcion
 ORDER BY c.descripcion
 """,
         [settings.unit_id],
+        conn=conn,
     )
     return [
         {
