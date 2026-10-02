@@ -25,7 +25,7 @@ MISSING = "missing"
 # ("KHARA KHARAARRUMANI"). So the separator is optional, the numbers must follow
 # the label directly (which keeps "LOTE N: 5" of the drawing out of it) and a
 # value ends where the next label starts.
-_NEXT = r"(?=\s+(?:SUB\s*-?\s*DISTRITO|DISTRITO|MANZAN[AO]|LOTE|VIA|ZONA)\b|\s+PROCESAMIENTO|\s*$)"
+_NEXT = r"(?=\s+(?:SUB\s*-?\s*DISTRITO|DISTRITO|MANZAN[AO]|LOTE|VIA|ZONA|ARQUITECTO)\b|\s+PROCESAMIENTO|\s*$)"
 _SEP = r"\s*[:;.]?\s*"
 _FIELDS = {
     "zone": re.compile(r"\bZONA" + _SEP + r"(.+?)" + _NEXT),
@@ -37,6 +37,17 @@ _FIELDS = {
 }
 
 
+# The second format of the plano heads the box with the zone ("DATOS DE UBICACION :
+# PUKARA GRANDE NORTE") and then lists ZONA, DISTRITO... with the values in other
+# blocks, so the zone is not after its own label. A zone "found" after ZONA that is
+# really the next label (MANZANA : 494...) is not a zone.
+_ZONE_HEADING = re.compile(r"\bDATOS\s*DE\s*UBICACION\s*[:;.]\s*(.+?)" + _NEXT)
+_LABEL_START = re.compile(r"^(?:SUB\s*-?\s*DISTRITO|DISTRITO|MANZAN[AO]|LOTE|VIA)\b")
+
+
+_NOT_A_STREET = ("ARQUITECTO", "PROCESAMIENTO", "FIRMA", "SELLO", "REGISTRO", "ESCALA")
+
+
 def read_location_block(text: str) -> Dict[str, Optional[str]]:
     """What the box says, by field. A line the OCR did not give is None."""
     prose = normalize(text or "")
@@ -46,6 +57,14 @@ def read_location_block(text: str) -> Dict[str, Optional[str]]:
         # "ZONA" or "LOTE" can belong to the drawing or to its coordinates table.
         matches = list(pattern.finditer(prose))
         found[key] = matches[-1].group(1).strip(" .") if matches else None
+    if found["zone"] and _LABEL_START.match(found["zone"]):
+        found["zone"] = None
+    if not found["zone"]:
+        heading = list(_ZONE_HEADING.finditer(prose))
+        found["zone"] = heading[-1].group(1).strip(" .") if heading else None
+    # A VIA left blank is followed by the next heading of the sheet, not by a street.
+    if found["street"] and found["street"].startswith(_NOT_A_STREET):
+        found["street"] = None
     return found
 
 

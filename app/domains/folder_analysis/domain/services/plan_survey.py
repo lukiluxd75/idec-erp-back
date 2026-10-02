@@ -136,7 +136,10 @@ def measures(
         return {**empty, "note": note}
 
     if not reading:
-        return refuse("El plano no trae una tabla de coordenadas legible: frente y fondos se cargan a mano.")
+        return refuse(
+            "El plano no trae tabla de coordenadas: las medidas salen de las cotas del dibujo al analizarlo "
+            "y, si no se leyeron ahí, se cargan a mano."
+        )
     sides, vertices = reading["sides"], reading["vertices"]
     if len(sides) != 4:
         return refuse(f"El lote del plano tiene {len(sides)} lados: frente y fondos se cargan a mano.")

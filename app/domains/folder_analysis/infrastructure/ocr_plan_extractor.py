@@ -18,8 +18,10 @@ import logging
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from app.domains.folder_analysis.domain.ports import ServerReadingPort
+from app.domains.folder_analysis.domain.services import plan_survey
 from app.domains.folder_analysis.domain.services.plan_layout import TableRegion, read_page, table_regions
 from app.domains.folder_analysis.infrastructure import opencv_plan_reader
+from app.domains.folder_analysis.infrastructure.drawing_reader import DrawingReader
 from app.domains.folios.contracts import read_page_text
 
 logger = logging.getLogger("uvicorn.error")
@@ -36,6 +38,7 @@ class OcrPlanExtractor(ServerReadingPort):
 
     def __init__(self, read_page: Optional[Callable[..., Any]] = None):
         self._read_page = read_page or read_page_text
+        self._drawing = DrawingReader(self._read_page)
 
     def extract(
         self,
@@ -72,7 +75,26 @@ class OcrPlanExtractor(ServerReadingPort):
 
         sheet = read_page(page.blocks, self._grids(straightened, page))
         sheet["page"] = number
+        self._read_drawing(sheet, straightened, page)
         return sheet
+
+    def _read_drawing(self, sheet: Dict[str, Any], straightened, page) -> None:
+        """The measures written on the drawing, for a sheet whose lot is not given by
+        a table of UTM coordinates. They travel with the page (`dimensions`, `street`)
+        so the sides can be worked out after the reading, once the surface the plano
+        declares is known."""
+        if straightened is None or len(plan_survey.parse_vertices(sheet["full_text"])) >= 3:
+            return
+        try:
+            frame = opencv_plan_reader.fit_to(straightened.frame, page.width, page.height)
+            drawing = self._drawing.read(frame, page.blocks)
+        except Exception:
+            logger.exception("Folder analysis: no se pudo leer el dibujo del plano")
+            return
+        if drawing["dimensions"]:
+            sheet["dimensions"] = drawing["dimensions"]
+        if drawing["street"]:
+            sheet["street"] = drawing["street"]
 
     def _grids(self, straightened, page) -> List[Tuple[TableRegion, List[float]]]:
         """Every cuadro of the sheet with its column lines, in the frame the OCR
