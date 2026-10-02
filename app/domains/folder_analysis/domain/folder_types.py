@@ -337,6 +337,12 @@ class DocumentField:
     # of the sheet: the reading has nothing to search for and its absence is not
     # a missing label.
     from_ide: bool = False
+    # Filled on the review screen but not shown in the block of values: the carpeta
+    # sheet still takes it from here, the plano just has nothing to confirm in it.
+    hidden: bool = False
+    # Every match of every pattern, not just the first: a plano prints the width of
+    # each street it faces.
+    collect_all: bool = False
 
 
 # Lo que se le saca a un acta notarial. No tiene rótulos: el número del notario,
@@ -387,13 +393,36 @@ DOCUMENT_FIELDS: Dict[Tuple[str, str], Tuple[DocumentField, ...]] = {
             ),
         ),
         # What the sheet copies from the IDE: filled from the lookup of the code.
-        DocumentField("street", "Dirección / calle", from_ide=True),
-        DocumentField("boundaries", "Colindancias", from_ide=True),
-        DocumentField("property_number", "Número de predio", from_ide=True),
-        DocumentField("frontage", "Frente", ("FRENTE",)),
-        DocumentField("rear_frontage", "Contra frente", ("CONTRA FRENTE", "CONTRAFRENTE")),
-        DocumentField("depth", "Fondo", ("FONDO",)),
-        DocumentField("depth_2", "Fondo 2", ("FONDO 2", "FONDO II", "SEGUNDO FONDO")),
+        # The address and the colindancias are read under the croquis from the IDE
+        # (PossessorsPlanLookup), not from the sheet: they feed the carpeta but are
+        # not asked here.
+        DocumentField("street", "Dirección / calle", from_ide=True, hidden=True),
+        DocumentField("boundaries", "Colindancias", from_ide=True, hidden=True),
+        # What the sheet says about the streets it faces is their width ("CALLE DE
+        # 12.50 MTS." next to the lote, "Calle de 9.00 mts." in the VIA box).
+        DocumentField(
+            "street_width",
+            "Ancho de calle",
+            patterns=(r"CALLE\s+DE\s+(\d+(?:[.,]\d+)?)\s*(?:MTS?|M)\b",),
+            collect_all=True,
+        ),
+        # Only the predio the plano says it is: whether it is the one of the code is
+        # what the table under the croquis checks against the IDE.
+        DocumentField(
+            "property_number",
+            "Número de predio",
+            ("LOTE", "PREDIO"),
+            # The ubicación box: "MANZANO 432 LOTE 002". "LOTE N: 5" of the drawing
+            # has no digits right after the word and is not it.
+            patterns=(r"MANZAN[AO]\s*\d+\s+LOTE\s*(\d+)", r"\bLOTE\s*(\d+)"),
+            transform="plain_number",
+        ),
+        # Measured from the UTM table by the IDE lookup when the sheet does not
+        # print them: which side is on the street is what the GIS tells.
+        DocumentField("frontage", "Frente", ("FRENTE",), from_ide=True),
+        DocumentField("rear_frontage", "Contra frente", ("CONTRA FRENTE", "CONTRAFRENTE"), from_ide=True),
+        DocumentField("depth", "Fondo", ("FONDO",), from_ide=True),
+        DocumentField("depth_2", "Fondo 2", ("FONDO 2", "FONDO II", "SEGUNDO FONDO"), from_ide=True),
         DocumentField(
             "usable_area",
             "Superficie útil",

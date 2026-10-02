@@ -13,7 +13,7 @@ Pure: it only touches the text it is given (CLAUDE.md §3).
 """
 import math
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 # 00-33-432-012-0-00-000-000 as printed (OCR may swap a dash for a space or dot).
 _CODE_PRINTED = re.compile(
@@ -79,6 +79,104 @@ def survey(vertices: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         )
     twice_area = sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(points, points[1:] + points[:1]))
     return {"vertices": vertices, "sides": sides, "area_m2": round(abs(twice_area) / 2.0, 2)}
+
+
+# The area of the vertices may differ this much from the one the plano prints
+# before the sides are not trusted: a point misread by the OCR moves it by far more.
+AREA_TOLERANCE = 0.02
+AREA_TOLERANCE_MIN_M2 = 1.0
+# The side that faces a street is the one whose middle is closest to its axis; if
+# a second side is nearly as close the lot is on a corner (or between two streets)
+# and which one is the frente is the architect's call, not a guess.
+STREET_MAX_DISTANCE_M = 40.0
+STREET_TIE_M = 1.0
+
+
+def _point_to_segment(p: Tuple[float, float], a: Sequence[float], b: Sequence[float]) -> float:
+    ax, ay, bx, by = a[0], a[1], b[0], b[1]
+    dx, dy = bx - ax, by - ay
+    length2 = dx * dx + dy * dy
+    t = 0.0 if length2 == 0 else max(0.0, min(1.0, ((p[0] - ax) * dx + (p[1] - ay) * dy) / length2))
+    return math.hypot(p[0] - (ax + t * dx), p[1] - (ay + t * dy))
+
+
+def _cross(o, a, b) -> float:
+    return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+
+def _segments_cross(a, b, c, d) -> bool:
+    return _cross(a, b, c) * _cross(a, b, d) < 0 and _cross(c, d, a) * _cross(c, d, b) < 0
+
+
+def _distance_to_streets(point: Tuple[float, float], paths: Sequence[Sequence[Sequence[float]]]) -> Optional[float]:
+    distances = [
+        _point_to_segment(point, a, b) for path in paths for a, b in zip(path, path[1:])
+    ]
+    return min(distances) if distances else None
+
+
+def measures(
+    reading: Optional[Dict[str, Any]],
+    street_paths: Sequence[Sequence[Sequence[float]]],
+    declared_area: Optional[float],
+) -> Dict[str, Any]:
+    """Frente, contra frente and the two fondos of a four-sided plano, computed
+    from its UTM vertices once the GIS says which side faces the street.
+
+    Only answers when the numbers can be trusted: the vertices must draw a lot (no
+    crossing sides), enclose the surface the plano prints, and one side must
+    clearly be the one on the street. Otherwise `values` is empty and `note` says
+    why, so the architect types them instead of finding a wrong figure filled in.
+    Fondo is the side after the frente in the order of the vertices, Fondo 2 the
+    one before it.
+    """
+    empty: Dict[str, Any] = {"values": {}, "note": None, "area_checked": False}
+
+    def refuse(note: str) -> Dict[str, Any]:
+        return {**empty, "note": note}
+
+    if not reading:
+        return refuse("El plano no trae una tabla de coordenadas legible: frente y fondos se cargan a mano.")
+    sides, vertices = reading["sides"], reading["vertices"]
+    if len(sides) != 4:
+        return refuse(f"El lote del plano tiene {len(sides)} lados: frente y fondos se cargan a mano.")
+    points = [(v["east"], v["north"]) for v in vertices]
+    if _segments_cross(points[0], points[1], points[2], points[3]) or _segments_cross(
+        points[1], points[2], points[3], points[0]
+    ):
+        return refuse("Las coordenadas del plano se cruzan: revise que estén bien leídas.")
+    area_checked = declared_area is not None
+    if area_checked and abs(reading["area_m2"] - declared_area) > max(
+        AREA_TOLERANCE_MIN_M2, declared_area * AREA_TOLERANCE
+    ):
+        return refuse(
+            f"Las coordenadas dan {reading['area_m2']} m2 y el plano declara {declared_area} m2: "
+            "no se calculan los lados, revise las coordenadas."
+        )
+    middles = [
+        ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0) for a, b in zip(points, points[1:] + points[:1])
+    ]
+    distances = [_distance_to_streets(m, street_paths) for m in middles]
+    if any(d is None for d in distances) or min(distances) > STREET_MAX_DISTANCE_M:
+        return refuse("El IDE no tiene una calle junto al lote: el frente se carga a mano.")
+    ranked = sorted(range(4), key=lambda i: distances[i])
+    if distances[ranked[1]] - distances[ranked[0]] < STREET_TIE_M:
+        return refuse("El lote da a más de una calle (esquina): el frente se carga a mano.")
+    front = ranked[0]
+
+    def length(index: int) -> str:
+        return f"{sides[index % 4]['length_m']:.2f} m"
+
+    return {
+        "values": {
+            "frontage": length(front),
+            "rear_frontage": length(front + 2),
+            "depth": length(front + 1),
+            "depth_2": length(front + 3),
+        },
+        "note": None,
+        "area_checked": area_checked,
+    }
 
 
 def read_plan(text: str) -> Dict[str, Any]:
