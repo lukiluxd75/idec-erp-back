@@ -14,6 +14,7 @@ from ...application.use_cases.generate_report import generate_report
 from ...domain.entities.report_context import ReportContext
 from ...domain.services.procedure_types import DEFAULT_PROCEDURE_TYPES
 from ...infrastructure.config import settings
+from ...infrastructure.db import report_session
 from ...infrastructure.sql_report_repository import SqlReportRepository
 from ...infrastructure.staff import load_districts, load_procedure_types
 
@@ -53,11 +54,16 @@ def _procedure_types_param(procedure_types: str | None) -> list[int] | None:
 
 def _get_report(start_date: date, end_date: date, district: int | None, procedure_types: str | None, include_details: bool = False) -> dict:
     context = ReportContext(settings.unit_id, settings.unit_name, settings.db_server, settings.db_name)
-    return generate_report(
-        start_date, end_date, _district_param(district),
-        _procedure_types_param(procedure_types), include_details=include_details,
-        repository=SqlReportRepository(), context=context,
-    )
+    with report_session() as conn:
+        return generate_report(
+            start_date,
+            end_date,
+            _district_param(district),
+            _procedure_types_param(procedure_types),
+            include_details=include_details,
+            repository=SqlReportRepository(conn),
+            context=context,
+        )
 
 
 def _get_export_report(start_date: date, end_date: date, district: int | None, procedure_types: str | None) -> dict:
@@ -72,14 +78,15 @@ def _get_export_report(start_date: date, end_date: date, district: int | None, p
 @router.get("/filters")
 def list_filters(_user: UserProfile = Depends(require_permission("procedurereports.view"))):
     try:
-        return {
-            "unitId": settings.unit_id,
-            "unit": settings.unit_name,
-            "centralDistrictId": settings.central_district_id,
-            "defaultProcedureTypes": list(DEFAULT_PROCEDURE_TYPES),
-            "districts": load_districts(),
-            "procedureTypes": load_procedure_types(),
-        }
+        with report_session() as conn:
+            return {
+                "unitId": settings.unit_id,
+                "unit": settings.unit_name,
+                "centralDistrictId": settings.central_district_id,
+                "defaultProcedureTypes": list(DEFAULT_PROCEDURE_TYPES),
+                "districts": load_districts(conn=conn),
+                "procedureTypes": load_procedure_types(),
+            }
     except Exception as exc:
         raise _database_error(exc) from exc
 

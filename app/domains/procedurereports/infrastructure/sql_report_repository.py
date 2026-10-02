@@ -6,8 +6,11 @@ from .staff import load_staff
 
 
 class SqlReportRepository:
+    def __init__(self, conn=None) -> None:
+        self._conn = conn
+
     def load_staff(self, district_id: int | None) -> list[dict]:
-        return load_staff(district_id)
+        return load_staff(district_id, conn=self._conn)
 
     def query(
         self,
@@ -42,4 +45,4 @@ class SqlReportRepository:
             sql, params = undated[kind](unit_id, staff_ids, procedure_type_ids)
         else:
             raise ValueError(f"Unsupported report query: {kind}")
-        return fetchall(sql, params)
+        return fetchall(sql, params, conn=self._conn)
