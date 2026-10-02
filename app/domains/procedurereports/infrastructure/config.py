@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     unit_id: int = Field(102116, validation_alias="UNIDAD_ID")
     unit_name: str = Field("AREA TECNICA CARTOGRAFIA", validation_alias="UNIDAD_NOMBRE")
     central_district_id: int = Field(7, validation_alias="COMUNA_CENTRAL_ID")
+    # Unidad de recepción / despacho masivo (detección de derivaciones muy rápidas).
+    reception_unit_id: int = Field(111147, validation_alias="REPORTS_RECEPTION_UNIT_ID")
+    reception_unit_name: str = Field(
+        "RECEPCION / EMISION / DESPACHO DE TRAMITES",
+        validation_alias="REPORTS_RECEPTION_UNIT_NAME",
+    )
     cors_origins: str = "*"
     cors_origin_regex: str = r"https?://([a-zA-Z0-9-]+\.)*catastrocbba\.com(:\d+)?"
 

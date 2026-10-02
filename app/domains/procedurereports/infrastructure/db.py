@@ -18,6 +18,9 @@ SQL_COLUMN_NAMES = {
     "tipo": "type", "estado": "status",
     "avgDays": "avgDays", "minDays": "minDays", "maxDays": "maxDays",
     "ageDays": "ageDays", "bucket": "bucket",
+    "unidad": "unitName", "motivo": "reason", "avgMin": "avgMinutes",
+    "rapidos": "rapidDispatches", "minutos": "minutes",
+    "idSecuencia": "sequenceId", "nroTramo": "legNumber",
 }
 
 

@@ -8,6 +8,9 @@ from fastapi.responses import Response
 
 from app.domains.security.contracts import UserProfile, require_permission
 
+from ...application.mass_forwarding import build_mass_forwarding_report
+from ...application.panel_summary import build_panel_summary
+from ...application.procedure_trace import build_procedure_trace
 from ...application.use_cases.export_excel import build_excel
 from ...application.use_cases.export_pdf import build_pdf
 from ...application.use_cases.generate_report import generate_report
@@ -71,6 +74,77 @@ def _get_export_report(start_date: date, end_date: date, district: int | None, p
         return _get_report(start_date, end_date, district, procedure_types, include_details=True)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise _database_error(exc) from exc
+
+
+@router.get("/panel")
+def get_panel(
+    start_date: date = Query(..., description="Inicio del período"),
+    end_date: date = Query(..., description="Fin del período"),
+    district: int | None = Query(7),
+    procedure_types: str | None = Query(None),
+    _user: UserProfile = Depends(require_permission("procedurereports.view")),
+):
+    try:
+        context = ReportContext(settings.unit_id, settings.unit_name, settings.db_server, settings.db_name)
+        with report_session() as conn:
+            return build_panel_summary(
+                start_date,
+                end_date,
+                _district_param(district),
+                _procedure_types_param(procedure_types),
+                SqlReportRepository(conn),
+                context,
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise _database_error(exc) from exc
+
+
+@router.get("/mass-forwarding")
+def get_mass_forwarding(
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    max_minutes: int = Query(3, ge=1, le=120),
+    min_dispatches: int = Query(50, ge=1, le=5000),
+    staff_name: str | None = Query(None, description="Filtrar por nombre completo del funcionario"),
+    staff_name_exact: bool = Query(False, description="Coincidencia exacta de nombre"),
+    _user: UserProfile = Depends(require_permission("procedurereports.view")),
+):
+    try:
+        with report_session() as conn:
+            return build_mass_forwarding_report(
+                conn=conn,
+                start_date=start_date,
+                end_date=end_date,
+                max_minutes=max_minutes,
+                min_dispatches=min_dispatches,
+                staff_name=staff_name,
+                staff_name_exact=staff_name_exact,
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise _database_error(exc) from exc
+
+
+@router.get("/trace")
+def get_procedure_trace(
+    procedure_number: int = Query(..., description="Número de trámite (nroTramite en SISCAT)"),
+    stall_threshold_days: int = Query(5, ge=1, le=90),
+    _user: UserProfile = Depends(require_permission("procedurereports.view")),
+):
+    try:
+        with report_session() as conn:
+            return build_procedure_trace(
+                conn=conn,
+                procedure_number=procedure_number,
+                stall_threshold_days=stall_threshold_days,
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         raise _database_error(exc) from exc
 
