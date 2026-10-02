@@ -199,8 +199,14 @@ class ConsolidateDocumentsUseCase:
         # El más viejo manda: es el que ya estaba en la carpeta, así que conserva
         # su número y las demás se le suman detrás, en el orden en que entraron.
         # Se ordena acá por fecha en vez de confiar en el orden en que vengan.
+        # On the loose board only the documents not filed yet count: the ones
+        # already saved into a carpeta belong to that carpeta, not to this board.
         existing = sorted(
-            self._documents.list(user_sub, doc_type=doc_type, folder_id=folder_id),
+            (
+                document
+                for document in self._documents.list(user_sub, doc_type=doc_type, folder_id=folder_id)
+                if folder is not None or document.folder_id is None
+            ),
             key=lambda document: document.created_at,
         )
         loose = [c.id for c in self._captures.list_by_status(user_sub, CaptureStatus.INBOX)]

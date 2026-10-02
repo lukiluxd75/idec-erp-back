@@ -9,6 +9,7 @@ from app.domains.folder_analysis.application.use_cases import (
     GetRegisteredFolderUseCase,
     ListRegisteredFoldersUseCase,
     RemoveDocumentFromRegisteredFolderUseCase,
+    SaveBoardToFolderUseCase,
     UpdateRegisteredFolderUseCase,
 )
 from app.domains.folder_analysis.presentation.deps import (
@@ -18,12 +19,14 @@ from app.domains.folder_analysis.presentation.deps import (
     get_get_registered_folder_use_case,
     get_list_registered_folders_use_case,
     get_remove_folder_document_use_case,
+    get_save_board_to_folder_use_case,
     get_update_registered_folder_use_case,
 )
 from app.domains.folder_analysis.presentation.schemas.folder_analysis_schema import (
     AddRegisteredFolderDocumentsRequest,
     CreateRegisteredFolderRequest,
     RegisteredFolderOut,
+    SaveBoardToFolderRequest,
     UpdateRegisteredFolderRequest,
 )
 from app.domains.security.contracts import UserProfile, require_permission
@@ -51,6 +54,18 @@ def create_folder(
     folder = use_case.execute(
         user.sub, body.name, body.notes, body.folder_type, body.data, body.document_ids
     )
+    return RegisteredFolderOut.from_entity(folder)
+
+
+@router.post("/from-board", response_model=RegisteredFolderOut, status_code=status.HTTP_201_CREATED)
+def save_board_to_folder(
+    body: SaveBoardToFolderRequest,
+    use_case: SaveBoardToFolderUseCase = Depends(get_save_board_to_folder_use_case),
+    user: UserProfile = Depends(require_permission("folder-analysis.edit")),
+):
+    """Saves what was scanned on the loose board into a new carpeta named after
+    the physical folder's number."""
+    folder = use_case.execute(user.sub, body.folder_number, body.folder_type, body.document_ids)
     return RegisteredFolderOut.from_entity(folder)
 
 
@@ -84,7 +99,7 @@ def delete_folder(
     use_case: DeleteRegisteredFolderUseCase = Depends(get_delete_registered_folder_use_case),
     user: UserProfile = Depends(require_permission("folder-analysis.edit")),
 ):
-    """Deletes the carpeta only; its documents stay in "Datos guardados"."""
+    """Deletes the carpeta with its documents and their photos."""
     use_case.execute(folder_id, user.sub)
 
 
@@ -108,5 +123,5 @@ def remove_document(
     ),
     user: UserProfile = Depends(require_permission("folder-analysis.edit")),
 ):
-    """Takes the document out of the carpeta without deleting the document."""
+    """Takes the document out of the carpeta by deleting it with its photos."""
     return RegisteredFolderOut.from_entity(use_case.execute(folder_id, user.sub, document_id))

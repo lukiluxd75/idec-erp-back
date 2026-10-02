@@ -215,6 +215,15 @@ class CreateRegisteredFolderRequest(BaseModel):
     document_ids: List[str] = Field(default_factory=list)
 
 
+class SaveBoardToFolderRequest(BaseModel):
+    """"Guardar en carpeta": the number written on the physical folder becomes
+    the carpeta's name; `folder_type` is the kind the board was showing."""
+
+    folder_number: str = Field(min_length=1, max_length=MAX_NAME_LENGTH)
+    folder_type: Optional[str] = None
+    document_ids: List[str] = Field(min_length=1)
+
+
 class UpdateRegisteredFolderRequest(BaseModel):
     """`document_ids` left out keeps the carpeta's contents as they are; sent, it
     replaces the reviewed documents it holds (an empty list takes all of those

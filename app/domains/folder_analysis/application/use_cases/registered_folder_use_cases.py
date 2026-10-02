@@ -6,6 +6,8 @@ not change afterwards: the documents already in it were classified under its
 lanes, and its sheet was filled with its fields. The sheet itself is kept to what
 the kind declares (clean_folder_data).
 
+Deleting a carpeta deletes what was scanned into it as well.
+
 A document opened inside a carpeta is in it from that moment, draft and all. One
 already reviewed on the loose board can be filed afterwards from "Datos
 guardados" -- that is the only case where being reviewed is required, because
@@ -35,7 +37,9 @@ from app.domains.folder_analysis.domain.folder_types import (
     clean_folder_data,
     folder_type,
 )
+from app.domains.folder_analysis.application.use_cases.capture_use_cases import forget_previews
 from app.domains.folder_analysis.domain.ports import (
+    CaptureRepositoryPort,
     DocumentRepositoryPort,
     RegisteredFolderRepositoryPort,
 )
@@ -99,16 +103,27 @@ class RegisteredFolderService:
         return folder
 
     def require_free_name(
-        self, user_sub: str, name: str, exclude_folder_id: Optional[str] = None
+        self,
+        user_sub: str,
+        name: str,
+        exclude_folder_id: Optional[str] = None,
+        taken_message: Optional[str] = None,
     ) -> None:
         if self._folders.name_taken(user_sub, name, exclude_folder_id):
             raise RegisteredFolderNameTakenException(
-                f'Ya tiene una carpeta llamada "{name}". Use otro nombre.'
+                taken_message or f'Ya tiene una carpeta llamada "{name}". Use otro nombre.'
             )
 
     def require_filable(
-        self, user_sub: str, document_ids: List[str], exclude_folder_id: Optional[str] = None
+        self,
+        user_sub: str,
+        document_ids: List[str],
+        exclude_folder_id: Optional[str] = None,
+        reviewed_only: bool = True,
     ) -> None:
+        """`reviewed_only` is off only when the loose board is saved whole into a
+        new carpeta: what goes in then is the work in progress of one physical
+        folder, not a finished document filed on its own."""
         if not document_ids:
             return
         # One listing instead of a query per document: this is the summary list,
@@ -120,7 +135,9 @@ class RegisteredFolderService:
             raise DocumentNotFoundException(
                 "Uno de los documentos seleccionados no existe o no le pertenece."
             )
-        if any(status_by_id[document_id] != DocumentStatus.REVIEWED for document_id in document_ids):
+        if reviewed_only and any(
+            status_by_id[document_id] != DocumentStatus.REVIEWED for document_id in document_ids
+        ):
             raise InvalidRegisteredFolderException(
                 "Solo puede guardar en una carpeta los documentos cuya revisión ya fue guardada."
             )
@@ -179,6 +196,56 @@ class CreateRegisteredFolderUseCase:
         return self._folders.create(
             user_sub, clean_name, clean_notes, kind, clean_folder_data(kind, data), ids
         )
+
+
+class SaveBoardToFolderUseCase:
+    """"Guardar en carpeta" from the loose board.
+
+    A whole physical folder is scanned on the loose board; when it is done, the
+    architect types the folder's number and everything on the board goes into a
+    new carpeta named after that number, whatever state each document is in
+    (still being read, read, or reviewed). The carpeta takes the kind the board
+    was showing, and the documents must be of that kind's lanes and not filed
+    anywhere else yet.
+    """
+
+    def __init__(
+        self,
+        folders: RegisteredFolderRepositoryPort,
+        documents: DocumentRepositoryPort,
+        service: RegisteredFolderService,
+    ):
+        self._folders = folders
+        self._documents = documents
+        self._service = service
+
+    def execute(
+        self,
+        user_sub: str,
+        folder_number: str,
+        folder_type_key: Optional[str],
+        document_ids: Sequence[str],
+    ) -> RegisteredFolder:
+        number = _clean_name(folder_number)
+        kind = _clean_folder_type(folder_type_key)
+        ids = _unique_ids(document_ids)
+        if not ids:
+            raise InvalidRegisteredFolderException(
+                "No hay documentos en el tablero para guardar en la carpeta."
+            )
+        self._service.require_free_name(
+            user_sub,
+            number,
+            taken_message=f'Ya existe una carpeta registrada con el número "{number}". Verifique el número.',
+        )
+        self._service.require_filable(user_sub, ids, reviewed_only=False)
+        lanes = folder_type(kind).document_types
+        doc_type_by_id = {document.id: document.doc_type for document in self._documents.list(user_sub)}
+        if any(doc_type_by_id.get(document_id) not in lanes for document_id in ids):
+            raise InvalidRegisteredFolderException(
+                "Hay documentos que no corresponden a este tipo de carpeta."
+            )
+        return self._folders.create(user_sub, number, None, kind, clean_folder_data(kind, None), ids)
 
 
 class UpdateRegisteredFolderUseCase:
@@ -250,30 +317,61 @@ class AddDocumentsToRegisteredFolderUseCase:
 
 
 class RemoveDocumentFromRegisteredFolderUseCase:
-    """Takes one document out of the carpeta. The document itself is untouched:
-    it stays in "Datos guardados", free to file in another carpeta."""
+    """Takes one document out of the carpeta by deleting it with its photos.
+    Sending it back to the loose board would mix it with the next physical
+    folder being scanned there."""
 
-    def __init__(self, folders: RegisteredFolderRepositoryPort, service: RegisteredFolderService):
+    def __init__(
+        self,
+        folders: RegisteredFolderRepositoryPort,
+        service: RegisteredFolderService,
+        documents: DocumentRepositoryPort,
+        captures: CaptureRepositoryPort,
+    ):
         self._folders = folders
         self._service = service
+        self._documents = documents
+        self._captures = captures
 
     def execute(self, folder_id: str, user_sub: str, document_id: str) -> RegisteredFolder:
         folder = self._service.require_folder(folder_id, user_sub)
-        if document_id not in folder.document_ids:
+        document = next((d for d in folder.documents if d.id == document_id), None)
+        if document is None:
             raise DocumentNotFoundException("Ese documento no está en esta carpeta.")
+        capture_ids = [page.capture_id for page in document.pages]
         self._folders.set_documents(
             folder_id, [i for i in folder.document_ids if i != document_id]
         )
+        # Document before photos: its pages hold the photos' ids.
+        self._documents.delete(document_id)
+        self._captures.delete_many(capture_ids, user_sub)
+        forget_previews(capture_ids)
         return self._service.require_folder(folder_id, user_sub)
 
 
 class DeleteRegisteredFolderUseCase:
-    """Removes the carpeta only. Its documents go back to being unfiled."""
+    """Removes the carpeta together with everything scanned into it: its
+    documents and their photos. Putting them back on the loose board would mix
+    them with the next physical folder being scanned there."""
 
-    def __init__(self, folders: RegisteredFolderRepositoryPort, service: RegisteredFolderService):
+    def __init__(
+        self,
+        folders: RegisteredFolderRepositoryPort,
+        service: RegisteredFolderService,
+        documents: DocumentRepositoryPort,
+        captures: CaptureRepositoryPort,
+    ):
         self._folders = folders
         self._service = service
+        self._documents = documents
+        self._captures = captures
 
     def execute(self, folder_id: str, user_sub: str) -> None:
-        self._service.require_folder(folder_id, user_sub)
+        folder = self._service.require_folder(folder_id, user_sub)
+        capture_ids = [page.capture_id for document in folder.documents for page in document.pages]
         self._folders.delete(folder_id)
+        # Documents before photos: their pages hold the photos' ids.
+        for document in folder.documents:
+            self._documents.delete(document.id)
+        self._captures.delete_many(capture_ids, user_sub)
+        forget_previews(capture_ids)
