@@ -1,6 +1,14 @@
 from datetime import date, datetime, timedelta
 
 from ..analysis import build_analysis
+from ..executive_metrics import (
+    aggregate_district_comparison,
+    aggregate_procedure_groups,
+    build_period_comparison,
+    build_sla_summary_row,
+    normalize_backlog_aging,
+    previous_period,
+)
 from ...domain.services.procedure_types import PALETTE, color_at, procedure_type_color, procedure_type_label, procedure_type_group
 from ...domain.entities.report_context import ReportContext
 from ...domain.ports.report_repository import ReportRepository
@@ -74,7 +82,18 @@ def _empty_report(start_date: date, end_date: date, district_id: int | None, dis
         "typeStaffMatrix": {"columns": [], "rows": []},
         "procedures": [],
         "colors": {},
-        "analysis": {"backlog": "No hay funcionarios activos en el filtro.", "outliers": []},
+        "sla": {"summary": build_sla_summary_row(None), "byType": [], "byStaff": []},
+        "backlogAging": [],
+        "criticalPending": [],
+        "procedureGroups": [],
+        "districtComparison": [],
+        "periodComparison": None,
+        "analysis": {
+            "backlog": "No hay funcionarios activos en el filtro.",
+            "outliers": [],
+            "executiveHeadline": "Sin datos para el filtro seleccionado.",
+            "executiveBullets": [],
+        },
     }
 
 
@@ -293,14 +312,89 @@ def generate_report(
                 item["color"] = colors_by_staff.get(item["name"], PALETTE[0])
                 procedures.append(item)
 
+    dispatches_total = _as_int(totals["dispatches"])
+    procedures_total = _as_int(totals["procedures"])
     kpis = _build_metrics(
         ranking,
         team_daily,
         start_date,
         end_date,
-        dispatches=_as_int(totals["dispatches"]),
-        procedures=_as_int(totals["procedures"]),
+        dispatches=dispatches_total,
+        procedures=procedures_total,
     )
+
+    sla_rows = repository.query("sla_summary", start_date, end_date, context.unit_id, staff_ids, procedure_types or None)
+    sla_summary = build_sla_summary_row(sla_rows[0] if sla_rows else None)
+    sla_by_type = []
+    for row in repository.query("sla_by_type", start_date, end_date, context.unit_id, staff_ids, procedure_types or None):
+        procedure_type_id = _as_int(row["procedureTypeId"])
+        avg_days = row.get("avgDays")
+        sla_by_type.append(
+            {
+                "procedureTypeId": procedure_type_id,
+                "description": procedure_type_label(procedure_type_id, row.get("description") or ""),
+                "group": procedure_type_group(procedure_type_id),
+                "avgDays": round(float(avg_days), 1) if avg_days is not None else None,
+                "dispatches": _as_int(row.get("dispatches")),
+                "color": procedure_type_color(procedure_type_id),
+            }
+        )
+    sla_by_staff = []
+    for row in repository.query("sla_by_staff", start_date, end_date, context.unit_id, staff_ids, procedure_types or None):
+        s = staff_by_id.get(_as_int(row["staffId"]))
+        if not s:
+            continue
+        avg_days = row.get("avgDays")
+        sla_by_staff.append(
+            {
+                "name": s["name"],
+                "district": s["district"],
+                "color": colors_by_staff.get(s["name"], PALETTE[0]),
+                "avgDays": round(float(avg_days), 1) if avg_days is not None else None,
+                "dispatches": _as_int(row.get("dispatches")),
+            }
+        )
+
+    aging_raw = repository.query("backlog_aging", start_date, end_date, context.unit_id, staff_ids, procedure_types or None)
+    backlog_aging = normalize_backlog_aging(aging_raw, kpis["pendingCount"])
+
+    critical_pending = []
+    for row in repository.query("critical_pending", start_date, end_date, context.unit_id, staff_ids, procedure_types or None):
+        s = staff_by_id.get(_as_int(row["staffId"]))
+        if not s:
+            continue
+        procedure_type_id = _as_int(row["procedureTypeId"]) if row.get("procedureTypeId") is not None else None
+        critical_pending.append(
+            {
+                "procedureId": _as_int(row["procedureId"]),
+                "procedureNumber": _as_int(row["procedureNumber"]) if row.get("procedureNumber") is not None else None,
+                "year": _as_int(row["procedureYear"]) if row.get("procedureYear") is not None else None,
+                "procedureTypeId": procedure_type_id,
+                "type": procedure_type_label(procedure_type_id or 0, row.get("type") or ""),
+                "cadastralCode": (row.get("cadastralCode") or "").strip(),
+                "name": s["name"],
+                "district": s["district"],
+                "receivedAt": _fmt_dt(row.get("receivedAt")),
+                "ageDays": _as_int(row.get("ageDays")),
+            }
+        )
+
+    procedure_groups = aggregate_procedure_groups(by_type)
+    district_comparison = aggregate_district_comparison(ranking)
+    prev_start, prev_end = previous_period(start_date, end_date)
+    prev_totals = repository.query("totals", prev_start, prev_end, context.unit_id, staff_ids, procedure_types or None)
+    prev_row = prev_totals[0] if prev_totals else {"dispatches": 0, "procedures": 0}
+    period_comparison = build_period_comparison(
+        start_date,
+        end_date,
+        dispatches_total,
+        procedures_total,
+        _as_int(prev_row.get("dispatches")),
+        _as_int(prev_row.get("procedures")),
+    )
+
+    sla = {"summary": sla_summary, "byType": sla_by_type, "byStaff": sla_by_staff}
+
     return {
         "meta": {
             "startDate": start_date.isoformat(),
@@ -324,5 +418,19 @@ def generate_report(
         "typeStaffMatrix": _type_staff_matrix(ranking, by_type, by_type_and_staff),
         "procedures": procedures,
         "colors": colors_by_staff,
-        "analysis": build_analysis(ranking, kpis, district_label),
+        "sla": sla,
+        "backlogAging": backlog_aging,
+        "criticalPending": critical_pending,
+        "procedureGroups": procedure_groups,
+        "districtComparison": district_comparison,
+        "periodComparison": period_comparison,
+        "analysis": build_analysis(
+            ranking,
+            kpis,
+            district_label,
+            sla=sla,
+            backlog_aging=backlog_aging,
+            period_comparison=period_comparison,
+            procedure_groups=procedure_groups,
+        ),
     }

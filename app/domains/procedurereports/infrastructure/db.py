@@ -15,6 +15,8 @@ SQL_COLUMN_NAMES = {
     "descripcion": "description", "n": "count", "despachos": "dispatches",
     "tramites": "procedures", "pend": "pending", "dia": "date",
     "tipo": "type", "estado": "status",
+    "avgDays": "avgDays", "minDays": "minDays", "maxDays": "maxDays",
+    "ageDays": "ageDays", "bucket": "bucket",
 }
 
 
