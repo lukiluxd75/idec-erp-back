@@ -16,18 +16,28 @@ from typing import Optional
 
 from app.domains.folder_analysis.domain.exceptions import InvalidDocumentRequestException
 
+# What the OCR reads as a letter where the code has a digit.
+_LOOKALIKE = str.maketrans({"O": "0", "I": "1", "L": "1", "S": "5", "Z": "2", "B": "8"})
+
 GIS_CODE_LENGTH = 17
 PRINTED_CODE_LENGTH = 19
 
 
 def to_gis_code(raw: Optional[str]) -> str:
     """The key the GIS knows the predio by, from the code as typed or printed."""
-    digits = re.sub(r"\D", "", raw or "")
-    if len(digits) == PRINTED_CODE_LENGTH:
-        digits = digits[2:]
-    if len(digits) != GIS_CODE_LENGTH:
+    chars = re.sub(r"[^0-9A-Z]", "", (raw or "").upper())
+    if len(chars) == PRINTED_CODE_LENGTH:
+        chars = chars[2:]
+    if len(chars) != GIS_CODE_LENGTH:
         raise InvalidDocumentRequestException(
             "El código catastral debe tener 19 dígitos (como figura en el plano) o 17 (como lo guarda el GIS)."
+        )
+    # Only the manzana (3 characters after the subdistrito) can carry a letter
+    # ("B37"); anywhere else a letter is the OCR confusing a digit.
+    digits = chars[:2] + chars[2:5] + chars[5:].translate(_LOOKALIKE)
+    if not re.fullmatch(r"\d{2}[0-9A-Z]{3}\d{12}", digits):
+        raise InvalidDocumentRequestException(
+            "El código catastral solo puede llevar letras en la manzana (por ejemplo B37)."
         )
     # Unit digit in the first position after the predio: it is a piso/local of the
     # lot, and the lot is what the map has.

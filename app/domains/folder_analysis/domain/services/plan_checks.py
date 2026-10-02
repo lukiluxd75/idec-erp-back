@@ -25,16 +25,28 @@ MISSING = "missing"
 # ("KHARA KHARAARRUMANI"). So the separator is optional, the numbers must follow
 # the label directly (which keeps "LOTE N: 5" of the drawing out of it) and a
 # value ends where the next label starts.
-_NEXT = r"(?=\s+(?:SUB\s*-?\s*DISTRITO|DISTRITO|MANZAN[AO]|LOTE|VIA|ZONA)\b|\s+PROCESAMIENTO|\s*$)"
-_SEP = r"\s*[:;.]?\s*"
+_NEXT = r"(?=\s+(?:SUB\s*-?\s*DISTRITO|DISTRITO|MANZAN[AO]|LOTE|VIA|ZONA|ARQUITECTO|SELLO)\b|\s+PROCESAMIENTO|\s*$)"
+_SEP = r"[\s:;.]*"
 _FIELDS = {
     "zone": re.compile(r"\bZONA" + _SEP + r"(.+?)" + _NEXT),
     "subdistrict": re.compile(r"\bSUB\s*-?\s*DISTRITO" + _SEP + r"(\d+)"),
     "district": re.compile(r"(?<!SUB )(?<!SUB)(?<!SUB-)\bDISTRITO" + _SEP + r"(\d+)"),
-    "block": re.compile(r"\bMANZAN[AO]" + _SEP + r"(\d+)"),
-    "lot": re.compile(r"\bLOTE" + _SEP + r"(\d+)"),
+    "block": re.compile(r"\bMANZAN[AO]" + _SEP + r"([A-Z]?\d{1,4})"),
+    # Three digits, as the box pads them ("002"): a smudged "0." is not a lote.
+    "lot": re.compile(r"\bLOTE" + _SEP + r"(\d{3})(?!\d)"),
     "street": re.compile(r"\bVIA" + _SEP + r"(.+?)" + _NEXT),
 }
+
+
+# The second format of the plano heads the box with the zone ("DATOS DE UBICACION :
+# PUKARA GRANDE NORTE") and then lists ZONA, DISTRITO... with the values in other
+# blocks, so the zone is not after its own label. A zone "found" after ZONA that is
+# really the next label (MANZANA : 494...) is not a zone.
+_ZONE_HEADING = re.compile(r"\bDATOS\s*DE\s*UBICACION\s*[:;.]\s*(.+?)" + _NEXT)
+_LABEL_START = re.compile(r"^(?:SUB\s*-?\s*DISTRITO|DISTRITO|MANZAN[AO]|LOTE|VIA)\b")
+
+
+_NOT_A_STREET = ("ARQUITECTO", "PROCESAMIENTO", "FIRMA", "SELLO", "REGISTRO", "ESCALA")
 
 
 def read_location_block(text: str) -> Dict[str, Optional[str]]:
@@ -46,6 +58,14 @@ def read_location_block(text: str) -> Dict[str, Optional[str]]:
         # "ZONA" or "LOTE" can belong to the drawing or to its coordinates table.
         matches = list(pattern.finditer(prose))
         found[key] = matches[-1].group(1).strip(" .") if matches else None
+    if found["zone"] and _LABEL_START.match(found["zone"]):
+        found["zone"] = None
+    if not found["zone"]:
+        heading = list(_ZONE_HEADING.finditer(prose))
+        found["zone"] = heading[-1].group(1).strip(" .") if heading else None
+    # A VIA left blank is followed by the next heading of the sheet, not by a street.
+    if found["street"] and found["street"].startswith(_NOT_A_STREET):
+        found["street"] = None
     return found
 
 
@@ -56,6 +76,12 @@ def _number(value: Any) -> Optional[int]:
 
 def _same_number(plan: Any, gis: Any) -> bool:
     return _number(plan) is not None and _number(plan) == _number(gis)
+
+
+def _same_code(plan: Any, gis: Any) -> bool:
+    """A manzana is a code ("432", "B37"): equal as written, letter included."""
+    a, b = _letters(plan), _letters(gis)
+    return bool(a) and a == b
 
 
 def _letters(value: Any) -> str:
@@ -74,7 +100,7 @@ def cross_check(location: Dict[str, Optional[str]], gis: Dict[str, Any]) -> List
         ("zone", "Zona", _same_words),
         ("district", "Distrito", _same_number),
         ("subdistrict", "Sub distrito", _same_number),
-        ("block", "Manzana", _same_number),
+        ("block", "Manzana", _same_code),
         ("lot", "Lote", _same_number),
     ]
     checks: List[Dict[str, Any]] = []

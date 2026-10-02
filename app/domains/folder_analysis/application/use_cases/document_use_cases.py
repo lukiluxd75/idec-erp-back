@@ -1,4 +1,5 @@
 import logging
+import re
 from dataclasses import replace
 from typing import Any, Callable, Dict, List, Mapping, Optional, Set
 
@@ -27,6 +28,7 @@ from app.domains.folder_analysis.domain.folder_types import (
     document_fields,
     folder_type,
 )
+from app.domains.folder_analysis.domain.services import drawing_sides, plan_survey
 from app.domains.folder_analysis.domain.services.field_harvest import harvest, observation
 from app.domains.folder_analysis.domain.ports import (
     CaptureRepositoryPort,
@@ -294,13 +296,44 @@ class RunServerReadingUseCase:
         if not specs or not isinstance(data, dict):
             return data
         values, missing = harvest(data, specs)
-        note = observation(missing)
-        if note:
+        notes = [observation(missing), self._complete_plan_values(data, values)]
+        reading = data.get("reading")
+        for note in filter(None, notes):
             observations.append(note)
-            reading = data.get("reading")
             if isinstance(reading, dict):
                 reading.setdefault("observations", []).append(note)
         return {**data, "values": values}
+
+    @staticmethod
+    def _complete_plan_values(data: Dict[str, Any], values: Dict[str, Optional[str]]) -> Optional[str]:
+        """What the label search could not give a plano, from the rest of the sheet.
+
+        The useful surface, when the label was not followed by a figure that ends in
+        m2 (the OCR splits the label from its number): the figure the sheet repeats.
+        And frente, contra frente and fondos from the measures written on the drawing,
+        for a plano that has no UTM table (domain/services/drawing_sides.py). They only
+        fill what the sheet itself did not give, and only when the figures add up to the
+        surface the plano declares."""
+        if "usable_area" in values and not re.fullmatch(
+            r"\s*\d+(?:[.,]\d+)?\s*M[2\u00b2]\s*", values.get("usable_area") or "", re.IGNORECASE
+        ):
+            surface = plan_survey.declared_surface(data.get("full_text") or "")
+            values["usable_area"] = f"{surface:.2f}M2" if surface is not None else None
+        pages = data.get("pages") or []
+        dimensions = [d for page in pages for d in (page.get("dimensions") or [])]
+        street = next((page["street"] for page in pages if page.get("street")), None)
+        # The whole-page reading sometimes misses the street label that the pass over
+        # the drawing does read: its width fills "Ancho de calle" when the text did not.
+        if street and not values.get("street_width") and street.get("width_m"):
+            values["street_width"] = f"{float(street['width_m']):.2f} m"
+        if not dimensions:
+            return None
+        area = re.search(r"\d+(?:[.,]\d+)?", values.get("usable_area") or "")
+        result = drawing_sides.assign(dimensions, street, float(area.group(0).replace(",", ".")) if area else None)
+        for key, value in result["values"].items():
+            if not values.get(key):
+                values[key] = value
+        return result["note"]
 
     def _feed_folder_sheet(
         self, document: FolderDocument, user_sub: str, data: Dict[str, Any]
