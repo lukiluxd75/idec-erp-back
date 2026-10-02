@@ -16,9 +16,17 @@ class Settings(BaseSettings):
     # REPORTS_DB_* -- prefixed like AVALUOS_DB_* (see core/config/settings.py) so
     # this never silently binds to the main app's own DB_USER/DB_PASSWORD/DB_NAME
     # (this is a second, unrelated SQL Server connection, read from the same .env).
-    db_server: str = Field("172.16.67.100,1433", validation_alias="REPORTS_DB_SERVER")
+    #
+    # Los defaults quedan vacíos a propósito: antes traían el servidor y el
+    # usuario reales de producción escritos en el código, lo que publicaba esa
+    # infraestructura en el repositorio y contradecía la regla de
+    # core/config/settings.py ("never hardcode secrets here"). No se pierde nada:
+    # connection_string() (ver db.py) ya exige los cuatro valores y falla con un
+    # mensaje claro si falta alguno, así que estos defaults nunca fueron usables
+    # por sí solos. Los valores van en el .env del backend.
+    db_server: str = Field("", validation_alias="REPORTS_DB_SERVER")
     db_name: str = Field("catastro", validation_alias="REPORTS_DB_NAME")
-    db_user: str = Field("jPoloA", validation_alias="REPORTS_DB_USER")
+    db_user: str = Field("", validation_alias="REPORTS_DB_USER")
     db_password: str = Field("", validation_alias="REPORTS_DB_PASSWORD")
     # Empty = auto-detect (FreeTDS on Linux, ODBC 17/18 on Windows when installed).
     db_driver: str = Field("", validation_alias="REPORTS_DB_DRIVER")

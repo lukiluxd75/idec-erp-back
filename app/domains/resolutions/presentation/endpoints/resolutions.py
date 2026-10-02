@@ -17,7 +17,12 @@ from fastapi import (
 )
 from fastapi.concurrency import run_in_threadpool
 
+from sqlalchemy.orm import Session
+
+from app.core.database.connection import get_db
 from app.core.errors.exceptions import DomainException
+from app.core.presence import CHANNEL_RESOLUTIONS, SqlPresenceStore
+from app.core.presence.socket import SocketPresence
 from app.core.utils.user_agent import is_mobile_user_agent
 from app.domains.resolutions.application.use_cases import (
     AddPlanPagesUseCase,
@@ -131,20 +136,27 @@ async def create_resolution(
 
 @router.get("/presence")
 def get_presence(
-    manager: ResolutionsConnectionManager = Depends(get_connection_manager),
+    db: Session = Depends(get_db),
     user: UserProfile = Depends(get_current_user),
 ):
     """Polled every few seconds by useResolutionsUpdates.js to keep
-    PhoneConnectedBadge accurate without touching the long-lived WS: the push
-    on /ws only reaches sockets already registered on the SAME worker, so a
-    REST call (naturally load-balanced across workers per request) is the
-    reliable way to catch up when the phone's socket landed elsewhere.
+    PhoneConnectedBadge accurate.
+
+    Se enciende tanto si la app movil tiene sesion abierta (CHANNEL_SESSION,
+    que dura toda la sesion) como si hay un socket vivo de este modulo -- ver
+    SqlPresenceStore.is_phone_connected.
+
+    Answered from the shared presence store (app/core/presence), not from this
+    worker's socket registry. That was the bug: the phone's socket lives on ONE
+    of the four workers while this endpoint is load-balanced per request, so
+    three polls out of four used to answer "not connected" and the badge
+    alternated every 3 seconds forever.
 
     Declared before GET /{resolution_id} on purpose: routes are matched in
     registration order, so "presence" would otherwise be swallowed as a
     resolution_id by that path-param route instead of reaching this one.
     """
-    return {"mobile_connected": manager.is_mobile_connected(user.sub)}
+    return {"mobile_connected": SqlPresenceStore(db).is_phone_connected(user.sub, CHANNEL_RESOLUTIONS)}
 
 
 @router.get("/{resolution_id}", response_model=ResolutionDetail)
@@ -336,6 +348,13 @@ async def resolutions_ws(
         return
 
     is_mobile = is_mobile_user_agent(websocket.headers.get("user-agent", ""))
+
+    # Dos registros distintos: el manager en memoria de este proceso para el
+    # broadcast de `update`, y la presencia en Postgres, que si tiene que ser
+    # igual en los cuatro workers (ver core/presence). start() va antes de
+    # connect() porque connect() ya emite el push de presencia leyendo el store.
+    presence = SocketPresence(user.sub, CHANNEL_RESOLUTIONS, is_mobile)
+    await presence.start()
     await manager.connect(websocket, user.sub, is_mobile)
     try:
         while True:
@@ -344,4 +363,9 @@ async def resolutions_ws(
             # (WebSocketDisconnect) without busy-waiting.
             await websocket.receive_text()
     except WebSocketDisconnect:
+        pass
+    finally:
+        # finally y no solo WebSocketDisconnect: una caida sucia tambien tiene
+        # que liberar la fila, o el indicador queda encendido hasta que expire.
+        await presence.stop()
         await manager.disconnect(websocket)

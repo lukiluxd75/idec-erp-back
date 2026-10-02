@@ -87,6 +87,50 @@ Todas las respuestas de error tienen la forma `{"detail": "<mensaje en español 
 
 ---
 
+## Indicador "Celular conectado"
+
+En el escritorio, la bandeja muestra **Celular conectado / Celular no conectado**.
+Sirve para que el arquitecto pueda descartar lo primero cuando no le llegan fotos.
+
+### Ya funciona sin cambios en la app
+
+El backend registra el celular en el `POST /login` y en cada `POST /refresh`, que
+la app ya llama. Reconoce a la app por el `User-Agent`: vale cualquier cliente que
+**no sea un navegador** (`okhttp/…`, `Dart/… (dart:io)`, `ktor`, `CFNetwork/…`),
+así que no hay que declarar nada especial. El navegador del PC no cuenta, para que
+subir archivos desde el escritorio no encienda el indicador.
+
+Una sesión registrada dura **2 horas** y se renueva con cada refresh de token, así
+que con la app abierta el indicador se mantiene encendido.
+
+### Para que sea exacto: dos llamadas
+
+```
+POST   /api/presence/session    <- justo después de iniciar sesión
+DELETE /api/presence/session    <- al cerrar sesión
+```
+
+- Sin cuerpo, las dos. `Authorization: Bearer <access_token>` como el resto.
+- Respuesta `200`: `{"mobile_connected": true|false}`.
+- `GET /api/presence/session` devuelve el estado actual, útil para verificar que
+  la app quedó registrada.
+
+**`DELETE` es la importante.** Es lo único que apaga el indicador *en el momento*:
+borra toda la presencia de celular de esa cuenta, incluida la de las fotos subidas
+hace un rato. Sin esa llamada el indicador se apaga solo, pero recién cuando vence
+la sesión de 2 horas.
+
+Llamar a `POST` cada 15 o 30 minutos mientras la app esté abierta mantiene la
+sesión fresca aunque el token no se refresque en ese rato.
+
+### Si la app se cierra sin avisar
+
+Si el usuario la mata desde el administrador de tareas o el celular se queda sin
+batería, no llega ningún `DELETE`. El indicador se apaga cuando vence la sesión,
+como máximo 2 horas después de la última señal.
+
+---
+
 ## Qué pasa después (solo como contexto, no lo hace la app)
 
 1. La foto aparece en la bandeja del escritorio. La web consulta cada pocos segundos.

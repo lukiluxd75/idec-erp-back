@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -5,13 +6,28 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.database.connection import init_db_tables
 from app.core.errors.handlers import register_exception_handlers
-from app.registry import api_router
+from app.registry import api_router, check_unregistered_domains
+
+logger = logging.getLogger("uvicorn.error")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
     init_db_tables()
+
+    # A domain can be fully built and still be unreachable if nobody added it to
+    # registry.py's table -- that is exactly what happened to `alignment`, whose
+    # endpoints existed while the frontend got 404s. Say so at startup instead of
+    # waiting for someone to notice the 404.
+    unregistered = check_unregistered_domains()
+    if unregistered:
+        logger.warning(
+            "Dominios presentes en app/domains/ pero NO registrados en registry.py "
+            "(sus endpoints no existen): %s",
+            ", ".join(unregistered),
+        )
+
     yield
 
 

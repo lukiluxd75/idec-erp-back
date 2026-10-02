@@ -194,7 +194,9 @@ def harvest(
             used_lines.add(line_index)
 
     values = {spec.key: _shaped(spec, found.get(spec.key)) for spec in specs}
-    missing = [spec.label for spec in specs if not values[spec.key]]
+    missing = [
+        spec.label for spec in specs if not values[spec.key] and not getattr(spec, "from_ide", False)
+    ]
     return values, missing
 
 

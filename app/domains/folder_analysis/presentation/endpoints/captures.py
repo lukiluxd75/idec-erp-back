@@ -11,16 +11,20 @@ from app.domains.folder_analysis.application.use_cases import (
     ListInboxUseCase,
     UploadCapturesUseCase,
 )
+from app.core.presence import CHANNEL_FOLDER_ANALYSIS, SqlPresenceStore
 from app.domains.folder_analysis.presentation.deps import (
     get_capture_image_use_case,
     get_clear_inbox_use_case,
     get_delete_capture_use_case,
     get_list_inbox_use_case,
+    get_presence_store,
     get_upload_captures_use_case,
+    record_mobile_presence,
 )
 from app.domains.folder_analysis.presentation.schemas.folder_analysis_schema import (
     CaptureOut,
     ClearedInboxOut,
+    PhonePresenceOut,
 )
 from app.domains.security.contracts import UserProfile, require_permission
 
@@ -32,9 +36,13 @@ def upload_captures(
     files: List[UploadFile] = File(...),
     use_case: UploadCapturesUseCase = Depends(get_upload_captures_use_case),
     user: UserProfile = Depends(require_permission("folder-analysis.edit")),
+    _presence: None = Depends(record_mobile_presence),
 ):
     """Mobile app entry point: one or more photos (multipart field `files`) that
-    land unsorted in the architect's inbox on the web."""
+    land unsorted in the architect's inbox on the web.
+
+    Also the main "phone connected" signal for this module: an upload arriving
+    from a phone refreshes that account's presence (see record_mobile_presence)."""
     contents = [(f.file.read(), f.content_type or "", f.filename or "") for f in files]
     return [CaptureOut.from_entity(c) for c in use_case.execute(contents, user.sub)]
 
@@ -95,6 +103,51 @@ def get_thumbnail(
     user: UserProfile = Depends(require_permission("folder-analysis.view")),
 ):
     return _cached_image(request, use_case, capture_id, user.sub, CaptureVariant.THUMBNAIL)
+
+
+@router.get("/presence", response_model=PhonePresenceOut)
+def get_presence(
+    presence: SqlPresenceStore = Depends(get_presence_store),
+    user: UserProfile = Depends(require_permission("folder-analysis.view")),
+):
+    """Whether this account has a phone connected right now, for the indicator
+    on the web (PhoneConnectedBadge).
+
+    Se enciende por cualquiera de dos motivos, y le basta uno:
+
+      * CHANNEL_SESSION -- el arquitecto inicio sesion en la app movil y no la
+        ha cerrado. Es el motivo principal: dura toda la sesion, asi que el
+        indicador queda encendido tambien mientras no esta subiendo nada.
+      * CHANNEL_FOLDER_ANALYSIS -- la app subio fotos hace poco. Respaldo para
+        una app que todavia no llame a /api/presence/session.
+
+    Answered from Postgres, so it does not matter which of the four workers
+    takes the request -- the previous per-process design made the equivalent
+    endpoints in geoextraction and resolutions answer True on one worker and
+    False on the other three, and the badge flipped every few seconds.
+    """
+    return PhonePresenceOut(
+        mobile_connected=presence.is_phone_connected(user.sub, CHANNEL_FOLDER_ANALYSIS)
+    )
+
+
+@router.post("/heartbeat", response_model=PhonePresenceOut)
+def heartbeat(
+    user: UserProfile = Depends(require_permission("folder-analysis.edit")),
+    _presence: None = Depends(record_mobile_presence),
+    presence: SqlPresenceStore = Depends(get_presence_store),
+):
+    """Optional for the mobile app: keeps "phone connected" lit while the
+    architect has the module open but is not uploading yet.
+
+    Without it the indicator still works -- every upload refreshes presence and
+    it lasts ACTIVITY_TTL (3 min) -- but it goes grey during a long gap between
+    batches. Calling this once a minute keeps it accurate. Costs one row
+    update; from a desktop User-Agent it is a no-op (see record_mobile_presence).
+    """
+    return PhonePresenceOut(
+        mobile_connected=presence.is_phone_connected(user.sub, CHANNEL_FOLDER_ANALYSIS)
+    )
 
 
 @router.delete("", response_model=ClearedInboxOut)

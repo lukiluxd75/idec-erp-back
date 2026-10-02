@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -29,19 +31,27 @@ def public_route():
 
 @router.get("/health/db", response_model=DatabaseHealthResponse)
 def health_database(db: Session = Depends(get_db)):
-    """Check connectivity with the PostgreSQL database engine."""
+    """Check connectivity with the PostgreSQL database engine.
+
+    Sin autenticación, así que la respuesta no lleva ni el nombre de la base ni
+    el texto del error: los errores de libpq traen host, puerto y usuario
+    dentro del mensaje, y antes se devolvían tal cual a cualquiera que pidiera
+    esta URL. El detalle va al log del servidor, que es donde hace falta para
+    diagnosticar; una sonda solo necesita `status`.
+    """
     try:
         db.execute(text("SELECT 1"))
         return DatabaseHealthResponse(
             status="online",
-            database=settings.DB_NAME,
             message="Conexión exitosa con el servidor PostgreSQL",
         )
     except Exception as exc:
+        logging.getLogger("uvicorn.error").warning(
+            "Health check de PostgreSQL (%s) falló: %s", settings.DB_NAME, exc, exc_info=True
+        )
         return DatabaseHealthResponse(
             status="error",
-            database=settings.DB_NAME,
-            message=f"Error al conectar con PostgreSQL: {exc}",
+            message="No se pudo conectar con el servidor PostgreSQL.",
         )
 
 
