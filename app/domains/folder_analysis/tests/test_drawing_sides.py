@@ -73,7 +73,7 @@ class DrawingSidesTest(unittest.TestCase):
 
     def test_the_reading_fills_the_sides_and_the_street_width_from_the_drawing(self):
         values = {"usable_area": "295.31 M2", "street_width": None, "frontage": None}
-        note = RunServerReadingUseCase._sides_from_drawing(
+        note = RunServerReadingUseCase._complete_plan_values(
             {"pages": [{"dimensions": V2_DIMENSIONS, "street": V2_STREET}]}, values
         )
         self.assertEqual(values["frontage"], "10.11 m")
@@ -82,7 +82,7 @@ class DrawingSidesTest(unittest.TestCase):
 
     def test_what_the_text_already_gave_is_not_overwritten(self):
         values = {"usable_area": "295.31 M2", "street_width": "12.50 m, 9.00 m", "frontage": "12.00 m"}
-        RunServerReadingUseCase._sides_from_drawing(
+        RunServerReadingUseCase._complete_plan_values(
             {"pages": [{"dimensions": V2_DIMENSIONS, "street": V2_STREET}]}, values
         )
         self.assertEqual(values["frontage"], "12.00 m")

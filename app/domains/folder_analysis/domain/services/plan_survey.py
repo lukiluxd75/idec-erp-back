@@ -15,18 +15,27 @@ import math
 import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-# 00-33-432-012-0-00-000-000 as printed (OCR may swap a dash for a space or dot).
+# 00-33-432-012-0-00-000-000 as printed (OCR may swap a dash for a space or dot). The
+# manzana may carry a letter ("00-30-B37-002-0-00-000-000").
 _CODE_PRINTED = re.compile(
-    r"(\d{2})\s*[-–.]\s*(\d{2})\s*[-–.]\s*(\d{3})\s*[-–.]\s*(\d{3})\s*[-–.]\s*(\d)\s*[-–.]\s*(\d{2})\s*[-–.]\s*(\d{3})\s*[-–.]\s*(\d{3})"
+    r"(\d{2})\s*[-–.]\s*(\d{2})\s*[-–.]\s*([0-9A-Z]{3})\s*[-–.]\s*(\d{3})\s*[-–.]\s*(\d)\s*[-–.]\s*(\d{2})\s*[-–.]\s*(\d{3})\s*[-–.]\s*(\d{3})", re.IGNORECASE
 )
 # P1  E 806132.14  N 8063496.75   (the E and N letters are not always read).
 _POINT = re.compile(
     r"\bP\s*(\d{1,2})\b[^0-9]{0,8}(\d{6}(?:[.,]\d+)?)[^0-9]{1,10}(\d{7}(?:[.,]\d+)?)", re.IGNORECASE
 )
-# "SUPERFICIE TOTAL UTIL", as the OCR misreads it ("TTAL").
+# "SUPERFICIE TOTAL UTIL", as the OCR misreads it ("TTAL"). It must end in m2: a side
+# ("30.18m") that the OCR put after the label is not the surface.
 _SURFACE = re.compile(
-    r"SUP(?:ERFICIE|\.)?\s*(?:T[A-Z]{2,4}\s+)?UTIL[^0-9]{0,40}(\d[\d.,]*)", re.IGNORECASE
+    r"SUP(?:ERFICIE|\.)?\s*(?:T[A-Z]{2,4}\s*)?UTIL[^0-9]{0,40}(\d[\d.,]*)\s*M[2²]", re.IGNORECASE
 )
+# Any surface the sheet writes: "295.31 m2", ".267.55m2".
+_ANY_SURFACE = re.compile(r"(?<!\d)(\d{1,5}[.,]\d{2})\s*M[2²]", re.IGNORECASE)
+# The corners of a lot can be rounded: "R5.00" is a corner of radius 5 m.
+_RADIUS = re.compile(r"(?<![A-Z.])R\s*(\d{1,2}[.,]\d{2})(?!\d)", re.IGNORECASE)
+# The table of coordinates when the OCR lost the P labels: an easting and a northing.
+_EAST = re.compile(r"(?<![\d.,])(\d{6}[.,]\d{1,3})(?![\d])")
+_NORTH = re.compile(r"(?<![\d.,])(\d{7}[.,]\d{1,3})(?![\d])")
 
 
 def _number(text: str) -> float:
@@ -36,7 +45,7 @@ def _number(text: str) -> float:
 def printed_code(text: str) -> Optional[str]:
     """The code catastral exactly as printed on the plano, with dashes."""
     match = _CODE_PRINTED.search(text or "")
-    return "-".join(match.groups()) if match else None
+    return "-".join(match.groups()).upper() if match else None
 
 
 def parse_vertices(text: str) -> List[Dict[str, Any]]:
@@ -48,18 +57,92 @@ def parse_vertices(text: str) -> List[Dict[str, Any]]:
         if number in seen:
             continue
         seen[number] = {"name": f"P{number}", "east": _number(match.group(2)), "north": _number(match.group(3))}
-    return [seen[number] for number in sorted(seen)]
+    if len(seen) >= 3:
+        return [seen[number] for number in sorted(seen)]
+    return _unlabelled_vertices(text)
+
+
+def _unlabelled_vertices(text: str) -> List[Dict[str, Any]]:
+    """The table when the OCR dropped the P1..Pn column: the eastings and the
+    northings, each in the order the text gives them, are paired by position. The
+    table closes the polygon by repeating P1, so a last point equal to the first is
+    dropped. The OCR sometimes swaps two rows of the table, which makes the polygon
+    cross itself: the order is then looked for among the ones that do not cross."""
+    easts = [_number(m.group(1)) for m in _EAST.finditer(text or "")]
+    norths = [_number(m.group(1)) for m in _NORTH.finditer(text or "")]
+    if len(easts) != len(norths) or len(easts) < 3:
+        return []
+    points = list(zip(easts, norths))
+    if len(points) > 3 and points[-1] == points[0]:
+        points = points[:-1]
+    if len(points) < 3 or len(set(points)) != len(points):
+        return []
+    points = _simple_order(points)
+    return [{"name": f"P{i + 1}", "east": e, "north": n} for i, (e, n) in enumerate(points)]
+
+
+def _crosses(a, b, c, d) -> bool:
+    def side(o, p, q):
+        return (p[0] - o[0]) * (q[1] - o[1]) - (p[1] - o[1]) * (q[0] - o[0])
+
+    return side(a, b, c) * side(a, b, d) < 0 and side(c, d, a) * side(c, d, b) < 0
+
+
+def _is_simple(points) -> bool:
+    n = len(points)
+    for i in range(n):
+        for j in range(i + 1, n):
+            if abs(i - j) in (1, n - 1):
+                continue
+            if _crosses(points[i], points[(i + 1) % n], points[j], points[(j + 1) % n]):
+                return False
+    return True
+
+
+def _simple_order(points):
+    """`points` as they are when they already draw a polygon; otherwise the first
+    ordering (keeping the first point where it is) that does not cross itself."""
+    if _is_simple(points) or len(points) > 7:
+        return points
+    from itertools import permutations
+
+    for rest in permutations(points[1:]):
+        candidate = [points[0], *rest]
+        if _is_simple(candidate):
+            return candidate
+    return points
 
 
 def declared_surface(text: str) -> Optional[float]:
     """The "superficie total útil" the plano prints, in m2."""
     match = _SURFACE.search(text or "")
-    if not match:
-        return None
-    try:
-        return float(match.group(1).rstrip(".,").replace(",", "."))
-    except ValueError:
-        return None
+    if match:
+        try:
+            return float(match.group(1).rstrip(".,").replace(",", "."))
+        except ValueError:
+            pass
+    # The OCR often separates the label from its figure. The surface útil is the one
+    # the sheet states over and over (s/mensura, total útil, the drawing), so the most
+    # repeated figure is it; the one that appears once (s/doc privado) is not.
+    counts: Dict[float, int] = {}
+    for found in _ANY_SURFACE.finditer(text or ""):
+        value = _number(found.group(1))
+        counts[value] = counts.get(value, 0) + 1
+    repeated = [v for v, n in counts.items() if n >= 2]
+    if not repeated:
+        return next(iter(counts)) if len(counts) == 1 else None
+    return max(repeated, key=lambda v: (counts[v], -v))
+
+
+def rounded_corners_area(radii: Sequence[float]) -> float:
+    """What the rounded corners take from the polygon the vertices draw: a corner of
+    radius r cuts (1 - pi/4) * r2 from the square corner."""
+    return sum((1 - math.pi / 4) * r * r for r in radii)
+
+
+def corner_radii(text: str) -> List[float]:
+    """The radii (m) of the rounded corners the drawing marks, one per label."""
+    return [_number(m.group(1)) for m in _RADIUS.finditer(text or "")]
 
 
 def survey(vertices: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -119,6 +202,7 @@ def measures(
     reading: Optional[Dict[str, Any]],
     street_paths: Sequence[Sequence[Sequence[float]]],
     declared_area: Optional[float],
+    corner_radii: Sequence[float] = (),
 ) -> Dict[str, Any]:
     """Frente, contra frente and the two fondos of a four-sided plano, computed
     from its UTM vertices once the GIS says which side faces the street.
@@ -149,9 +233,14 @@ def measures(
     ):
         return refuse("Las coordenadas del plano se cruzan: revise que estén bien leídas.")
     area_checked = declared_area is not None
-    if area_checked and abs(reading["area_m2"] - declared_area) > max(
-        AREA_TOLERANCE_MIN_M2, declared_area * AREA_TOLERANCE
-    ):
+    # A rounded corner of radius r cuts (1 - pi/4) * r2 from the square corner the
+    # vertices draw, so a lot with two R5.00 corners has 10.7 m2 less than its
+    # vertices enclose and the plano still prints the right surface.
+    rounded = rounded_corners_area(corner_radii)
+    tolerance = max(AREA_TOLERANCE_MIN_M2, (declared_area or 0) * AREA_TOLERANCE)
+    if area_checked and min(
+        abs(reading["area_m2"] - declared_area), abs(reading["area_m2"] - rounded - declared_area)
+    ) > tolerance:
         return refuse(
             f"Las coordenadas dan {reading['area_m2']} m2 y el plano declara {declared_area} m2: "
             "no se calculan los lados, revise las coordenadas."
@@ -185,8 +274,15 @@ def measures(
 def read_plan(text: str) -> Dict[str, Any]:
     """Everything the plano says about its own lot that the lookup can compare."""
     vertices = parse_vertices(text)
+    radii = corner_radii(text)
+    drawn = survey(vertices)
+    if drawn and radii:
+        # The vertices draw square corners: the surface of the lot is what is left
+        # once the rounded ones are cut.
+        drawn["corner_radii"] = radii
+        drawn["area_net_m2"] = round(drawn["area_m2"] - rounded_corners_area(radii), 2)
     return {
         "printed_code": printed_code(text),
         "declared_area_m2": declared_surface(text),
-        "survey": survey(vertices),
+        "survey": drawn,
     }

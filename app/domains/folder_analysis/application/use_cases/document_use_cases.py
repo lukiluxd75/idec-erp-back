@@ -28,7 +28,7 @@ from app.domains.folder_analysis.domain.folder_types import (
     document_fields,
     folder_type,
 )
-from app.domains.folder_analysis.domain.services import drawing_sides
+from app.domains.folder_analysis.domain.services import drawing_sides, plan_survey
 from app.domains.folder_analysis.domain.services.field_harvest import harvest, observation
 from app.domains.folder_analysis.domain.ports import (
     CaptureRepositoryPort,
@@ -296,7 +296,7 @@ class RunServerReadingUseCase:
         if not specs or not isinstance(data, dict):
             return data
         values, missing = harvest(data, specs)
-        notes = [observation(missing), self._sides_from_drawing(data, values)]
+        notes = [observation(missing), self._complete_plan_values(data, values)]
         reading = data.get("reading")
         for note in filter(None, notes):
             observations.append(note)
@@ -305,11 +305,20 @@ class RunServerReadingUseCase:
         return {**data, "values": values}
 
     @staticmethod
-    def _sides_from_drawing(data: Dict[str, Any], values: Dict[str, Optional[str]]) -> Optional[str]:
-        """Frente, contra frente and fondos from the measures written on the drawing,
+    def _complete_plan_values(data: Dict[str, Any], values: Dict[str, Optional[str]]) -> Optional[str]:
+        """What the label search could not give a plano, from the rest of the sheet.
+
+        The useful surface, when the label was not followed by a figure that ends in
+        m2 (the OCR splits the label from its number): the figure the sheet repeats.
+        And frente, contra frente and fondos from the measures written on the drawing,
         for a plano that has no UTM table (domain/services/drawing_sides.py). They only
         fill what the sheet itself did not give, and only when the figures add up to the
         surface the plano declares."""
+        if "usable_area" in values and not re.fullmatch(
+            r"\s*\d+(?:[.,]\d+)?\s*M[2\u00b2]\s*", values.get("usable_area") or "", re.IGNORECASE
+        ):
+            surface = plan_survey.declared_surface(data.get("full_text") or "")
+            values["usable_area"] = f"{surface:.2f}M2" if surface is not None else None
         pages = data.get("pages") or []
         dimensions = [d for page in pages for d in (page.get("dimensions") or [])]
         street = next((page["street"] for page in pages if page.get("street")), None)

@@ -25,14 +25,15 @@ MISSING = "missing"
 # ("KHARA KHARAARRUMANI"). So the separator is optional, the numbers must follow
 # the label directly (which keeps "LOTE N: 5" of the drawing out of it) and a
 # value ends where the next label starts.
-_NEXT = r"(?=\s+(?:SUB\s*-?\s*DISTRITO|DISTRITO|MANZAN[AO]|LOTE|VIA|ZONA|ARQUITECTO)\b|\s+PROCESAMIENTO|\s*$)"
-_SEP = r"\s*[:;.]?\s*"
+_NEXT = r"(?=\s+(?:SUB\s*-?\s*DISTRITO|DISTRITO|MANZAN[AO]|LOTE|VIA|ZONA|ARQUITECTO|SELLO)\b|\s+PROCESAMIENTO|\s*$)"
+_SEP = r"[\s:;.]*"
 _FIELDS = {
     "zone": re.compile(r"\bZONA" + _SEP + r"(.+?)" + _NEXT),
     "subdistrict": re.compile(r"\bSUB\s*-?\s*DISTRITO" + _SEP + r"(\d+)"),
     "district": re.compile(r"(?<!SUB )(?<!SUB)(?<!SUB-)\bDISTRITO" + _SEP + r"(\d+)"),
-    "block": re.compile(r"\bMANZAN[AO]" + _SEP + r"(\d+)"),
-    "lot": re.compile(r"\bLOTE" + _SEP + r"(\d+)"),
+    "block": re.compile(r"\bMANZAN[AO]" + _SEP + r"([A-Z]?\d{1,4})"),
+    # Three digits, as the box pads them ("002"): a smudged "0." is not a lote.
+    "lot": re.compile(r"\bLOTE" + _SEP + r"(\d{3})(?!\d)"),
     "street": re.compile(r"\bVIA" + _SEP + r"(.+?)" + _NEXT),
 }
 
@@ -77,6 +78,12 @@ def _same_number(plan: Any, gis: Any) -> bool:
     return _number(plan) is not None and _number(plan) == _number(gis)
 
 
+def _same_code(plan: Any, gis: Any) -> bool:
+    """A manzana is a code ("432", "B37"): equal as written, letter included."""
+    a, b = _letters(plan), _letters(gis)
+    return bool(a) and a == b
+
+
 def _letters(value: Any) -> str:
     return re.sub(r"[^A-Z0-9]", "", normalize(str(value or "")))
 
@@ -93,7 +100,7 @@ def cross_check(location: Dict[str, Optional[str]], gis: Dict[str, Any]) -> List
         ("zone", "Zona", _same_words),
         ("district", "Distrito", _same_number),
         ("subdistrict", "Sub distrito", _same_number),
-        ("block", "Manzana", _same_number),
+        ("block", "Manzana", _same_code),
         ("lot", "Lote", _same_number),
     ]
     checks: List[Dict[str, Any]] = []

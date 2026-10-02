@@ -389,7 +389,7 @@ DOCUMENT_FIELDS: Dict[Tuple[str, str], Tuple[DocumentField, ...]] = {
             printed=("CODIGO CATASTRAL", "COD CATASTRAL", "COD. CATASTRAL"),
             # 00-33-432-012-0-00-000-000, with whatever the OCR made of the dashes.
             patterns=(
-                r"(\d{2}\s*[-.]\s*\d{2}\s*[-.]\s*\d{3}\s*[-.]\s*\d{3}\s*[-.]\s*\d\s*[-.]\s*\d{2}\s*[-.]\s*\d{3}\s*[-.]\s*\d{3})",
+                r"(\d{2}\s*[-.]\s*\d{2}\s*[-.]\s*[0-9A-Z]{3}\s*[-.]\s*\d{3}\s*[-.]\s*\d\s*[-.]\s*\d{2}\s*[-.]\s*\d{3}\s*[-.]\s*\d{3})",
             ),
         ),
         # What the sheet copies from the IDE: filled from the lookup of the code.
@@ -403,7 +403,7 @@ DOCUMENT_FIELDS: Dict[Tuple[str, str], Tuple[DocumentField, ...]] = {
         DocumentField(
             "street_width",
             "Ancho de calle",
-            patterns=(r"CALLE\s+DE\s+(\d+(?:[.,]\d+)?)\s*(?:MTS?|M)\b",),
+            patterns=(r"CALLE\s*DE\s*(\d+(?:[.,]\d+)?)\s*(?:MTS?|M)\b",),
             collect_all=True,
         ),
         # Only the predio the plano says it is: whether it is the one of the code is
@@ -413,9 +413,16 @@ DOCUMENT_FIELDS: Dict[Tuple[str, str], Tuple[DocumentField, ...]] = {
             "Número de predio",
             # Not read by label: a plano whose lote is blank ("LOTE N°" with nothing
             # after it) would give back "N°" as the number.
-            # The ubicación box: "MANZANO 432 LOTE 002". "LOTE N: 5" of the drawing
-            # has no digits right after the word and is not it.
-            patterns=(r"MANZAN[AO]\s*\d+\s+LOTE\s*(\d+)", r"\bLOTE\s*(\d+)"),
+            # The ubicación box: "MANZANO 432 LOTE 002" (the manzana may be "B37", the
+            # separators dots). "LOTE N: 5" of the drawing has no digits right after the
+            # word and is not it. Then the lot the drawing writes over its own surface
+            # ("LOTE N° 002 / SUP. TOTAL UTIL"), never the neighbour's "LOTE N° 003".
+            patterns=(
+                r"MANZAN[AO]\W{0,8}[A-Z]?\d{1,4}\W{0,6}LOTE\W{0,8}(\d{3})",
+                r"SUP\.?\s*TOTAL\s*UTIL\s*LOTE\s*N\W{0,2}\s*(\d{1,3})(?![.,\d])(?!\s*M\b)",
+                r"LOTE\s*N\W{0,2}\s*(\d{1,3})(?![.,\d])(?!\s*M\b)\s*SUP\.?\s*TOTAL\s*UTIL",
+                r"\bLOTE\s*(\d+)",
+            ),
             transform="plain_number",
         ),
         # Measured from the UTM table by the IDE lookup when the sheet does not

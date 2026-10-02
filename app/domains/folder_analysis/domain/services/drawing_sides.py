@@ -30,7 +30,7 @@ from app.domains.folder_analysis.domain.services.text import normalize
 # else. "295.31 m2" is a surface, not a side, and "30.18m SUP." is not a label.
 _DIMENSION = re.compile(r"^\W*(\d{1,3})\s*[.,]\s*(\d{2})\s*M\W*$")
 # "CALLE DE 10.00 mts.", "AVENIDA DE 12 MTS", "PASAJE 6.00 mts".
-_STREET = re.compile(r"\b(?:CALLE|AVENIDA|AV|PASAJE|PJE)\b\.?\s*(?:DE\s*)?(\d{1,3}(?:\s*[.,]\s*\d{1,2})?)\s*(?:MTS?|M)\b")
+_STREET = re.compile(r"(?:CALLE|AVENIDA|AV|PASAJE|PJE)\.?\s*(?:DE)?\s*(\d{1,3}(?:\s*[.,]\s*\d{1,2})?)\s*(?:MTS?|M)\b")
 
 # A label counts as running up and down (or across) when its box is clearly longer
 # one way than the other; a squarish box says nothing about the side it measures.
