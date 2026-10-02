@@ -156,7 +156,7 @@ DOCUMENT_TYPES: Dict[str, DocumentTypeSpec] = {
 
 POSSESSORS = FolderTypeSpec(
     key="possessors",
-    label="Poseedores",
+    label="Registro catastral de poseedores",
     description="Trámite de poseedores: avalúo, plano, formulario, declaración jurada y carnets.",
     document_types=(
         DocumentType.APPRAISAL,

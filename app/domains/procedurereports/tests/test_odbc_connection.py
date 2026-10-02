@@ -1,3 +1,5 @@
+import pytest
+
 from app.domains.procedurereports.infrastructure.odbc_connection import (
     build_reports_connection_string,
     parse_reports_server,
@@ -37,3 +39,69 @@ def test_resolve_odbc_driver_prefers_explicit_when_installed(monkeypatch):
         lambda: ["FreeTDS", "ODBC Driver 17 for SQL Server"],
     )
     assert resolve_odbc_driver("FreeTDS") == "FreeTDS"
+
+
+def _drivers(monkeypatch, names):
+    monkeypatch.setattr(
+        "app.domains.procedurereports.infrastructure.odbc_connection.pyodbc.drivers",
+        lambda: names,
+    )
+
+
+# Windows sin el ODBC 17/18 instalado: pyodbc.drivers() trae el "SQL Server" de
+# siempre junto a los de Office, y el .env puede seguir pidiendo FreeTDS. Antes
+# eso terminaba en RuntimeError diciendo que no habia driver de SQL Server
+# mientras lo listaba como instalado, y los reportes respondian 503.
+_WINDOWS_WITH_OFFICE = [
+    "SQL Server",
+    "Microsoft Access Driver (*.mdb, *.accdb)",
+    "Microsoft Excel Driver (*.xls, *.xlsx, *.xlsm, *.xlsb)",
+]
+
+
+def test_falls_back_to_legacy_windows_driver(monkeypatch):
+    _drivers(monkeypatch, _WINDOWS_WITH_OFFICE)
+    assert resolve_odbc_driver("FreeTDS") == "SQL Server"
+
+
+def test_legacy_driver_gets_no_tls_keywords(monkeypatch):
+    _drivers(monkeypatch, _WINDOWS_WITH_OFFICE)
+    cs = build_reports_connection_string(
+        server="172.16.67.100,1433",
+        database="catastro",
+        user="u",
+        password="p",
+        driver="",
+    )
+    assert "DRIVER={SQL Server};" in cs
+    assert "SERVER=172.16.67.100,1433;" in cs
+    assert "Encrypt=" not in cs
+    assert "TrustServerCertificate=" not in cs
+
+
+def test_modern_driver_keeps_tls_keywords(monkeypatch):
+    _drivers(monkeypatch, ["ODBC Driver 18 for SQL Server", "SQL Server"])
+    cs = build_reports_connection_string(
+        server="172.16.67.100",
+        database="catastro",
+        user="u",
+        password="p",
+        driver="",
+        encrypt=True,
+    )
+    assert "DRIVER={ODBC Driver 18 for SQL Server};" in cs
+    assert "TrustServerCertificate=yes;" in cs
+    assert "Encrypt=yes;" in cs
+
+
+def test_requested_driver_never_matches_an_office_driver(monkeypatch):
+    # "Driver" aparece en los de Office: el match por subcadena no debe salirse
+    # de la familia SQL Server.
+    _drivers(monkeypatch, ["Microsoft Access Text Driver (*.txt, *.csv)"])
+    with pytest.raises(RuntimeError, match="No SQL Server ODBC driver found"):
+        resolve_odbc_driver("Driver")
+
+
+def test_requested_driver_matches_by_partial_name(monkeypatch):
+    _drivers(monkeypatch, ["FreeTDS"])
+    assert resolve_odbc_driver("FreeTDS 1.3") == "FreeTDS"
