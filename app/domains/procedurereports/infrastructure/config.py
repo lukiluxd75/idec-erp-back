@@ -8,7 +8,7 @@ _BACKEND_DIR = Path(__file__).resolve().parents[4]
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=_BACKEND_DIR / ".env",
+        env_file=(_BACKEND_DIR / ".env", _BACKEND_DIR / ".env.local"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -20,7 +20,10 @@ class Settings(BaseSettings):
     db_name: str = Field("catastro", validation_alias="REPORTS_DB_NAME")
     db_user: str = Field("jPoloA", validation_alias="REPORTS_DB_USER")
     db_password: str = Field("", validation_alias="REPORTS_DB_PASSWORD")
-    db_driver: str = Field("ODBC Driver 17 for SQL Server", validation_alias="REPORTS_DB_DRIVER")
+    # Empty = auto-detect (FreeTDS on Linux, ODBC 17/18 on Windows when installed).
+    db_driver: str = Field("", validation_alias="REPORTS_DB_DRIVER")
+    db_tds_version: str = Field("7.4", validation_alias="REPORTS_DB_TDS_VERSION")
+    db_encrypt: bool = Field(False, validation_alias="REPORTS_DB_ENCRYPT")
     unit_id: int = Field(102116, validation_alias="UNIDAD_ID")
     unit_name: str = Field("AREA TECNICA CARTOGRAFIA", validation_alias="UNIDAD_NOMBRE")
     central_district_id: int = Field(7, validation_alias="COMUNA_CENTRAL_ID")

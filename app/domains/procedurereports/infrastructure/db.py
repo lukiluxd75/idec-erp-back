@@ -3,6 +3,7 @@ from contextlib import contextmanager
 import pyodbc
 
 from .config import settings
+from .odbc_connection import build_reports_connection_string
 
 # Translate historical SQL Server column names at the database boundary.
 SQL_COLUMN_NAMES = {
@@ -22,14 +23,14 @@ def connection_string() -> str:
         raise RuntimeError(
             "Configura REPORTS_DB_SERVER, REPORTS_DB_NAME, REPORTS_DB_USER y REPORTS_DB_PASSWORD en el .env del backend."
         )
-    return (
-        f"DRIVER={{{settings.db_driver}}};"
-        f"SERVER={settings.db_server};"
-        f"DATABASE={settings.db_name};"
-        f"UID={settings.db_user};"
-        f"PWD={settings.db_password};"
-        "TrustServerCertificate=yes;"
-        "Encrypt=no;"
+    return build_reports_connection_string(
+        server=settings.db_server,
+        database=settings.db_name,
+        user=settings.db_user,
+        password=settings.db_password,
+        driver=settings.db_driver,
+        tds_version=settings.db_tds_version,
+        encrypt=settings.db_encrypt,
     )
 
 
