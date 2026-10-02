@@ -43,7 +43,11 @@ def list_processed_sectors(
     return use_case.execute(campaign_id=campaign_id, unassigned_only=unassigned_only)
 
 
-def _campaign_label(campaign_id: Optional[int], campaign_repository: CampaignRepositoryPort) -> str:
+def _campaign_label(
+    campaign_id: Optional[int], campaign_repository: CampaignRepositoryPort, all_campaigns: bool = False
+) -> str:
+    if all_campaigns:
+        return "Todas las campañas"
     if not campaign_id:
         return "Sin campaña"
     campaign = next((c for c in campaign_repository.list_active() if c.id == campaign_id), None)
@@ -54,16 +58,19 @@ def _campaign_label(campaign_id: Optional[int], campaign_repository: CampaignRep
 def export_campaign_report_data(
     campaign_id: Optional[int] = Query(None),
     unassigned_only: bool = Query(False),
+    all_campaigns: bool = Query(False),
     use_case: ExportCampaignReportUseCase = Depends(get_export_campaign_report_use_case),
     campaign_repository: CampaignRepositoryPort = Depends(get_campaign_repository),
     _user: UserProfile = Depends(require_permission("detection.view")),
 ):
     """Backs the "Exportar" preview modal and the JSON/Imprimir options --
     same confirmed/rejected rows as the Excel/PDF exports, as JSON instead of
-    a file, so the frontend can render the preview table itself."""
-    rows = use_case.execute(campaign_id=campaign_id, unassigned_only=unassigned_only)
+    a file, so the frontend can render the preview table itself. The modal's
+    own campaign selector (defaulting to whatever is active on the map) can
+    override campaign_id/unassigned_only here, or set all_campaigns=True."""
+    rows = use_case.execute(campaign_id=campaign_id, unassigned_only=unassigned_only, all_campaigns=all_campaigns)
     return {
-        "campaign_label": _campaign_label(campaign_id, campaign_repository),
+        "campaign_label": _campaign_label(campaign_id, campaign_repository, all_campaigns),
         "rows": [row_to_dict(row, i) for i, row in enumerate(rows, start=1)],
     }
 
@@ -72,18 +79,22 @@ def export_campaign_report_data(
 def export_campaign_report(
     campaign_id: Optional[int] = Query(None),
     unassigned_only: bool = Query(False),
+    all_campaigns: bool = Query(False),
     use_case: ExportCampaignReportUseCase = Depends(get_export_campaign_report_use_case),
     campaign_repository: CampaignRepositoryPort = Depends(get_campaign_repository),
     _user: UserProfile = Depends(require_permission("detection.view")),
 ):
-    """"Exportar" on the detection map: confirmed/rejected parcels of the
-    CURRENTLY SELECTED campaign only (or unassigned sectors when none is
-    selected) -- see list_report_rows for why this never spans campaigns."""
-    rows = use_case.execute(campaign_id=campaign_id, unassigned_only=unassigned_only)
-    campaign_label = _campaign_label(campaign_id, campaign_repository)
+    """"Exportar" on the detection map: confirmed/rejected parcels, scoped by
+    default to the campaign active on the map, but the export modal's own
+    selector can pick a different one -- or all_campaigns=True for every
+    campaign at once (each row keeps its own campaign_code, so this stays an
+    audit listing rather than a cross-campaign rollup -- see
+    list_report_rows)."""
+    rows = use_case.execute(campaign_id=campaign_id, unassigned_only=unassigned_only, all_campaigns=all_campaigns)
+    campaign_label = _campaign_label(campaign_id, campaign_repository, all_campaigns)
 
     content = build_campaign_report_excel(rows, campaign_label)
-    filename = f"reporte-predios-{campaign_id or 'sin-campania'}.xlsx"
+    filename = f"reporte-predios-{'todas-las-campanas' if all_campaigns else (campaign_id or 'sin-campania')}.xlsx"
     return Response(
         content=content,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -95,17 +106,18 @@ def export_campaign_report(
 def export_campaign_report_pdf(
     campaign_id: Optional[int] = Query(None),
     unassigned_only: bool = Query(False),
+    all_campaigns: bool = Query(False),
     use_case: ExportCampaignReportUseCase = Depends(get_export_campaign_report_use_case),
     campaign_repository: CampaignRepositoryPort = Depends(get_campaign_repository),
     _user: UserProfile = Depends(require_permission("detection.view")),
 ):
     """Formal/presentation profile of the same export -- same rows and row
     coloring as the Excel, laid out for reading rather than editing."""
-    rows = use_case.execute(campaign_id=campaign_id, unassigned_only=unassigned_only)
-    campaign_label = _campaign_label(campaign_id, campaign_repository)
+    rows = use_case.execute(campaign_id=campaign_id, unassigned_only=unassigned_only, all_campaigns=all_campaigns)
+    campaign_label = _campaign_label(campaign_id, campaign_repository, all_campaigns)
 
     content = build_campaign_report_pdf(rows, campaign_label)
-    filename = f"reporte-predios-{campaign_id or 'sin-campania'}.pdf"
+    filename = f"reporte-predios-{'todas-las-campanas' if all_campaigns else (campaign_id or 'sin-campania')}.pdf"
     return Response(
         content=content,
         media_type="application/pdf",

@@ -189,7 +189,10 @@ class SqlProcessedSectorRepository(ProcessedSectorRepositoryPort):
         return SectorResumeContext(job_id=job_id, status=sector.status, urls=urls)
 
     def list_report_rows(
-        self, campaign_id: Optional[int] = None, unassigned_only: bool = False
+        self,
+        campaign_id: Optional[int] = None,
+        unassigned_only: bool = False,
+        all_campaigns: bool = False,
     ) -> List[AffectedParcelReportRow]:
         query = (
             self._db.query(AffectedParcelModel, ProcessedSectorModel, CampaignModel)
@@ -197,10 +200,11 @@ class SqlProcessedSectorRepository(ProcessedSectorRepositoryPort):
             .outerjoin(CampaignModel, CampaignModel.id == ProcessedSectorModel.campaign_id)
             .filter(AffectedParcelModel.validation_status.in_(("confirmed", "rejected")))
         )
-        if campaign_id:
-            query = query.filter(ProcessedSectorModel.campaign_id == campaign_id)
-        elif unassigned_only:
-            query = query.filter(ProcessedSectorModel.campaign_id.is_(None))
+        if not all_campaigns:
+            if campaign_id:
+                query = query.filter(ProcessedSectorModel.campaign_id == campaign_id)
+            elif unassigned_only:
+                query = query.filter(ProcessedSectorModel.campaign_id.is_(None))
         rows = query.order_by(ProcessedSectorModel.id.asc(), AffectedParcelModel.id.asc()).all()
 
         parcel_ids = [ap.id for ap, _, _ in rows]
