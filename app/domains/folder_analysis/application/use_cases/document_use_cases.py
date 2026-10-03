@@ -1,7 +1,7 @@
 import logging
 import re
 from dataclasses import replace
-from typing import Any, Callable, Dict, List, Mapping, Optional, Set
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set
 
 from app.core.errors.exceptions import DomainException
 from app.domains.folder_analysis.application.document_synchronizer import DocumentSynchronizer
@@ -29,12 +29,18 @@ from app.domains.folder_analysis.domain.folder_types import (
     folder_type,
 )
 from app.domains.folder_analysis.domain.services import drawing_sides, plan_survey
-from app.domains.folder_analysis.domain.services.field_harvest import harvest, observation
+from app.domains.folder_analysis.domain.services.field_harvest import (
+    from_seals,
+    harvest,
+    missing_labels,
+    observation,
+)
 from app.domains.folder_analysis.domain.ports import (
     CaptureRepositoryPort,
     DocumentRepositoryPort,
     ExtractionQueuePort,
     RegisteredFolderRepositoryPort,
+    SealReadingPort,
     ServerReadingPort,
 )
 
@@ -357,7 +363,11 @@ class RunServerReadingUseCase:
     folios pipeline, a tax receipt with the FUR rules) and stores the result.
     Runs in a BackgroundTask after `analyze` returned, so -- like the folios
     domain's own pipeline -- nothing is allowed to escape: every failure is
-    stored on the document, where the architect can see it and retry."""
+    stored on the document, where the architect can see it and retry.
+
+    `seals` is the pass over the image that finds the stamps and reads them, for
+    a carpeta whose field is stamped and not written (the number of the notary).
+    Optional: without it the reading is what the text of the sheet gives."""
 
     def __init__(
         self,
@@ -365,11 +375,13 @@ class RunServerReadingUseCase:
         captures: CaptureRepositoryPort,
         extractors: Mapping[str, ServerReadingPort],
         folders: Optional[RegisteredFolderRepositoryPort] = None,
+        seals: Optional[SealReadingPort] = None,
     ):
         self._documents = documents
         self._captures = captures
         self._extractors = extractors
         self._folders = folders
+        self._seals = seals
 
     def execute(self, document_id: str, user_sub: str) -> None:
         document = self._documents.get(document_id, user_sub)
@@ -415,7 +427,7 @@ class RunServerReadingUseCase:
             )
             return
 
-        data = self._with_harvested_values(document, data, observations)
+        data = self._with_harvested_values(document, data, observations, images)
 
         logger.info(
             "Folder analysis: %s %s leído con %d observación(es)",
@@ -425,7 +437,11 @@ class RunServerReadingUseCase:
         self._feed_folder_sheet(document, user_sub, data)
 
     def _with_harvested_values(
-        self, document: FolderDocument, data: Dict[str, Any], observations: List[str]
+        self,
+        document: FolderDocument,
+        data: Dict[str, Any],
+        observations: List[str],
+        images: List[bytes],
     ) -> Dict[str, Any]:
         """The values the carpeta asks for, pulled out of what was read.
 
@@ -439,14 +455,65 @@ class RunServerReadingUseCase:
         specs = document_fields(document.folder_type, document.doc_type)
         if not specs or not isinstance(data, dict):
             return data
-        values, missing = harvest(data, specs)
-        notes = [observation(missing), self._complete_plan_values(data, values)]
+        values, _missing = harvest(data, specs)
+        stamped = self._from_seals(specs, values, images)
+        # Lo que falta se pregunta DESPUÉS del sello: un número que el sello dio
+        # no es un campo vacío, y nombrarlo en las observaciones mandaría al
+        # arquitecto a buscar a mano algo que ya está leído.
+        notes = [
+            stamped,
+            observation(missing_labels(values, specs)),
+            self._complete_plan_values(data, values),
+        ]
         reading = data.get("reading")
         for note in filter(None, notes):
             observations.append(note)
             if isinstance(reading, dict):
                 reading.setdefault("observations", []).append(note)
         return {**data, "values": values}
+
+    def _from_seals(
+        self, specs: Sequence[Any], values: Dict[str, Optional[str]], images: List[bytes]
+    ) -> Optional[str]:
+        """Lo que los sellos estampados en las fotos dicen, buscándolos en la imagen.
+
+        Solo se hace para los campos que declaran vivir en un sello (hoy el
+        número del notario) y solo si la lectura de sellos está cableada; un
+        documento que no pide nada de un sello no gasta ni una llamada al OCR.
+
+        Lo que diga el sello manda sobre lo que se leyó de la redacción, porque
+        es donde el número está siempre: una minuta va dirigida al notario y no
+        lo nombra, y el notario que sí aparece escrito suele ser el que reconoció
+        el documento anterior. Si los dos dicen algo y no coinciden, queda dicho
+        en las observaciones: es un caso para mirar la foto, no para elegir
+        callado.
+
+        Nunca levanta: un sello que no se pudo buscar o leer deja el campo como
+        lo dejó el texto, que es exactamente lo que había antes de esta pasada.
+        """
+        if self._seals is None or not any(getattr(spec, "seal_patterns", ()) for spec in specs):
+            return None
+        try:
+            stamped = from_seals(self._seals.read(images), specs)
+        except Exception:
+            logger.exception("Folder analysis: no se pudieron leer los sellos del documento")
+            return None
+        disagreed = []
+        for spec in specs:
+            value = stamped.get(spec.key)
+            if not value:
+                continue
+            written = values.get(spec.key)
+            values[spec.key] = value
+            if written and written != value:
+                disagreed.append(f"{spec.label}: el sello dice {value} y el texto {written}")
+        if not disagreed:
+            return None
+        return (
+            "Se tomó lo que dice el sello; conviene comparar con la foto. "
+            + "; ".join(disagreed)
+            + "."
+        )
 
     @staticmethod
     def _complete_plan_values(data: Dict[str, Any], values: Dict[str, Optional[str]]) -> Optional[str]:

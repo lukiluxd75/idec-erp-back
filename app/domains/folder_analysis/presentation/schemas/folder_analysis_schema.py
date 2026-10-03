@@ -170,7 +170,12 @@ class RegisteredFolderOut(BaseModel):
 
     `folder_type` is the key of its kind and `folder_type_label` the name the
     architect reads, so a list does not have to look the catalogue up for every
-    row. `document_types` are the lanes its board shows."""
+    row. `document_types` are the lanes its board shows.
+
+    `mine` is false only for a carpeta of another user, which an administrator of
+    the module reaches by searching it by name. Those are read-only: the screen
+    hides what writes to them, and the endpoints that write refuse them anyway.
+    `owner` is who it belongs to, and comes filled only in that case."""
 
     id: str
     name: str
@@ -184,13 +189,27 @@ class RegisteredFolderOut(BaseModel):
     documents: List[DocumentDetail]
     document_count: int
     counts_by_type: Dict[str, int]
+    mine: bool = True
+    owner: Optional[str] = None
 
     @classmethod
-    def from_entity(cls, folder: RegisteredFolder) -> "RegisteredFolderOut":
+    def from_entity(
+        cls,
+        folder: RegisteredFolder,
+        user_sub: Optional[str] = None,
+        owner: Optional[str] = None,
+    ) -> "RegisteredFolderOut":
+        """`user_sub` is who is asking. Left out, the carpeta is answered as the
+        asker's own -- which is what every endpoint but the search does, because
+        they all went through require_folder first and could not have reached
+        anyone else's."""
         spec = folder_type(folder.folder_type)
+        mine = user_sub is None or folder.user_sub == user_sub
         return cls(
             id=folder.id,
             name=folder.name,
+            mine=mine,
+            owner=None if mine else owner,
             notes=folder.notes,
             folder_type=spec.key,
             folder_type_label=spec.label,

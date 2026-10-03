@@ -209,7 +209,10 @@ POSSESSORS = FolderTypeSpec(
                     label="Notario (Nº)",
                     source=FieldSource.DOCUMENT,
                     from_document=DocumentType.SWORN_STATEMENT,
-                    hint="Mejor el número del notario que su nombre.",
+                    hint=(
+                        "Se guarda el número, no el nombre. Sale del sello del documento y, "
+                        "cuando el sello no se puede leer, del texto."
+                    ),
                 ),
                 FolderField(
                     key="property_number",
@@ -330,6 +333,14 @@ class DocumentField:
     # the normalized text (uppercase, no accents, single spaces); group 1 is the
     # value, or the named groups the transform asks for.
     patterns: Tuple[str, ...] = ()
+    # Cómo viene escrito el valor DENTRO del sello, para un campo que vive en la
+    # estampa redonda y no en la redacción. El sello no se lee con el texto de la
+    # hoja: se lo busca en la imagen, se lo recorta y se desenrolla su corona
+    # (infrastructure/opencv_seal_reader.py), y por eso sus patrones son otros --
+    # dentro del recorte ya se sabe de qué sello se trata, así que no hay que
+    # volver a reconocerlo, solo encontrar el valor. Un campo que declara esto se
+    # llena con lo que diga el sello antes que con lo que diga el texto.
+    seal_patterns: Tuple[str, ...] = ()
     # Post-processing of what the pattern matched. Today only "spanish_date",
     # which turns a date written in words into dd/mm/aaaa.
     transform: Optional[str] = None
@@ -384,6 +395,24 @@ NOTARIAL_FIELDS: Tuple["DocumentField", ...] = (
             # reconoció el documento anterior ("ante Notario de Primera Clase
             # Nro. 44"), que no lleva esas palabras.
             r"NOTARI[AO]\s*DE\s*FE[A-Z\s,.-]{0,40}?(?:NRO|N[O0°])\.?\s*(\d{1,3})\b",
+        ),
+        # Y el sello mismo, que es de donde sale el número siempre: una minuta va
+        # dirigida al notario y no lo nombra, y el notario que sí nombra es el
+        # que reconoció el documento anterior. El sello se busca en la foto y se
+        # lee aparte, así que acá llega el texto de UN sello y nada más.
+        #
+        # Por eso no se exige "NOTARI(A|O) DE FE" delante: dentro del recorte ya
+        # se sabe que es el sello del notario, y exigirlo es justamente lo que
+        # falla cuando el desenrollado de la corona parte la leyenda en dos. Lo
+        # que sostiene el patrón es la marca de número con su número: en un sello
+        # no hay otra cifra de tres dígitos que pueda confundirse con esa (un
+        # teléfono y un año tienen más, y el patrón pide que el número termine
+        # ahí).
+        seal_patterns=(
+            # "NOTARIA DE FE PUBLICA No. 48", "CLAN0.48" del sello partido.
+            r"(?:NRO|N[O0°])\.?\s*(\d{1,3})\b",
+            # El sello al que el OCR le comió la marca: "DE PRIMERA CLASE 48".
+            r"CLASE\s*(\d{1,3})\b",
         ),
     ),
     DocumentField(

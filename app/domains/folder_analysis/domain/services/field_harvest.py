@@ -10,6 +10,10 @@ for each field the carpeta asks for, it looks for the label as it is printed
 (`printed`), first among the pairs the OCR already separated and then in the
 text of the sheet.
 
+A value that is not written on the sheet but stamped on it -- the number of the
+notary, which lives in the seal -- comes in through from_seals(), with the text
+of each seal read apart from the page (see SealReadingPort).
+
 Nothing is guessed. A label that is not on the sheet comes back empty and is
 named in the observations, so the architect sees what to type instead of finding
 out later that a field was silently filled with the wrong thing.
@@ -17,7 +21,7 @@ out later that a field was silently filled with the wrong thing.
 Pure: it only touches the reading it is given (CLAUDE.md §3).
 """
 import re
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from app.domains.folder_analysis.domain.services import spanish_dates
 from app.domains.folder_analysis.domain.services.text import clean_value, compact, normalize
@@ -56,7 +60,7 @@ TRANSFORMS = {
 }
 
 
-def _from_patterns(text: str, spec: Any) -> Optional[str]:
+def _from_patterns(text: str, spec: Any, patterns: Optional[Sequence[str]] = None) -> Optional[str]:
     """The value written inside a sentence, for a sheet that has no labels.
 
     A notarial act names nothing: the number of the notary, the person and the
@@ -67,10 +71,13 @@ def _from_patterns(text: str, spec: Any) -> Optional[str]:
     The patterns are an order of preference, not a set: the first one that says
     anything answers, because a field lists them from the wording that names it
     most surely down to the one that only usually does.
+
+    `patterns` replaces the field's own list, for a reading that is not the text
+    of the sheet and has its own wording -- the text of a seal (`seal_patterns`).
     """
     transform = TRANSFORMS.get(getattr(spec, "transform", None))
     collect_all = getattr(spec, "collect_all", False)
-    for pattern in getattr(spec, "patterns", ()):
+    for pattern in getattr(spec, "patterns", ()) if patterns is None else patterns:
         if not collect_all:
             match = re.search(pattern, text)
             value = (transform(match) if transform else clean_value(match.group(1))) if match else None
@@ -224,10 +231,53 @@ def harvest(
             used_lines.add(line_index)
 
     values = {spec.key: _shaped(spec, found.get(spec.key)) for spec in specs}
-    missing = [
-        spec.label for spec in specs if not values[spec.key] and not getattr(spec, "from_ide", False)
+    return values, missing_labels(values, specs)
+
+
+def missing_labels(values: Mapping[str, Optional[str]], specs: Sequence[Any]) -> List[str]:
+    """The labels that stayed empty and have to be typed by hand.
+
+    What comes from the IDE does not count: the sheet does not print it, so its
+    absence is not something the reading failed at. Public because what is
+    missing is asked again after the seals were read -- a value the stamp gave is
+    not missing any more.
+    """
+    return [
+        spec.label
+        for spec in specs
+        if not values.get(spec.key) and not getattr(spec, "from_ide", False)
     ]
-    return values, missing
+
+
+def from_seals(texts: Iterable[str], specs: Sequence[Any]) -> Dict[str, str]:
+    """What the seals stamped on the sheet say, for the fields that live in one.
+
+    A seal is not read with the text of the page: its legend is curved and the
+    OCR of the whole sheet gives it back in pieces, so it is found in the image,
+    cropped and unwrapped apart (SealReadingPort). Here it arrives as text
+    already, one reading per element, and each field looks for its value with the
+    patterns it declared for the seal (`seal_patterns`).
+
+    `texts` is consumed one by one and dropped as soon as every one of those
+    fields is filled: each reading costs a call to the OCR, and the seal is
+    almost always on the first sheet. Only what was found comes back -- a seal
+    that says nothing leaves the field to the text of the sheet.
+    """
+    wanted = [spec for spec in specs if getattr(spec, "seal_patterns", ())]
+    found: Dict[str, str] = {}
+    if not wanted:
+        return found
+    for text in texts:
+        prose = normalize(text)
+        for spec in wanted:
+            if spec.key in found:
+                continue
+            value = _shaped(spec, _from_patterns(prose, spec, spec.seal_patterns))
+            if value:
+                found[spec.key] = value
+        if len(found) == len(wanted):
+            break
+    return found
 
 
 def _shaped(spec: Any, value: Optional[str]) -> Optional[str]:

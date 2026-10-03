@@ -27,6 +27,7 @@ from app.domains.folder_analysis.application.use_cases import (
     DeleteRegisteredFolderUseCase,
     GetCaptureImageUseCase,
     GetDocumentUseCase,
+    GetFolderPhotoUseCase,
     GetRegisteredFolderUseCase,
     ListDocumentsUseCase,
     ListReviewedDocumentsUseCase,
@@ -37,6 +38,7 @@ from app.domains.folder_analysis.application.use_cases import (
     RegisteredFolderService,
     RemoveDocumentFromRegisteredFolderUseCase,
     SaveBoardToFolderUseCase,
+    SearchRegisteredFoldersUseCase,
     ReviewDocumentUseCase,
     RunServerReadingUseCase,
     SetDocumentPagesUseCase,
@@ -52,6 +54,7 @@ from app.domains.folder_analysis.domain.ports import (
     FolioExtractionPort,
     PdfRasterizerPort,
     RegisteredFolderRepositoryPort,
+    SealReadingPort,
     ServerReadingPort,
     TaxExtractionPort,
     TaxStructurerPort,
@@ -63,6 +66,7 @@ from app.domains.folder_analysis.infrastructure.folios_extractor import FoliosEx
 from app.domains.folder_analysis.infrastructure.ocr_plan_extractor import OcrPlanExtractor
 from app.domains.folder_analysis.infrastructure.ocr_tax_extractor import OcrTaxExtractor
 from app.domains.folder_analysis.infrastructure.ollama_fur_structurer import OllamaFurStructurer
+from app.domains.folder_analysis.infrastructure.opencv_seal_reader import OpenCvSealReader
 from app.domains.folder_analysis.infrastructure.opencv_thumbnail import OpenCvThumbnail
 from app.domains.folder_analysis.infrastructure.pdfium_rasterizer import PdfiumRasterizer
 from app.domains.folder_analysis.infrastructure.sql_capture_repository import SqlCaptureRepository
@@ -126,6 +130,15 @@ def get_plan_extractor() -> ServerReadingPort:
 
 
 @lru_cache()
+def get_seal_reader() -> SealReadingPort:
+    """La pasada que busca los sellos en la foto y los lee aparte del resto de la
+    hoja. Va con la lectura en servidor y no con una lectura de carril, porque lo
+    que se busca en el sello lo declara la carpeta (folder_types.seal_patterns) y
+    no el documento."""
+    return OpenCvSealReader()
+
+
+@lru_cache()
 def get_server_readers() -> Dict[str, ServerReadingPort]:
     """Every lane is read here with PaddleOCR and OpenCV instead of on the
     architects' PCs.
@@ -154,6 +167,7 @@ def run_server_reading(document_id: str, user_sub: str) -> None:
             captures=SqlCaptureRepository(db),
             extractors=get_server_readers(),
             folders=SqlRegisteredFolderRepository(db),
+            seals=get_seal_reader(),
         ).execute(document_id, user_sub)
     finally:
         db.close()
@@ -273,6 +287,22 @@ def get_list_registered_folders_use_case(
     folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
 ) -> ListRegisteredFoldersUseCase:
     return ListRegisteredFoldersUseCase(folders)
+
+
+def get_folder_photo_use_case(
+    folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
+    captures: CaptureRepositoryPort = Depends(get_capture_repository),
+) -> GetFolderPhotoUseCase:
+    """Las fotos de una carpeta, de solo lectura. La imagen se lee con el mismo
+    caso de uso de siempre; lo que agrega este es a nombre de quién se la pide y
+    con qué permiso."""
+    return GetFolderPhotoUseCase(folders, GetCaptureImageUseCase(captures, get_thumbnails()))
+
+
+def get_search_registered_folders_use_case(
+    folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
+) -> SearchRegisteredFoldersUseCase:
+    return SearchRegisteredFoldersUseCase(folders)
 
 
 def get_get_registered_folder_use_case(

@@ -66,11 +66,35 @@ class SqlRegisteredFolderRepository(RegisteredFolderRepositoryPort):
             return None
         return self._to_entity(row)
 
+    def find_any(self, folder_id: str) -> Optional[RegisteredFolder]:
+        row = self._row(folder_id)
+        return None if row is None else self._to_entity(row)
+
     def list(self, user_sub: str) -> List[RegisteredFolder]:
         rows = self._db.execute(
             select(RegisteredFolderModel)
             .where(RegisteredFolderModel.user_sub == user_sub)
             .order_by(func.lower(RegisteredFolderModel.name))
+        ).scalars()
+        return [self._to_entity(row) for row in rows]
+
+    def search_by_name(
+        self, name: str, user_sub: Optional[str] = None, limit: int = 50
+    ) -> List[RegisteredFolder]:
+        term = (name or "").strip()
+        if not term:
+            return []
+        query = select(RegisteredFolderModel).where(
+            # ilike and not lower(): the column is indexed by nothing here either
+            # way, and ilike says what this is. The term is escaped because a
+            # carpeta is named after a number the architect types, and a "%" or
+            # a "_" in it would otherwise be a wildcard instead of a character.
+            RegisteredFolderModel.name.ilike(f"%{_escape_like(term)}%", escape="\\")
+        )
+        if user_sub is not None:
+            query = query.where(RegisteredFolderModel.user_sub == user_sub)
+        rows = self._db.execute(
+            query.order_by(func.lower(RegisteredFolderModel.name)).limit(max(1, limit))
         ).scalars()
         return [self._to_entity(row) for row in rows]
 
@@ -165,6 +189,11 @@ class SqlRegisteredFolderRepository(RegisteredFolderRepositoryPort):
         if row is not None:
             self._db.delete(row)
             self._db.commit()
+
+
+def _escape_like(term: str) -> str:
+    """The term as a literal inside a LIKE pattern."""
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _new_items(document_ids: List[str]) -> List[RegisteredFolderItemModel]:
