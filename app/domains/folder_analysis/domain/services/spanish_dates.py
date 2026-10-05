@@ -12,7 +12,10 @@ tildes, un solo espacio) por normalize(), así que "MIÉRCOLES" es "MIERCOLES" y
 "AÑO" es "ANO".
 """
 import re
+from datetime import date
 from typing import Optional
+
+from app.domains.folder_analysis.domain.services.text import normalize, similar
 
 MONTHS = {
     "ENERO": 1,
@@ -30,8 +33,7 @@ MONTHS = {
     "DICIEMBRE": 12,
 }
 
-# Las formas en que un acta escribe un número. "VEINTIUN" y "PRIMERO" están acá
-# porque un día se escribe así ("veintiun del mes de", "primero de enero").
+# Las formas en que un acta escribe un número.
 _WORDS = {
     "CERO": 0, "UN": 1, "UNO": 1, "UNA": 1, "PRIMERO": 1, "PRIMER": 1,
     "DOS": 2, "TRES": 3, "CUATRO": 4, "CINCO": 5, "SEIS": 6, "SIETE": 7,
@@ -47,10 +49,77 @@ _WORDS = {
     "SETECIENTOS": 700, "OCHOCIENTOS": 800, "NOVECIENTOS": 900,
 }
 
+# Cómo se escribe de verdad un número en estas hojas, además de como lo manda la ortografía.
+_VARIANTS = {
+    "VENTIUN": 21, "VENTIUNO": 21, "VENTIUNA": 21, "VENTIDOS": 22, "VENTITRES": 23,
+    "VENTICUATRO": 24, "VENTICINCO": 25, "VENTISEIS": 26, "VENTISIETE": 27,
+    "VENTIOCHO": 28, "VENTINUEVE": 29, "VENTE": 20,
+    "DIECISEIS": 16, "DIEZISEIS": 16, "DIESISEIS": 16, "DIESISIETE": 17,
+    "DIESIOCHO": 18, "DIESINUEVE": 19,
+    "PRIMERA": 1, "SEGUNDO": 2, "TERCERO": 3,
+}
+
 _THOUSAND = "MIL"
 _SKIPPED = {"Y", "DE", "DEL", "LOS", "LAS", "EL", "LA", "DIAS", "DIA"}
 
 _WEEKDAYS = "LUNES|MARTES|MIERCOLES|JUEVES|VIERNES|SABADO|DOMINGO"
+
+
+def leading_number(text: str) -> Optional[int]:
+    """El número con el que ARRANCA ese texto, cortando donde deja de serlo.
+
+    Es lo que deja capturar con holgura y entender igual: un acta no termina su
+    fecha en el mismo lado en cada hoja ("del ano dos mil veintiseis, ANTE MI",
+    "de dos mil veintiseis y en presencia de"), y pedirle al patrón que adivine
+    dónde corta era lo que hacía que una redacción nueva no se leyera. Acá se
+    toman las palabras que son número y se para en la primera que no lo es.
+
+    None cuando ni la primera palabra es un número: ahí no hay nada que leer.
+    """
+    total, current, seen = 0, 0, False
+    for token in re.split(r"[\s,]+", (text or "").strip()):
+        if not token or token in _SKIPPED:
+            continue
+        # Una cifra ya es el número entero: "21", "2026".
+        if token.isdigit():
+            return int(token) if not seen else total + current
+        if token == _THOUSAND:
+            current = (current or 1) * 1000
+            total += current
+            current, seen = 0, True
+            continue
+        value = _number_word(token)
+        if value is None:
+            break
+        current += value
+        seen = True
+    return total + current if seen else None
+
+
+def _number_word(token: str) -> Optional[int]:
+    """El número que dice esa palabra, aguantando cómo salió de la foto.
+
+    Primero tal cual, después las formas que se escriben de verdad ("ventiuno"),
+    y recién al final por parecido, que es lo que salva a la palabra con una
+    letra cambiada ("VEINTIUN" leído "VElNTIUN"). El parecido se exige alto: una
+    palabra que no es un número tiene que quedar afuera, porque una fecha
+    inventada no la vuelve a mirar nadie.
+    """
+    exact = _WORDS.get(token)
+    if exact is not None:
+        return exact
+    variant = _VARIANTS.get(token)
+    if variant is not None:
+        return variant
+    if len(token) < 4:
+        # Dos o tres letras se parecen a cualquier cosa.
+        return None
+    best, score = None, MIN_WORD_RATIO
+    for word, value in _WORDS.items():
+        ratio = similar(token, word)
+        if ratio >= score:
+            best, score = value, ratio
+    return best
 
 
 def words_to_number(text: str) -> Optional[int]:
@@ -75,7 +144,7 @@ def words_to_number(text: str) -> Optional[int]:
             total += current
             current, seen = 0, True
             continue
-        value = _WORDS.get(token)
+        value = _WORDS.get(token) or _VARIANTS.get(token)
         if value is None:
             return None
         current += value
@@ -83,11 +152,11 @@ def words_to_number(text: str) -> Optional[int]:
     return total + current if seen else None
 
 
-# Cifras que el OCR devuelve por letras dentro de una palabra impresa: el mes de
-# una minuta fotografiada sale "AGOST0" o "5EPTIEMBRE". Se aplica solo al nombre
-# del mes -- nunca al día ni al año, que son cifras de verdad y una confusión ahí
-# tiene que quedar a la vista del arquitecto.
 _LOOKALIKE_LETTERS = str.maketrans({"0": "O", "1": "I", "5": "S", "8": "B"})
+
+# Cuánto tiene que parecerse una palabra a la que debería ser para darla por esa.
+MIN_WORD_RATIO = 0.86
+MIN_MONTH_RATIO = 0.80
 
 
 def month_number(month: str) -> Optional[int]:
@@ -98,15 +167,24 @@ def month_number(month: str) -> Optional[int]:
         return None
     if name.isdigit():
         return int(name)
-    return MONTHS.get(name) or MONTHS.get(name.translate(_LOOKALIKE_LETTERS))
+    exact = MONTHS.get(name) or MONTHS.get(name.translate(_LOOKALIKE_LETTERS))
+    if exact is not None:
+        return exact
+    # Y por parecido, para el mes al que la foto le cambió una letra ("SEPTlEMBRE", "NOVLEMBRE").
+    best, score = None, MIN_MONTH_RATIO
+    for month, number in MONTHS.items():
+        ratio = similar(name, month)
+        if ratio >= score:
+            best, score = number, ratio
+    return best
 
 
 def to_iso_like(day: str, month: str, year: str) -> Optional[str]:
     """dd/mm/aaaa a partir de las tres partes como vienen escritas, en letras o
     en cifras. None si alguna no se entiende: una fecha a medias es peor que
     ninguna, porque nadie la va a volver a mirar."""
-    day_number = words_to_number(day)
-    year_number = words_to_number(year)
+    day_number = leading_number(day)
+    year_number = leading_number(year)
     month_number_value = month_number(month)
     if not day_number or not month_number_value or not year_number:
         return None
@@ -117,41 +195,104 @@ def to_iso_like(day: str, month: str, year: str) -> Optional[str]:
         year_number += 2000
     if not 1900 <= year_number <= 2199:
         return None
+    try:
+        date(year_number, month_number_value, day_number)
+    except ValueError:
+        return None
     return f"{day_number:02d}/{month_number_value:02d}/{year_number:04d}"
 
 
-# El año va detrás de "de", "del" o "del año": una minuta cierra con "26 de
-# Agosto del 2014" tan seguido como con "de 2014", y sin la forma "del" esa
-# fecha no se leía.
-_OF_THE_YEAR = r"DE(?:L(?: ANO)?)?"
+_OF_THE_YEAR = r"DE(?:L(?:\s+ANO)?)?"
 
-# Lo que separa las palabras de una fecha en una hoja fotografiada. No es solo el
-# espacio: el OCR mete las rayas del renglón y los puntos de la línea de puntos
-# entre medio, y una fecha manuscrita sobre el renglón sale "26 de/Agosto del
-# 2014". Sin esto la fecha de cierre de la minuta no se leía.
+# Lo que separa las palabras de una fecha en una hoja fotografiada.
 _SEP = r"[\s/.,·-]+"
 
-# La fecha en cifras, con el día, el mes y el año en los grupos que to_iso_like()
-# espera. El mes admite cifras porque el OCR cambia letras por números dentro de
-# la palabra ("AGOST0"); month_number() las devuelve a su letra.
+# La fecha en cifras, con el día, el mes y el año en los grupos que to_iso_like() espera.
 _FIGURES = (
     rf"\b(?P<day>\d{{1,2}}){_SEP}DE{_SEP}(?P<month>[A-Z0-9]+){_SEP}{_OF_THE_YEAR}{_SEP}(?P<year>\d{{4}})\b"
 )
 
-# Cómo un acta escribe su fecha. Todas dejan el día, el mes y el año en los
-# grupos `day`, `month` y `year`, que es lo que to_iso_like() espera.
+# El día, en letras o en cifras.
+_DAY = r"(?P<day>\d{1,2}|[A-Z]+(?:\s+Y\s+[A-Z]+)?)"
+
+# Lo que separa dos palabras de una fecha en una hoja FOTOGRAFIADA.
+_GAP = r"[\s/.,:;·_-]+"
+
+# El año, en letras o en cifras.
+_YEAR = r"(?P<year>\d{4}|[A-Z]+(?:\s+[A-Z]+){0,4})"
+
+# El mes por su nombre.
+_MONTH = r"(?P<month>[A-Z0-9]+)"
+
+# "del mes de septiembre" y "de septiembre" son la misma cosa, y las dos se escriben.
+_OF_THE_MONTH = rf"(?:DEL{_GAP}MES{_GAP})?DE"
+
+# La fecha escrita entera con palabras y sin nada que la anuncie: "veinte y uno de septiembre de dos mil veintiseis".
+_LOOSE = rf"\b{_DAY}{_GAP}{_OF_THE_MONTH}{_GAP}{_MONTH}{_GAP}{_OF_THE_YEAR}{_GAP}{_YEAR}"
+
+# La fecha en cifras con barras, puntos o guiones: "21/09/2026", "21-09-2026".
+_SLASHED = r"(?P<day>\d{1,2})\s*[/.-]\s*(?P<month>\d{1,2})\s*[/.-]\s*(?P<year>\d{4})\b"
+
+# La misma, pero detrás de la palabra que la presenta.
+_LABELLED_SLASHED = rf"\bFECHAS?\W{{0,6}}{_SLASHED}"
+
+# Y suelta, que es el último recurso de todos.
+_BARE_SLASHED = rf"(?<!\d\s)\b{_SLASHED}"
+
+# Cómo un acta escribe su fecha.
 PATTERNS = (
-    # "del día, lunes veintiun del mes de septiembre del año dos mil veintiseis"
-    rf"DEL DIA[,\s]+(?:{_WEEKDAYS})?[,\s]*(?P<day>[A-Z ]+?) DEL MES DE (?P<month>[A-Z]+) DEL ANO (?P<year>[A-Z0-9 ]+?)(?=[,.;]|\s+ANTE|$)",
-    # "a los veintiun días del mes de septiembre de dos mil veintiseis"
-    rf"A LOS (?P<day>[A-Z0-9 ]+?) DIAS? DEL MES DE (?P<month>[A-Z]+) {_OF_THE_YEAR} (?P<year>[A-Z0-9 ]+?)(?=[,.;]|\s+ANTE|$)",
-    # La fecha del acto antes que ninguna otra. Una minuta cita las fechas de los
-    # documentos que la anteceden ("sentencia de fecha 08 de Agosto de 1996",
-    # "según documento de fecha 29 de Agosto del 2007") y esas vienen primero en
-    # la hoja; la suya propia cierra el documento junto a la ciudad y no lleva
-    # "fecha" delante. Sin este orden se guardaba la del antecedente.
+    rf"\b(?:DEL\s+|EL\s+|AL\s+)?DIA\b{_GAP}(?:(?:{_WEEKDAYS}){_GAP})?{_DAY}{_GAP}{_OF_THE_MONTH}{_GAP}{_MONTH}{_GAP}{_OF_THE_YEAR}{_GAP}{_YEAR}",
+    rf"\b(?:{_WEEKDAYS})\b{_GAP}{_DAY}{_GAP}{_OF_THE_MONTH}{_GAP}{_MONTH}{_GAP}{_OF_THE_YEAR}{_GAP}{_YEAR}",
+    # "a los veintiun días del mes de septiembre de dos mil veintiseis", "a los 21 días de septiembre del año 2026"
+    rf"\bA\s+LOS{_GAP}{_DAY}{_GAP}DIAS?{_GAP}{_OF_THE_MONTH}{_GAP}{_MONTH}{_GAP}{_OF_THE_YEAR}{_GAP}{_YEAR}",
+    # La fecha en cifras detrás de su palabra: "Fecha: 21/09/2026".
+    _LABELLED_SLASHED,
+    # La fecha del acto antes que ninguna otra.
     rf"(?<!FECHA ){_FIGURES}",
-    # Último recurso, para la hoja cuya única fecha va presentada como tal
-    # ("declaración jurada de fecha 12 de marzo de 2025").
     _FIGURES,
+    _LOOSE,
+    _BARE_SLASHED,
 )
+
+# Una fecha escrita en cifras y separada por barras, guiones o puntos.
+_SHORT_SLASHED = re.compile(r"\b(\d{1,2})\s*[/.-]\s*(\d{1,2})\s*[/.-]\s*(\d{2,4})\b")
+
+# La misma fecha al revés, que es como la escribe un modelo que se olvidó del formato que se le pidió ("2026-09-21").
+_ISO = re.compile(r"\b(\d{4})\s*[/.-]\s*(\d{1,2})\s*[/.-]\s*(\d{1,2})\b")
+
+
+def any_date(text: str) -> Optional[str]:
+    """Una fecha escrita de cualquiera de estas formas, en dd/mm/aaaa.
+
+    Existe para lo que contesta el modelo de visión: se le pide la fecha en
+    dd/mm/aaaa y la devuelve así casi siempre, pero también la devuelve como la
+    leyó de la hoja ("21 de septiembre de 2026") o en el orden del año primero
+    ("2026-09-21"). La oficina la quiere en una sola forma, así que se la pasa
+    por acá antes de guardarla.
+
+    None cuando no se entiende, que es lo que corresponde: una fecha a medias o
+    dada vuelta es peor que un campo vacío, porque nadie la vuelve a mirar.
+    """
+    prose = (text or "").strip()
+    if not prose:
+        return None
+
+    iso = _ISO.search(prose)
+    if iso is not None:
+        return to_iso_like(iso.group(3), iso.group(2), iso.group(1))
+
+    slashed = _SHORT_SLASHED.search(prose)
+    if slashed is not None:
+        # Siempre día/mes/año: es lo que se le pidió al modelo y lo que escribe la oficina.
+        return to_iso_like(slashed.group(1), slashed.group(2), slashed.group(3))
+
+    upper = normalize(prose)
+    for pattern in PATTERNS:
+        match = re.search(pattern, upper)
+        if match is None:
+            continue
+        parts = match.groupdict()
+        value = to_iso_like(parts.get("day", ""), parts.get("month", ""), parts.get("year", ""))
+        if value:
+            return value
+    return None

@@ -97,8 +97,6 @@ class SqlCaptureRepository(CaptureRepositoryPort):
         parsed = [i for i in (parse_uuid(c) for c in capture_ids) if i is not None]
         if not parsed:
             return 0
-        # user_sub in the WHERE as well as the ids: an id that is not this
-        # architect's deletes nothing instead of somebody else's photo.
         result = self._db.execute(
             delete(CaptureModel).where(
                 CaptureModel.id.in_(parsed), CaptureModel.user_sub == user_sub

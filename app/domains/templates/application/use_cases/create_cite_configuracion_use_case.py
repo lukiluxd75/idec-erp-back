@@ -20,8 +20,6 @@ class CreateCiteConfiguracionUseCase:
         longitud_numero: int,
         reinicia_por_gestion: bool,
     ) -> CiteConfiguracion:
-        # Fails fast on a malformed `formato` (unknown placeholder / unclosed
-        # brace) before it is ever persisted -- see render_cite_formato.
         render_cite_formato(
             formato,
             area=area_codigo,

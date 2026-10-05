@@ -1,6 +1,6 @@
 import logging
 
-from typing import List
+from typing import List, Optional
 
 import cv2
 import numpy as np
@@ -11,16 +11,8 @@ from app.domains.folder_analysis.domain.ports import PdfRasterizerPort
 
 logger = logging.getLogger("uvicorn.error")
 
-# A letter page is rendered about this wide on its long side -- roughly 180 dpi,
-# which is what the OCR of the folios and the FUR was tuned on. Below that the
-# small print of a comprobante starts to go.
 TARGET_LONG_SIDE = 2000
-# A plano is a page many times bigger, and the pixels of a letter page spread
-# over an A1 would leave its labels unreadable, so a big page is rendered by its
-# density instead...
 MIN_DPI = 150
-# ...up to a point: past this it stops being something a screen or a worker PC
-# can handle, and the plano is better rendered a little coarser.
 MAX_LONG_SIDE = 4500
 MAX_SCALE = 4.0  # a small page (a receipt) is not worth more than 288 dpi
 
@@ -33,13 +25,12 @@ class PdfiumRasterizer(PdfRasterizerPort):
     def __init__(self, jpeg_quality: int = 88):
         self._jpeg_quality = jpeg_quality
 
-    def pages(self, content: bytes, max_pages: int) -> List[bytes]:
+    def pages(self, content: bytes, max_pages: Optional[int] = None) -> List[bytes]:
         try:
             document = pdfium.PdfDocument(content)
             total = len(document)
         except pdfium.PdfiumError as exc:
-            # Password, broken xref, not a PDF at all: all the same to the
-            # architect, who only needs to know this file cannot be used.
+            # Password, broken xref, not a PDF at all: all the same to the architect, who only needs to know this file cannot be used.
             logger.info("Folder analysis: PDF ilegible (%s)", exc)
             raise InvalidCaptureException(
                 "El PDF no se pudo abrir. Si tiene contraseña, quítesela y vuelva a subirlo."
@@ -47,16 +38,13 @@ class PdfiumRasterizer(PdfRasterizerPort):
 
         if total == 0:
             raise InvalidCaptureException("El PDF no tiene páginas.")
-        if total > max_pages:
+        if max_pages is not None and total > max_pages:
             raise InvalidCaptureException(
                 f"El PDF tiene {total} páginas y se admiten como máximo {max_pages}. "
                 "Separe el documento y suba las páginas que necesita."
             )
 
         try:
-            # Fields filled on screen (a comprobante downloaded from the bank is
-            # often a form) are part of the page as far as the architect is
-            # concerned, so they have to be drawn too.
             document.init_forms()
         except Exception:
             logger.debug("Folder analysis: el PDF no trae formularios que dibujar")

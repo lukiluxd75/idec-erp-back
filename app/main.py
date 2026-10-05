@@ -16,10 +16,6 @@ async def lifespan(app: FastAPI):
 
     init_db_tables()
 
-    # A domain can be fully built and still be unreachable if nobody added it to
-    # registry.py's table -- that is exactly what happened to `alignment`, whose
-    # endpoints existed while the frontend got 404s. Say so at startup instead of
-    # waiting for someone to notice the 404.
     unregistered = check_unregistered_domains()
     if unregistered:
         logger.warning(
@@ -47,9 +43,7 @@ def create_application() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
-        # File-download endpoints (e.g. the detection report export) set
-        # this so the browser knows the suggested filename -- not exposed by
-        # default under CORS, so `fetch()` can't read it cross-origin without this.
+        # Expose Content-Disposition so the browser can read download filenames.
         expose_headers=["Content-Disposition"],
     )
 

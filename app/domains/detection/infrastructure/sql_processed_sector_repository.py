@@ -136,10 +136,6 @@ class SqlProcessedSectorRepository(ProcessedSectorRepositoryPort):
         )
         latest_run = self._latest_processing_run(processed_sector_id)
         if latest_run is not None:
-            # Scoped to the latest run: once a manual realignment adds a
-            # second batch (see ingest_result), an older run's parcels must
-            # not be zipped against a `cambios[]` array of a different job
-            # result they don't correspond to positionally.
             query = query.join(
                 DetectionModel, DetectionModel.id == AffectedParcelModel.detection_id
             ).filter(DetectionModel.processing_run_id == latest_run.id)
@@ -164,10 +160,6 @@ class SqlProcessedSectorRepository(ProcessedSectorRepositoryPort):
         run = self._latest_processing_run(processed_sector_id)
         job_id = (run.params or {}).get("job_id") if run else None
 
-        # sector_artifact.kind only distinguishes 4 named kinds ("other" is a
-        # lossy catch-all for everything else the engine's `urls` map had --
-        # see doc/bdd.sql's ck_sector_artifact_kind) -- fine here since those
-        # 4 are exactly the before/after images the Hallazgos gallery needs.
         urls: dict = {}
         if run is not None:
             kind_to_key = {
@@ -211,8 +203,6 @@ class SqlProcessedSectorRepository(ProcessedSectorRepositoryPort):
             else {}
         )
 
-        # Most recent "reject" review's comment, if any -- the architect's
-        # stated reason a finding was dismissed (see ReviewAffectedParcelUseCase).
         rejection_comments: dict[int, str] = {}
         if parcel_ids:
             for rv in (
@@ -298,13 +288,6 @@ class SqlProcessedSectorRepository(ProcessedSectorRepositoryPort):
             engine_result.get("align_quality") or {}
         ).get("gsd_m")
 
-        # A manual alignment recorded by record_manual_alignment() but not yet
-        # linked to a processing_run means the engine just re-ran detection on
-        # the newly-aligned images (align-manual/apply) -- this ingestion is
-        # that SECOND run, not the sector's first. Reuses that alignment
-        # instead of creating a fresh auto_ecc one, and gets its own new
-        # processing_run so the two runs' detections stay distinguishable
-        # (see list_affected_parcels).
         pending_manual_alignment = (
             self._db.query(AlignmentModel)
             .outerjoin(ProcessingRunModel, ProcessingRunModel.alignment_id == AlignmentModel.id)
@@ -320,11 +303,6 @@ class SqlProcessedSectorRepository(ProcessedSectorRepositoryPort):
 
         if pending_manual_alignment is not None:
             alignment = pending_manual_alignment
-            # apply_align_manual's own immediate response does not carry
-            # cc/residual_m -- the engine re-runs detection asynchronously,
-            # so those only become known once THIS (the re-run's) result
-            # arrives. Same top-level fields ingest_result already reads for
-            # the auto case (verified against a real post-apply result).
             align_quality = engine_result.get("align_quality") or {}
             cc = engine_result.get("ecc_cc")
             residual_m = engine_result.get("align_residual_m")
@@ -353,9 +331,6 @@ class SqlProcessedSectorRepository(ProcessedSectorRepositoryPort):
             run = previous_run
             if run is not None:
                 run.alignment_id = alignment.id
-                # Georeferencing parameters for this (re-)alignment, kept
-                # alongside job_id (see start()) since there are no
-                # dedicated columns for them in the schema.
                 run.params = {
                     **run.params,
                     "img_bbox": img_bbox,
@@ -423,10 +398,6 @@ class SqlProcessedSectorRepository(ProcessedSectorRepositoryPort):
         if sector.campaign_id is not None:
             campaign = self._db.query(CampaignModel).filter(CampaignModel.id == sector.campaign_id).first()
             if campaign is not None:
-                # Delta, not sector.n_affected_parcels outright: on a manual-
-                # realignment re-ingestion this sector was already counted
-                # once (see the first ingestion's own call here) -- adding
-                # the new total again would double count it in the campaign.
                 campaign.n_affected_parcels += sector.n_affected_parcels - previous_n_affected_parcels
 
         self._db.commit()
@@ -480,10 +451,6 @@ class SqlProcessedSectorRepository(ProcessedSectorRepositoryPort):
                 )
             )
 
-        # Back to a pre-ingestion status: the engine re-runs detection on
-        # apply, and the next result fetched for this job must go through
-        # ingest_result() again (is_ingested() gates on this exact status set)
-        # instead of being skipped as "already ingested".
         sector.status = "detecting"
         sector.progress_pct = 0
         sector.updated_at = datetime.utcnow()
@@ -519,13 +486,7 @@ class SqlProcessedSectorRepository(ProcessedSectorRepositoryPort):
             new_alignment.is_accepted = False
 
     def _create_alignment(self, sector_id: int, engine_result: dict[str, Any]) -> AlignmentModel:
-        # Only ever called from ingest_result()'s "no pending manual
-        # alignment" branch -- i.e. the sector's genuine first ingestion, so
-        # method is always the automatic one. Previously guessed this from
-        # whether engine_result["align_method"] contained "ecc", which broke
-        # for at least one real job (mislabeled an auto_ecc alignment as
-        # manual_gcp) -- the calling context already guarantees which one
-        # this is, no need to sniff engine-internal algorithm-name strings.
+        # Only called when no manual alignment is pending.
         align_quality = engine_result.get("align_quality") or {}
         resumen = engine_result.get("resumen_confiabilidad") or {}
         cc = engine_result.get("ecc_cc")
@@ -631,9 +592,6 @@ class SqlProcessedSectorRepository(ProcessedSectorRepositoryPort):
                     stage=stage,
                     status=status,
                     message="; ".join(s.get("label", "") for s in relevant),
-                    # Not measurable from a single result/progress snapshot — this
-                    # backend does not run a persistent poller of its own, only
-                    # the frontend polls; see IngestDetectionResultUseCase.
                     duration_seconds=None,
                 )
             )

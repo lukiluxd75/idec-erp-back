@@ -19,9 +19,6 @@ from app.domains.folder_analysis.domain.folder_types import (
     folder_type,
 )
 
-# The document type arrives as text and is checked against the catalogue instead
-# of a closed Literal: the kinds of document grow with the kinds of carpeta, and
-# a list written here would be a second place to keep them in step.
 DocType = str
 
 
@@ -68,13 +65,12 @@ class PageOut(BaseModel):
 class DocumentSummary(BaseModel):
     id: str
     doc_type: str
-    # The carpeta it was opened in, when it was opened in one, and the kind of
-    # carpeta it was classified under (which says what is pulled out of it).
     folder_id: Optional[str] = None
     folder_type: Optional[str] = None
     status: str
     pages: List[PageOut]
     error: Optional[str] = None
+    stage: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     analyzed_at: Optional[datetime] = None
@@ -93,6 +89,7 @@ class DocumentSummary(BaseModel):
                 for p in document.pages
             ],
             error=document.error,
+            stage=document.stage,
             created_at=document.created_at,
             updated_at=document.updated_at,
             analyzed_at=document.analyzed_at,
@@ -118,11 +115,8 @@ class DocumentDetail(DocumentSummary):
 class CreateDocumentRequest(BaseModel):
     doc_type: DocType
     capture_ids: List[str] = Field(min_length=1)
-    # The carpeta the photos were dropped in. Left out on the loose board.
+    # The carpeta the photos were dropped in.
     folder_id: Optional[str] = None
-    # The kind of carpeta being classified, when there is no carpeta open: the
-    # loose board picks it in its selector, and it is what decides which values
-    # are pulled out of the document. Inside a carpeta, its own kind wins.
     folder_type: Optional[str] = None
 
     @field_validator("doc_type")
@@ -226,8 +220,7 @@ class RegisteredFolderOut(BaseModel):
 class CreateRegisteredFolderRequest(BaseModel):
     name: str = Field(min_length=1, max_length=MAX_NAME_LENGTH)
     notes: Optional[str] = Field(default=None, max_length=MAX_NOTES_LENGTH)
-    # The kind of carpeta. Left out, it is the general one -- the three lanes the
-    # board had before the catalogue.
+    # The kind of carpeta.
     folder_type: Optional[str] = None
     # The carpeta's own sheet; what is not a field of its kind is dropped.
     data: Dict[str, Any] = Field(default_factory=dict)
@@ -284,6 +277,10 @@ class DocumentValueOut(BaseModel):
     label: str
     # Not asked on the review screen; the carpeta sheet still takes it from here.
     hidden: bool = False
+    # El campo puede traer VARIOS valores (dos poseedores, dos calles).
+    multiple: bool = False
+    # Cómo se llama uno de esos varios ("Poseedor"), para rotular cada apartado.
+    item_label: Optional[str] = None
 
 
 class DocumentTypeOut(BaseModel):
@@ -306,8 +303,7 @@ class FolderTypeOut(BaseModel):
     description: str
     document_types: List[str]
     field_groups: List[FolderFieldGroupOut]
-    # Qué valores se le sacan a cada documento de esta carpeta, por tipo de
-    # documento. Un tipo que no está acá se lee genérico (texto y cuadros).
+    # Qué valores se le sacan a cada documento de esta carpeta, por tipo de documento.
     document_values: Dict[str, List[DocumentValueOut]]
 
     @classmethod
@@ -319,7 +315,13 @@ class FolderTypeOut(BaseModel):
             document_types=list(spec.document_types),
             document_values={
                 doc_type: [
-                    DocumentValueOut(key=field.key, label=field.label, hidden=field.hidden)
+                    DocumentValueOut(
+                        key=field.key,
+                        label=field.label,
+                        hidden=field.hidden,
+                        multiple=field.collect_all,
+                        item_label=field.item_label,
+                    )
                     for field in document_fields(spec.key, doc_type)
                 ]
                 for doc_type in spec.document_types

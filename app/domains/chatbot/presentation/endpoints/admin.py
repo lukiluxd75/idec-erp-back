@@ -123,9 +123,6 @@ async def ingest_json_procedures(
 @router.get("/feedback", response_model=List[FeedbackListItem])
 def list_feedback(
     use_case: ListFeedbackUseCase = Depends(get_list_feedback_use_case),
-    # Separado de chatbot.edit a propósito: gestionar el catálogo de trámites y
-    # ver la retroalimentación de todos los usuarios son permisos distintos (un
-    # rol puede tener uno sin el otro) -- ver seed_permisos_chatbot.sql.
     _user: UserProfile = Depends(require_permission("chatbot.feedback")),
 ):
     return [

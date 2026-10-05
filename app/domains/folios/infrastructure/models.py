@@ -46,8 +46,6 @@ class FolioModel(Base):
     page_count = Column(Integer, nullable=False)
     extracted_data = deferred(Column(JSON))
     reviewed_data = deferred(Column(JSON))
-    # How the pipeline filled each field (see ProcessFolioUseCase._assemble) --
-    # only downloaded on demand from the web, to debug a wrong fill.
     fill_log = deferred(Column(JSON))
     error_message = Column(Text)
     created_at = Column(DateTime, nullable=False)

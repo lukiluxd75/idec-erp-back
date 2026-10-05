@@ -48,8 +48,6 @@ def lookup_parcel(
     text = _plan_text(documents.execute(document_id, user.sub)) if document_id else None
     result = lookup.execute(code, text)
     try:
-        # A value JSON cannot carry (NaN) fails AFTER the handler, as a 500 with no
-        # CORS headers; better to find out here and say so.
         json.dumps(result, allow_nan=False)
     except (TypeError, ValueError) as exc:
         logger.exception("Folder analysis: la respuesta del predio %s no es serializable", code)

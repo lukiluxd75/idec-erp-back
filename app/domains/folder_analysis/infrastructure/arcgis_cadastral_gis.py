@@ -22,11 +22,9 @@ PARCELS_LAYER = "catastro/prediosCertificado1/MapServer/0"
 STREETS_LAYER = "catastro/viasCertificado/MapServer/0"
 USE_LAYER = "catastro/usoSueloCertificado/MapServer/0"
 BLOCKS_LAYER = "catastro/manzanasCertificado/MapServer/0"
-# The services the croquis is stacked from, bottom to top (the same order the
-# certificate demo adds them in).
+# The services the croquis is stacked from, bottom to top (the same order the certificate demo adds them in).
 CROQUIS_SERVICES = ("usoSueloCertificado", "manzanasCertificado", "prediosCertificado1", "viasCertificado")
-# WGS84 / UTM zone 19 south: what the layers are stored in and what the plano's
-# coordinate table is printed in.
+# WGS84 / UTM zone 19 south: what the layers are stored in and what the plano's coordinate table is printed in.
 UTM_19S = 32719
 
 

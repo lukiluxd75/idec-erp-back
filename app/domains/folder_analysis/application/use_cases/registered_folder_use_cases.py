@@ -50,8 +50,7 @@ from app.domains.folder_analysis.domain.ports import (
 )
 
 
-# Lo mínimo que hay que escribir para que una búsqueda sea una búsqueda. Con una
-# letra, buscar entre las carpetas de todos los usuarios devuelve media base.
+# Lo mínimo que hay que escribir para que una búsqueda sea una búsqueda.
 MIN_SEARCH_LENGTH = 2
 
 
@@ -136,8 +135,7 @@ class RegisteredFolderService:
         folder, not a finished document filed on its own."""
         if not document_ids:
             return
-        # One listing instead of a query per document: this is the summary list,
-        # so it carries no extracted/reviewed JSON.
+        # One listing instead of a query per document: this is the summary list, so it carries no extracted/reviewed JSON.
         status_by_id: Dict[str, str] = {
             document.id: document.status for document in self._documents.list(user_sub)
         }

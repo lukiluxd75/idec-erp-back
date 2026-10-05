@@ -56,9 +56,6 @@ def list_inbox(
     return [CaptureOut.from_entity(c) for c in use_case.execute(user.sub)]
 
 
-# A photo never changes once it is uploaded, so the browser may keep any of its
-# copies for as long as it likes: turning a page back, or coming back to the
-# screen tomorrow, costs nothing.
 IMMUTABLE_CACHE = "private, max-age=604800, immutable"
 
 

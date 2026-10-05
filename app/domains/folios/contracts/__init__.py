@@ -37,8 +37,6 @@ __all__ = ["FolioExtraction", "PageText", "TextBlock", "extract_folio", "read_pa
 class FolioExtraction:
     data: Dict[str, Any]
     needs_review: bool
-    # How every value was reached (OCR text per field, LLM proposals): for the
-    # caller to store next to the data when it wants a fill log of its own.
     fill_log: Dict[str, Any]
 
     @property

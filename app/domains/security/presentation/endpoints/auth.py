@@ -82,9 +82,6 @@ def login(
         )
 
         # Ensure the user exists in 'usuario' (linked by keycloak_sub).
-        # InactiveUserException is allowed to propagate on purpose: if the user is
-        # marked inactive, login must fail here — do not return a valid token and
-        # fail only on the next screen.
         try:
             profile = verify_use_case.execute(result.access_token)
             sync_rbac.execute(
@@ -92,10 +89,6 @@ def login(
                 username=profile.username,
                 email=profile.email,
             )
-            # "Celular conectado" sin tocar la app movil: si este login no viene
-            # de un navegador de escritorio, queda registrada una sesion de
-            # celular (ver endpoints/presence.py). La app ya llama a /login, asi
-            # que el indicador se enciende solo al iniciar sesion.
             record_session_from_request(request, db, profile.sub)
         except InactiveUserException:
             raise
@@ -126,9 +119,6 @@ def refresh(
     """
     result = refresh_use_case.execute(RefreshTokenInputDTO(refresh_token=payload.refresh_token))
 
-    # El refresh es el latido natural de la app: lo llama sola cada vez que el
-    # access_token esta por vencer, asi que renovar aqui la sesion mantiene el
-    # indicador encendido mientras la app siga viva, sin pedirle nada nuevo.
     try:
         profile = verify_use_case.execute(result.access_token)
         record_session_from_request(request, db, profile.sub)

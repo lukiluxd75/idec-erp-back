@@ -38,18 +38,6 @@ from app.core.database.connection import Base
 
 SCHEMA = "detection_results"
 
-# `created_by`/`updated_by`/`validated_by` were migrated from BIGINT to UUID
-# with a real FK to `public.users(id)` (2026-09-17, see
-# scripts/migrate_detection_results_created_by_to_uuid.sql) so this domain can
-# record which authenticated user did what, resolved from the Keycloak `sub`
-# on the JWT -- see SqlProcessedSectorRepository._resolve_user_id.
-#
-# No `ForeignKey()` declared on these columns even though the constraint is
-# real in Postgres: SQLAlchemy's declarative FK resolution needs the target
-# Table already registered in this same `Base.metadata`, which would mean
-# importing `security.infrastructure.models` here — the cross-domain ORM
-# coupling this backend avoids everywhere else (see `resolutions`/`chatbot`,
-# which denormalize `user_sub` instead of FKing into security's schema).
 
 
 class CampaignModel(Base):
@@ -195,9 +183,6 @@ class ProcessingRunModel(Base):
         BigInteger, ForeignKey(f"{SCHEMA}.processed_sector.id", ondelete="CASCADE"), nullable=False
     )
     alignment_id = Column(BigInteger, ForeignKey(f"{SCHEMA}.alignment.id"))
-    # Holds the full request payload sent to the GPU engine PLUS its `job_id` —
-    # the schema has no dedicated job_id column (see design discussion in the PR),
-    # so this JSONB is the only place that correlates a run with the engine's job.
     params = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     created_at = Column(DateTime, nullable=False, server_default=text("now()"))
 

@@ -35,8 +35,6 @@ class ZentyalLdapAdapter(DirectoryProviderPort):
     def _build_server(self) -> Server:
         tls_config = None
         if self._use_ssl:
-            # Zentyal certificate is self-signed in this environment; validate=CERT_NONE
-            # mirrors the bypass needed so the LDAPS connection does not fail on an unknown CA.
             tls_config = Tls(
                 validate=ssl.CERT_REQUIRED if self._verify_cert else ssl.CERT_NONE,
                 version=ssl.PROTOCOL_TLSv1_2,
@@ -72,10 +70,6 @@ class ZentyalLdapAdapter(DirectoryProviderPort):
             ) from exc
 
         try:
-            # The `cn` (display name) almost never matches the login username in
-            # AD/Samba4 — building the DN by hand (cn={username},...) breaks as soon as the
-            # real name differs (e.g. "Pablo Vargas" vs. "pvargas"). Search the user by their
-            # real login attribute and use the DN returned by the directory itself.
             search_filter = self._user_search_filter.format(username=username)
             found = conn.search(
                 search_base=self._search_base_dn,

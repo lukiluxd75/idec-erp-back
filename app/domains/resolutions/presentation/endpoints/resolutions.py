@@ -182,8 +182,7 @@ def get_page(
     return Response(content=content, media_type=content_type)
 
 
-# Separa varias plantas de una misma foto en el campo `plantas`
-# ("PLANTA 2º PISO|PLANTA 3º PISO|PLANTA 4º PISO").
+# Separa varias plantas de una misma foto en el campo `plantas` ("PLANTA 2º PISO|PLANTA 3º PISO|PLANTA 4º PISO").
 SEPARADOR_PLANTAS = "|"
 
 
@@ -349,23 +348,15 @@ async def resolutions_ws(
 
     is_mobile = is_mobile_user_agent(websocket.headers.get("user-agent", ""))
 
-    # Dos registros distintos: el manager en memoria de este proceso para el
-    # broadcast de `update`, y la presencia en Postgres, que si tiene que ser
-    # igual en los cuatro workers (ver core/presence). start() va antes de
-    # connect() porque connect() ya emite el push de presencia leyendo el store.
     presence = SocketPresence(user.sub, CHANNEL_RESOLUTIONS, is_mobile)
     await presence.start()
     await manager.connect(websocket, user.sub, is_mobile)
     try:
         while True:
-            # The client sends nothing on this socket: it is only used for
-            # server -> browser notifications. receive_text() detects disconnect
-            # (WebSocketDisconnect) without busy-waiting.
+            # The client sends nothing on this socket: it is only used for server -> browser notifications.
             await websocket.receive_text()
     except WebSocketDisconnect:
         pass
     finally:
-        # finally y no solo WebSocketDisconnect: una caida sucia tambien tiene
-        # que liberar la fila, o el indicador queda encendido hasta que expire.
         await presence.stop()
         await manager.disconnect(websocket)

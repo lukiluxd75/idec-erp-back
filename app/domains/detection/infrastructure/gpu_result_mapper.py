@@ -27,8 +27,6 @@ DETECTION_TYPE_MAP = {
 }
 
 # `cambios[].tipo` -> `affected_parcel.change_type` (ck_affected_parcel_change_type).
-# NOT the same enum as DETECTION_TYPE_MAP: bdd.sql spells the "cambio" case
-# differently in each table ('changed' vs 'modified').
 AFFECTED_PARCEL_CHANGE_TYPE_MAP = {
     "nueva": "new",
     "eliminada": "removed",
@@ -44,10 +42,6 @@ MATCH_CONFIDENCE_MAP = {
 }
 
 # `cruce_predio.motivo` (when not "ok") -> `affected_parcel.no_match_reason`.
-# Not verified against a real "no match" sample (this job matched all 3
-# findings) — the fallback keeps any unrecognized engine reason inside the
-# CHECK's allowed values instead of raising, but should be revisited once a
-# real no-match payload is available.
 NO_MATCH_REASON_MAP = {
     "sin_capa": "no_layer",
     "no_layer": "no_layer",
@@ -58,16 +52,12 @@ NO_MATCH_REASON_MAP = {
 }
 NO_MATCH_REASON_FALLBACK = "arcgis_error"
 
-# `progress.steps[].id` grouped into the 3 stages `processing_history.stage`
-# allows (the engine tracks 9 granular steps, the schema only 3).
 STAGE_GROUPS: dict[str, set[str]] = {
     "alignment": {"plan", "wms_a", "wms_b", "align"},
     "shadows": {"shadows"},
     "detection": {"detect", "filter", "predios", "done"},
 }
 
-# `sector_artifact.kind` only allows these 5 values; everything else the
-# engine returns under `result.urls` collapses into "other".
 ARTIFACT_KIND_MAP = {
     "aligned_a": "aligned_a",
     "aligned_b": "aligned_b",

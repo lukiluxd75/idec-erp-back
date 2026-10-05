@@ -32,9 +32,6 @@ USER = "user-abc"
 
 class PresenceStoreTests(unittest.TestCase):
     def setUp(self):
-        # One shared in-memory DB, several sessions on top of it: that is how a
-        # multi-worker deployment looks to this code -- separate processes, one
-        # Postgres underneath.
         self.engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
         DevicePresenceModel.__table__.create(bind=self.engine)
         self.Session = sessionmaker(bind=self.engine)

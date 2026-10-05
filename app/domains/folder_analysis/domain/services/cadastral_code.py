@@ -32,15 +32,12 @@ def to_gis_code(raw: Optional[str]) -> str:
         raise InvalidDocumentRequestException(
             "El código catastral debe tener 19 dígitos (como figura en el plano) o 17 (como lo guarda el GIS)."
         )
-    # Only the manzana (3 characters after the subdistrito) can carry a letter
-    # ("B37"); anywhere else a letter is the OCR confusing a digit.
     digits = chars[:2] + chars[2:5] + chars[5:].translate(_LOOKALIKE)
     if not re.fullmatch(r"\d{2}[0-9A-Z]{3}\d{12}", digits):
         raise InvalidDocumentRequestException(
             "El código catastral solo puede llevar letras en la manzana (por ejemplo B37)."
         )
-    # Unit digit in the first position after the predio: it is a piso/local of the
-    # lot, and the lot is what the map has.
+    # Unit digit in the first position after the predio: it is a piso/local of the lot, and the lot is what the map has.
     if digits[8] != "0":
         digits = digits[:9] + "0" * 8
     return digits

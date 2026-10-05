@@ -18,11 +18,6 @@ from app.core.database.connection import Base
 
 SCHEMA = "alignment_results"
 
-# created_by/confirmed_by reference public.users(id) at the DB level (real FK
-# in the DDL) but are plain UUID columns here, not SQLAlchemy ForeignKey()s --
-# same reasoning as detection/infrastructure/models.py's header: declaring the
-# FK would require importing security's ORM models into this Base.metadata,
-# the cross-domain coupling this backend avoids everywhere.
 
 
 class AlignmentBlockModel(Base):

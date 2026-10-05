@@ -30,9 +30,6 @@ class Block(Protocol):
     def h(self) -> float: ...
 
 
-# Leading junk includes "%": a label ends in one ("DESCUENTO 10%") and only its
-# letters and digits are counted when it is cut off its value, so the sign is left
-# at the front of what follows. Trailing "%" is kept -- there it is a value.
 _EDGE_JUNK = re.compile(r"^[\s\-_*+#=~.:,;|%]+|[\s\-_*+#=~:,;|]+$")
 
 
@@ -55,10 +52,6 @@ def clean_value(text: str) -> Optional[str]:
     return re.sub(r"\s+", " ", _EDGE_JUNK.sub("", text or "")).strip() or None
 
 
-# Digits the OCR returns for letters and the other way round, on printed forms:
-# "IMPUEST0 DETERMINAD0", "FOLI0", "M0NT0 PAGAD0". Applied to BOTH sides of a
-# label comparison, so it can never turn one label into another, and never to a
-# value -- a misread digit in an amount has to stay visible to the architect.
 _LOOKALIKE = str.maketrans({"0": "O", "1": "I", "5": "S", "8": "B", "2": "Z"})
 
 

@@ -20,9 +20,6 @@ class DetectChangesRequest(BaseModel):
     min_prob_pct: float = 40.0
     predios_buffer_m: float = 2.0
     points_per_side: int = 8
-    # ERP-only bookkeeping (see StartDetectionJobUseCase) -- stripped before
-    # forwarding the payload to the GPU engine, which knows nothing about
-    # detection_results.campaign.
     campaign_id: Optional[int] = Field(None, description="detection_results.campaign id, if any")
 
 

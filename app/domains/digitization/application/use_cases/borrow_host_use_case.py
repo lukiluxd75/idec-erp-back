@@ -7,8 +7,7 @@ from app.domains.digitization.domain.ports import HostUsagePort
 
 logger = logging.getLogger("uvicorn.error")
 
-# How often a borrowed PC re-reads its stop flag. The borrower asks between
-# tokens, several times a second, so without this the database would be hammered.
+# How often a borrowed PC re-reads its stop flag.
 _STOP_POLL_SECONDS = 2.0
 
 

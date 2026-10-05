@@ -23,8 +23,7 @@ from fastapi import Depends
 from app.domains.security.domain.ports import UserRepositoryPort
 from app.domains.security.presentation.deps import get_user_repository
 
-# subs -> {sub: username}. A sub with no local user simply is not in the answer:
-# the caller shows what it has, it does not invent a name.
+# subs -> {sub: username}.
 UsernameLookup = Callable[[Iterable[Optional[str]]], Dict[str, str]]
 
 

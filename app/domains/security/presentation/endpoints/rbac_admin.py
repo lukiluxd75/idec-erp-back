@@ -45,8 +45,6 @@ from app.domains.security.presentation.schemas.rbac_admin_schema import (
 from app.domains.security.presentation.schemas.auth_schema import PublicMessageResponse
 
 # Reads require security.view; mutations require security.edit (IDEC guide §8).
-# Bootstrap: scripts/bootstrap_security_permissions.py (or deploy step) grants
-# security.view/edit to existing active roles so the first admin is not locked out.
 router = APIRouter(tags=["Security — Roles and Permissions"])
 
 

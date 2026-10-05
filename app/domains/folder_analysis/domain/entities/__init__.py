@@ -5,6 +5,7 @@ from app.domains.folder_analysis.domain.entities.folder_document import (
     DocumentType,
     FolderDocument,
     PageStatus,
+    ReadingStage,
     QueuedJob,
 )
 from app.domains.folder_analysis.domain.entities.registered_folder import (
@@ -26,6 +27,7 @@ __all__ = [
     "MAX_NAME_LENGTH",
     "MAX_NOTES_LENGTH",
     "PageStatus",
+    "ReadingStage",
     "QueuedJob",
     "RegisteredFolder",
 ]

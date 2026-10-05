@@ -41,34 +41,22 @@ from app.domains.folios.contracts import read_page_text
 
 logger = logging.getLogger("uvicorn.error")
 
-# Para buscar, la foto reducida: un sello se reconoce por su forma, no por su
-# detalle, y en una foto de 12 Mpx las dos pasadas costarían de más. El recorte
-# que se manda a leer sale igual de la foto original.
 WORK_WIDTH = 1400
 
-# El radio de un sello de notario, como parte del ancho de la hoja. Por debajo
-# del mínimo es un punto de la impresión; por encima del máximo es el borde de la
-# foto o un plato, no un sello.
+# El radio de un sello de notario, como parte del ancho de la hoja.
 MIN_RADIUS_RATIO = 0.035
 MAX_RADIUS_RATIO = 0.22
 
-# Tinta de sello: violeta o azul. Lo impreso en negro no tiene saturación, y por
-# eso esto separa el sello del texto de la hoja y no de la luz de la foto.
+# Tinta de sello: violeta o azul.
 MIN_SATURATION = 55
 MIN_VALUE = 40
 
 # Una mancha es redonda cuando su área se parece a la del círculo que la encierra.
-# Flojo a propósito: el sello llega cortado por el borde del papel o pisado por
-# una firma más veces de las que llega entero.
 MIN_ROUNDNESS = 0.55
 
-# Cuántos sellos se leen por hoja. Una hoja tiene el del notario y a veces el de
-# la ventanilla; más que eso son manchas, y cada una cuesta OCR.
+# Cuántos sellos se leen por hoja.
 MAX_SEALS_PER_PAGE = 2
 
-# El recorte se agranda a este ancho antes de leerlo: la leyenda de un sello es
-# letra chica, y el OCR la lee mucho mejor en grande que en los 200 px que ocupa
-# en la hoja.
 READ_WIDTH = 900
 
 # Un poco más que el sello, para no cortarle la leyenda con el propio recorte.
@@ -232,9 +220,6 @@ def _variants(page: np.ndarray, seal: Seal) -> Iterator[np.ndarray]:
     yield crop
     ring = unwrap(crop)
     yield ring
-    # La mitad de abajo del sello está cabeza abajo en la hoja, así que al
-    # desenrollar queda media vuelta girada respecto de la de arriba: una de las
-    # dos tiras lee derecho, y cuál de ellas depende de dónde arranca la leyenda.
     yield cv2.rotate(ring, cv2.ROTATE_180)
 
 

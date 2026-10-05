@@ -12,6 +12,7 @@ from app.domains.folder_analysis.domain.ports.server_reading_port import ServerR
 from app.domains.folder_analysis.domain.ports.tax_extraction_port import TaxExtractionPort
 from app.domains.folder_analysis.domain.ports.tax_structurer_port import TaxStructurerPort
 from app.domains.folder_analysis.domain.ports.thumbnail_port import ThumbnailPort
+from app.domains.folder_analysis.domain.ports.vision_reading_port import VisionReadingPort
 
 __all__ = [
     "CadastralGisPort",
@@ -27,4 +28,5 @@ __all__ = [
     "TaxExtractionPort",
     "TaxStructurerPort",
     "ThumbnailPort",
+    "VisionReadingPort",
 ]

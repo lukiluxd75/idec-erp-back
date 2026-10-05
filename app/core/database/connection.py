@@ -13,48 +13,19 @@ if db_uri.startswith("sqlite"):
         connect_args={"check_same_thread": False},
     )
 else:
-    # Guards asked of the server for every connection this app opens. They live
-    # here rather than in ALTER DATABASE so they are versioned with the code and
-    # bind only this app, leaving the other databases on the shared server alone.
-    # They are applied on the "connect" event below, not as libpq startup
-    # `options`: a connection pooler sits in front of this database and rejects
-    # that parameter ("Unsupported startup parameter: options"). It pools by
-    # session, so a plain SET holds for the life of the connection.
+    # Guards asked of the server for every connection this app opens.
     _SERVER_GUARDS = (
-        # A transaction left open holds its locks, and Postgres grants locks in
-        # arrival order: one forgotten transaction is enough to queue every later
-        # query on that table behind it, which is how this database once stopped
-        # answering while the rest of the server was fine. Ten minutes is far above
-        # any real request -- the longest legitimate chain is folios (90s OCR +
-        # 120s LLM) and chatbot (60s embedding + 180s vision) -- so this only ever
-        # reaches an abandoned one. Tighten it once those domains release the
-        # session before their slow call, the way digitization now does.
         f"idle_in_transaction_session_timeout={settings.DB_IDLE_IN_TRANSACTION_TIMEOUT_MS}",
-        # Nothing waits forever for a lock: a statement that cannot get one fails
-        # and frees its connection instead of adding to the queue behind it.
         f"lock_timeout={settings.DB_LOCK_TIMEOUT_MS}",
     )
     engine = create_engine(
         db_uri,
-        # No pool_pre_ping: the DB (172.16.66.103) is ~120ms away, and pre_ping
-        # adds a full round trip to EVERY checkout from the pool -- i.e. to every
-        # single DB-touching request, all the time. pool_recycle already discards
-        # connections older than an hour, which is enough given how often this
-        # app hits the DB (polling every 10s on some pages) to keep connections
-        # from going stale between uses.
         pool_recycle=3600,
-        # Bounded and explicit, so the ceiling this app can put on a shared server
-        # is predictable: processes x (size + overflow), against max_connections.
         pool_size=settings.DB_POOL_SIZE,
         max_overflow=settings.DB_POOL_MAX_OVERFLOW,
         pool_timeout=settings.DB_POOL_TIMEOUT_SECONDS,
         connect_args={
             "connect_timeout": settings.DB_CONNECT_TIMEOUT_SECONDS,
-            # Without keepalives the server cannot tell a client that died from one
-            # that is merely quiet: it waits in ClientRead forever, holding whatever
-            # locks that transaction took. That is exactly how a killed backend left
-            # this table unusable for the better part of an hour. These make the
-            # kernel notice a gone client in about a minute and roll it back.
             "keepalives": 1,
             "keepalives_idle": 30,
             "keepalives_interval": 10,
@@ -89,16 +60,8 @@ def init_db_tables() -> bool:
     Automatically create database tables if they do not exist.
     """
     try:
-        # Shared "phone connected" presence (app/core/presence): one table in
-        # `public`, used by geoextraction, resolutions and folder analysis.
         from app.core.presence import models as presence_models  # noqa: F401
         from app.domains.security.infrastructure import models  # noqa: F401
-        # The 'resolutions' domain's MIRRORED models (resolutions/resolution_pages,
-        # owned by the mobile app) are deliberately NOT imported here — see
-        # app/domains/resolutions/infrastructure/models.py. `plan_page_models` is
-        # different: it's a table the ERP itself owns (added 2026-09, floor-plan
-        # photos for colindancias), living in the same already-existing
-        # `resolutions` schema, so it IS registered for create_all() below.
         from app.domains.resolutions.infrastructure import plan_page_models  # noqa: F401
         from app.domains.geoextraction.infrastructure import models  # noqa: F401
         from app.domains.chatbot.infrastructure import models as chatbot_models  # noqa: F401
@@ -106,19 +69,13 @@ def init_db_tables() -> bool:
 
         if not db_uri.startswith("sqlite"):
             # create_all() only creates tables, never the Postgres schema itself.
-            # Unlike 'resolutions'/'detection', 'chatbot' and 'folios' own their
-            # schemas outright (nothing external creates them), so it has to happen here.
             with engine.begin() as conn:
                 conn.execute(CreateSchema(chatbot_models.SCHEMA, if_not_exists=True))
                 conn.execute(CreateSchema(folios_models.SCHEMA, if_not_exists=True))
         Base.metadata.create_all(bind=engine)
 
         if not db_uri.startswith("sqlite"):
-            # create_all() no altera tablas existentes, y a `device_presence` le
-            # cambió una columna después de su primera versión. Se registra
-            # aparte y con nivel error: si esto falla, el indicador "Celular
-            # conectado" queda apagado en silencio, que es muy difícil de
-            # diagnosticar desde la pantalla.
+            # create_all() no altera tablas existentes, y a `device_presence` le cambió una columna después de su primera versión.
             try:
                 presence_models.ensure_schema(engine)
             except Exception as exc:

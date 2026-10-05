@@ -33,8 +33,6 @@ class SqlResolutionRepository(ResolutionRepositoryPort):
         return self._to_entity(model) if model else None
 
     def get_page(self, resolution_id: str, order_index: int, user_sub: str) -> Optional[Tuple[bytes, str]]:
-        # Ownership check without pulling every page's image (see _get_model):
-        # this only needs to know the resolution exists and belongs to user_sub.
         owned = (
             self._db.query(ResolutionModel.resolution_id)
             .filter(
@@ -59,11 +57,6 @@ class SqlResolutionRepository(ResolutionRepositoryPort):
 
     @staticmethod
     def _pages_without_image():
-        # list()/_get_model() only need order_index + mime (see _to_entity) — the
-        # `image` BLOB (avg ~550KB/page here) is only ever needed by get_page(),
-        # which queries it directly. Eager-loading it everywhere else meant every
-        # resolutions list/detail pulled every photo's full bytes across a DB link
-        # with ~120ms latency for nothing.
         return joinedload(ResolutionModel.pages).load_only(
             ResolutionPageModel.order_index, ResolutionPageModel.mime
         )
@@ -119,8 +112,6 @@ class SqlResolutionRepository(ResolutionRepositoryPort):
         if model is None:
             return False
 
-        # Soft delete (`deleted_at` column): the row and its pages stay in the DB,
-        # they just stop being listed/fetched — see deleted_at IS NULL filter above.
         model.deleted_at = datetime.utcnow()
         self._db.commit()
         return True

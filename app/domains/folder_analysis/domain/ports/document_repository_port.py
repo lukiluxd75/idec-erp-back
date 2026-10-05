@@ -67,4 +67,14 @@ class DocumentRepositoryPort(ABC):
     ) -> None: ...
 
     @abstractmethod
+    def set_stage(self, document_id: str, stage: Optional[str]) -> None:
+        """En qué anda la lectura ahora mismo (ReadingStage), o None cuando lo que
+        hace ya lo cuenta el estado de cada foto y cuando terminó.
+
+        Escritura suelta y no parte de save_progress a propósito: esto no es un
+        resultado ni un avance de página, es un cartel para la pantalla que mira
+        la lectura. Va sola para que una pasada pueda anunciarse sin tocar nada
+        de lo leído."""
+
+    @abstractmethod
     def save_review(self, document_id: str, data: Dict[str, Any]) -> None: ...

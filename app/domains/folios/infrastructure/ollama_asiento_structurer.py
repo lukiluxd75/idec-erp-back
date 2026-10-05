@@ -47,8 +47,6 @@ class OllamaAsientoStructurer(AsientoStructurerPort):
         self._model = model or settings.FOLIOS_LLM_MODEL
         self._timeout = timeout or settings.FOLIOS_LLM_TIMEOUT_SECONDS
         self._host_provider = host_provider
-        # Marks the PC as busy while the call runs, so the monitor screen sees it,
-        # and hands back the "Detener" flag that monitor can raise.
         self._borrow = borrow or (lambda _host, _seconds: nullcontext(lambda: False))
 
     def is_configured(self) -> bool:
@@ -87,8 +85,7 @@ class OllamaAsientoStructurer(AsientoStructurerPort):
                         {"role": "user", "content": raw_text},
                     ],
                     "format": "json",
-                    # Streamed although the JSON is only usable whole: it is what
-                    # lets the monitor's "Detener" reach a call already underway.
+                    # Streamed although the JSON is only usable whole: it is what lets the monitor's "Detener" reach a call already underway.
                     "stream": True,
                     "keep_alive": KEEP_ALIVE,
                     "options": {"temperature": 0},

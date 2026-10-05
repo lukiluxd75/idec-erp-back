@@ -5,6 +5,7 @@ from typing import Dict
 from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
+from app.core.config.settings import settings
 from app.core.database.connection import SessionLocal, get_db
 from app.core.presence import (
     CHANNEL_FOLDER_ANALYSIS,
@@ -59,6 +60,7 @@ from app.domains.folder_analysis.domain.ports import (
     TaxExtractionPort,
     TaxStructurerPort,
     ThumbnailPort,
+    VisionReadingPort,
 )
 from app.domains.folder_analysis.infrastructure.arcgis_cadastral_gis import ArcGisCadastralGis
 from app.domains.folder_analysis.infrastructure.digitization_queue import DigitizationQueue
@@ -66,6 +68,7 @@ from app.domains.folder_analysis.infrastructure.folios_extractor import FoliosEx
 from app.domains.folder_analysis.infrastructure.ocr_plan_extractor import OcrPlanExtractor
 from app.domains.folder_analysis.infrastructure.ocr_tax_extractor import OcrTaxExtractor
 from app.domains.folder_analysis.infrastructure.ollama_fur_structurer import OllamaFurStructurer
+from app.domains.folder_analysis.infrastructure.ollama_vision_reader import OllamaVisionReader
 from app.domains.folder_analysis.infrastructure.opencv_seal_reader import OpenCvSealReader
 from app.domains.folder_analysis.infrastructure.opencv_thumbnail import OpenCvThumbnail
 from app.domains.folder_analysis.infrastructure.pdfium_rasterizer import PdfiumRasterizer
@@ -139,6 +142,21 @@ def get_seal_reader() -> SealReadingPort:
 
 
 @lru_cache()
+def get_vision_reader() -> VisionReadingPort:
+    """La última pasada de la lectura: qwen3-vl mirando la foto, en las mismas
+    computadoras de los arquitectos que presta el dominio de digitización.
+
+    Va junto a la lectura en servidor y no dentro de un carril, como el sello,
+    porque lo que se le pregunta lo declara la carpeta
+    (folder_types.vision_hint) y no el documento.
+    """
+    return OllamaVisionReader(
+        host_provider=get_worker_host_picker().execute,
+        borrow=get_borrow_host("folder-analysis").execute,
+    )
+
+
+@lru_cache()
 def get_server_readers() -> Dict[str, ServerReadingPort]:
     """Every lane is read here with PaddleOCR and OpenCV instead of on the
     architects' PCs.
@@ -168,6 +186,8 @@ def run_server_reading(document_id: str, user_sub: str) -> None:
             extractors=get_server_readers(),
             folders=SqlRegisteredFolderRepository(db),
             seals=get_seal_reader(),
+            vision=get_vision_reader(),
+            vision_max_pages=settings.FOLDER_VISION_MAX_PAGES,
         ).execute(document_id, user_sub)
     finally:
         db.close()
@@ -375,13 +395,6 @@ def get_generate_cadastral_croquis_use_case(
     return GenerateCadastralCroquisUseCase(gis)
 
 
-# --- "Celular conectado" -------------------------------------------------------
-#
-# Este dominio no tiene websocket (ver usePollWhile.js y el contrato en
-# docs/FOLDER_ANALYSIS_API_MOVIL.md: la app solo hace POST /captures), así que su
-# presencia es del tipo "actividad": cada petición que llega desde un celular
-# refresca la fila. El estado vive en Postgres, no en memoria del proceso, para
-# que los 4 workers respondan lo mismo -- ver app/core/presence.
 
 
 def get_presence_store(db: Session = Depends(get_db)) -> SqlPresenceStore:
@@ -405,15 +418,7 @@ def record_mobile_presence(
     duplicaría la consulta de permisos en cada subida.
     """
     user_agent = request.headers.get("user-agent", "")
-    # looks_like_phone y no is_mobile_user_agent: ese solo reconoce NAVEGADORES
-    # de celular, y la app movil es nativa -- manda `okhttp/4.12.0` o
-    # `Dart/3.3 (dart:io)`, que no contienen "Mobi" ni "Android". Por eso la
-    # foto llegaba pero el indicador nunca se encendia.
     if not looks_like_phone(user_agent):
-        # Se registra el User-Agent descartado porque este indicador falla
-        # callado por naturaleza: si no se enciende, no hay nada en pantalla
-        # que diga por que. Con esta linea, una subida que el servidor tomo por
-        # escritorio deja constancia de con que se identifico.
         logging.getLogger("uvicorn.error").info(
             "presence: subida a folder-analysis tomada como escritorio, "
             "no enciende el indicador. User-Agent=%r",

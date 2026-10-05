@@ -12,13 +12,6 @@ from app.domains.security.infrastructure.models import (
     UserRoleAreaModel,
 )
 
-# Area + role every new Keycloak-authenticated user starts with: instead of
-# having no permissions until an admin assigns them by hand (CLAUDE.md §5),
-# everyone who logs in for the first time enters Catastro with the base "Inicio"
-# role. Resolved via get-or-create (same pattern as
-# SqlRbacAdminRepository._get_or_create_permission) because there is no Alembic
-# or seed separate from the code today (CLAUDE.md §6): if the area or role already
-# exists (created by hand from RolesPage) they are reused, never duplicated by name.
 INITIAL_AREA_NAME = "Catastro"
 INITIAL_ROLE_NAME = "Inicio"
 

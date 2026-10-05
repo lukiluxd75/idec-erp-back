@@ -255,8 +255,6 @@ class PlanChecksTest(unittest.TestCase):
         self.assertEqual(set(checks.values()), {"missing"})
 
 
-# What the OCR really made of the plano of the example (a photo of a printed sheet):
-# no colons, "MANZANO", a zone glued to its neighbour word, "TTAL" for "TOTAL".
 OCR_TEXT = """
 LOTE N: 5 to CALLE DE 12.50 MTS.
 COORDENADAS UTM-WCS-84ZONA19

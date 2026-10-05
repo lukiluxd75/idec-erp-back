@@ -85,10 +85,7 @@ class SqlRegisteredFolderRepository(RegisteredFolderRepositoryPort):
         if not term:
             return []
         query = select(RegisteredFolderModel).where(
-            # ilike and not lower(): the column is indexed by nothing here either
-            # way, and ilike says what this is. The term is escaped because a
-            # carpeta is named after a number the architect types, and a "%" or
-            # a "_" in it would otherwise be a wildcard instead of a character.
+            # ilike and not lower(): the column is indexed by nothing here either way, and ilike says what this is.
             RegisteredFolderModel.name.ilike(f"%{_escape_like(term)}%", escape="\\")
         )
         if user_sub is not None:
@@ -161,8 +158,6 @@ class SqlRegisteredFolderRepository(RegisteredFolderRepositoryPort):
         row = self._row(folder_id)
         if row is None:
             return
-        # At the end of the carpeta, and only once: a document opened in it is
-        # already there, and filing it twice would break (folder_id, position).
         if any(str(item.document_id) == document_id for item in row.items):
             return
         row.items.append(
@@ -177,8 +172,6 @@ class SqlRegisteredFolderRepository(RegisteredFolderRepositoryPort):
         row = self._row(folder_id)
         if row is None:
             return
-        # Flush the removal first: the (folder_id, position) and document_id
-        # unique constraints would clash with the new rows otherwise.
         row.items.clear()
         self._db.flush()
         row.items.extend(_new_items(document_ids))

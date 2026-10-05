@@ -10,10 +10,6 @@ from app.domains.folios.domain.ports.folio_repository_port import FolioRepositor
 from app.domains.folios.infrastructure.models import FolioModel, FolioPageModel
 
 
-# A folio still PENDING/PROCESSING with no progress for this long was cut off
-# (backend restarted mid-pipeline: BackgroundTasks do not survive it). The
-# pipeline touches updated_at after every page, and one page at worst takes
-# ~10 min (every OCR call hitting its timeout), so 15 min means "dead".
 STALE_AFTER = timedelta(minutes=15)
 STALE_MESSAGE = "El procesamiento se interrumpió (posible reinicio del servidor). Reprocese el folio."
 
@@ -201,9 +197,6 @@ class SqlFolioRepository(FolioRepositoryPort):
         row = self._require(folio_id, None, with_data=True)
         row.status = FolioStatus.PROCESSING
         row.error_message = None
-        # Reprocessing = start over from a fresh extraction; an unconfirmed
-        # draft review would otherwise keep hiding it (confirmed folios are
-        # never reprocessed -- see RequestReprocessUseCase).
         row.reviewed_data = None
         row.fill_log = None
         row.updated_at = _now()

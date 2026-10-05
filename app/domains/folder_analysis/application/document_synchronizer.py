@@ -17,11 +17,7 @@ class DocumentSynchronizer:
         self._queue = queue
 
     def refresh(self, documents: List[FolderDocument]) -> List[FolderDocument]:
-        # Only documents the queue is actually running. The types read on the
-        # server (folio, tax receipt) have no job ids: their own use case writes
-        # their pages and their result, and reading page statuses here would call
-        # them finished the moment the last photo is read -- while the data is
-        # still being put together -- and store an empty result over it.
+        # Only documents the queue is actually running.
         pending = [
             d for d in documents
             if d.status in DocumentStatus.IN_PROGRESS and any(p.job_id for p in d.pages)

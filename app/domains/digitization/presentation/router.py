@@ -15,8 +15,6 @@ logger = logging.getLogger("uvicorn.error")
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    # FastAPI merges a router's lifespan into the app's, so the domain starts its
-    # own schema and dispatcher without touching main.py or core.
     if engine.dialect.name != "postgresql":
         logger.warning("digitization: requires PostgreSQL; schema and dispatcher skipped")
         yield

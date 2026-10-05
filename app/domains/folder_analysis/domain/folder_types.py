@@ -49,8 +49,7 @@ class FolderField:
     from_document: Optional[str] = None
     # What it always says, when the source is a fixed value.
     value: Optional[str] = None
-    # The line under the field: where to copy it from, or what the office's rule
-    # for it is. It is shown to the architect, so it is written in Spanish.
+    # The line under the field: where to copy it from, or what the office's rule for it is.
     hint: Optional[str] = None
 
 
@@ -93,12 +92,6 @@ class FolderTypeSpec:
         return doc_type in self.document_types
 
 
-# --- Documents -------------------------------------------------------------
-#
-# The three that already existed, plus the ones the carpeta de poseedores needs.
-# A document with no rules of its own is still read here on the server with the
-# generic OCR (its text, its labelled values and its tables) until someone writes
-# down what to pull out of it -- see extraction_profiles.
 
 DOCUMENT_TYPES: Dict[str, DocumentTypeSpec] = {
     DocumentType.FOLIO: DocumentTypeSpec(
@@ -139,7 +132,7 @@ DOCUMENT_TYPES: Dict[str, DocumentTypeSpec] = {
         key=DocumentType.SWORN_STATEMENT,
         label="Declaración jurada",
         noun="la declaración jurada",
-        hint="Declaración jurada ante notario. Puede tener varias páginas.",
+        hint="Carril retirado. Solo para los documentos guardados antes de quitarlo.",
         multi_page=True,
     ),
     DocumentType.ID_CARD: DocumentTypeSpec(
@@ -157,15 +150,41 @@ DOCUMENT_TYPES: Dict[str, DocumentTypeSpec] = {
 POSSESSORS = FolderTypeSpec(
     key="possessors",
     label="Registro catastral de poseedores",
-    description="Trámite de poseedores: avalúo, plano, formulario, declaración jurada y otros documentos.",
+    description="Trámite de poseedores: avalúo, plano, formulario y otros documentos.",
     document_types=(
         DocumentType.APPRAISAL,
         DocumentType.PLAN,
         DocumentType.FORM,
-        DocumentType.SWORN_STATEMENT,
         DocumentType.ID_CARD,
     ),
     field_groups=(
+        FolderFieldGroup(
+            key="notarial",
+            title="Datos del formulario",
+            fields=(
+                FolderField(
+                    key="notary_number",
+                    label="N.º de notario",
+                    source=FieldSource.DOCUMENT,
+                    from_document=DocumentType.FORM,
+                    hint="Se extrae del sello notarial del formulario.",
+                ),
+                FolderField(
+                    key="owner_name",
+                    label="Poseedores",
+                    source=FieldSource.DOCUMENT,
+                    from_document=DocumentType.FORM,
+                    hint="Nombres de los poseedores declarados en el formulario.",
+                ),
+                FolderField(
+                    key="statement_dates",
+                    label="Fecha de la declaración jurada",
+                    source=FieldSource.DOCUMENT,
+                    from_document=DocumentType.FORM,
+                    hint="La fecha se guarda en formato dd/mm/aaaa.",
+                ),
+            ),
+        ),
         FolderFieldGroup(
             key="plan",
             title="Datos de plano",
@@ -200,56 +219,10 @@ POSSESSORS = FolderTypeSpec(
                 ),
             ),
         ),
-        FolderFieldGroup(
-            key="sworn_statement",
-            title="Datos de la declaración jurada",
-            fields=(
-                FolderField(
-                    key="notary_number",
-                    label="Notario (Nº)",
-                    source=FieldSource.DOCUMENT,
-                    from_document=DocumentType.SWORN_STATEMENT,
-                    hint=(
-                        "Se guarda el número, no el nombre. Sale del sello del documento y, "
-                        "cuando el sello no se puede leer, del texto."
-                    ),
-                ),
-                FolderField(
-                    key="property_number",
-                    label="Número de predio",
-                    source=FieldSource.IDE,
-                    hint="Del IDE.",
-                ),
-                FolderField(
-                    key="owner_name",
-                    label="Nombres de los poseedores",
-                    source=FieldSource.DOCUMENT,
-                    from_document=DocumentType.SWORN_STATEMENT,
-                    hint="Todos los que firman, separados por coma, tal como figuran en la declaración jurada.",
-                ),
-                FolderField(
-                    key="statement_dates",
-                    label="Fecha de la declaración jurada",
-                    source=FieldSource.DOCUMENT,
-                    from_document=DocumentType.SWORN_STATEMENT,
-                    hint="En dd/mm/aaaa. El acta la escribe con letras y la lectura la pasa a cifras.",
-                ),
-                FolderField(
-                    key="legal_status",
-                    label="Datos legales",
-                    source=FieldSource.FIXED,
-                    value="Particular",
-                    hint="En poseedores es siempre particular.",
-                ),
-            ),
-        ),
     ),
 )
 
 
-# Every carpeta that existed before this catalogue: the documents already
-# analyzed were not filed under any kind of carpeta, and the board showed the
-# three original lanes. They keep working under this one.
 GENERAL = FolderTypeSpec(
     key="general",
     label="General",
@@ -263,8 +236,6 @@ FOLDER_TYPES: Dict[str, FolderTypeSpec] = {
     GENERAL.key: GENERAL,
 }
 
-# What a carpeta with no kind of its own falls back to, so nothing that already
-# exists has to be migrated before it can be opened again.
 DEFAULT_FOLDER_TYPE = GENERAL.key
 
 
@@ -324,49 +295,82 @@ class DocumentField:
     key: str
     label: str
     printed: Tuple[str, ...] = ()
-    # The office asks for this one by number, not by name (the notary), so only
-    # the number of what was read is kept.
+    # The office asks for this one by number, not by name (the notary), so only the number of what was read is kept.
     number_only: bool = False
-    # How the value is written when the sheet has no labels at all -- a notarial
-    # act is running prose, and what identifies a value there is the sentence it
-    # sits in ("se hizo presente NOMBRE con Cédula de Identidad"). Regexes over
-    # the normalized text (uppercase, no accents, single spaces); group 1 is the
-    # value, or the named groups the transform asks for.
     patterns: Tuple[str, ...] = ()
-    # Cómo viene escrito el valor DENTRO del sello, para un campo que vive en la
-    # estampa redonda y no en la redacción. El sello no se lee con el texto de la
-    # hoja: se lo busca en la imagen, se lo recorta y se desenrolla su corona
-    # (infrastructure/opencv_seal_reader.py), y por eso sus patrones son otros --
-    # dentro del recorte ya se sabe de qué sello se trata, así que no hay que
-    # volver a reconocerlo, solo encontrar el valor. Un campo que declara esto se
-    # llena con lo que diga el sello antes que con lo que diga el texto.
+    # Cómo viene escrito el valor DENTRO del sello, para un campo que vive en la estampa redonda y no en la redacción.
     seal_patterns: Tuple[str, ...] = ()
-    # Post-processing of what the pattern matched. Today only "spanish_date",
-    # which turns a date written in words into dd/mm/aaaa.
+    # Post-processing of what the pattern matched.
     transform: Optional[str] = None
-    # The value comes from the IDE lookup on the review screen, not from the text
-    # of the sheet: the reading has nothing to search for and its absence is not
-    # a missing label.
     from_ide: bool = False
-    # Filled on the review screen but not shown in the block of values: the carpeta
-    # sheet still takes it from here, the plano just has nothing to confirm in it.
     hidden: bool = False
-    # Every match of every pattern, not just the first: a plano prints the width of
-    # each street it faces.
+    # Every match of every pattern, not just the first: a plano prints the width of each street it faces.
     collect_all: bool = False
+    item_label: Optional[str] = None
+    # La redacción que, cuando viene justo ANTES de lo que un patrón encontró, dice que ese número es de otra cosa.
+    rejected_after: Tuple[str, ...] = ()
+    # Qué pedirle al modelo de visión mirando la foto, en castellano y señalando dónde está el valor en la hoja.
+    vision_hint: Optional[str] = None
 
 
-# Cómo viene escrita la cédula detrás de un nombre. Es lo que marca dónde termina
-# el nombre, así que tiene que aguantar lo que el OCR hace con dos letras sueltas:
-# la I sale L o 1 ("CON C.L:5932821" por "con C.I: 5932821"), y los puntos y el
-# espacio aparecen o no según cómo salió la foto.
+# Cómo viene escrita la cédula detrás de un nombre.
 _ID_CARD = r"(?:CEDULA DE IDENTIDAD|C\.?\s?[IL1]\.?)"
 
+# La cédula con su número detrás.
+_ID_NUMBER = rf"{_ID_CARD}[^\d]{{0,6}}\d"
 
-# Lo que se le saca a un acta notarial. No tiene rótulos: el número del notario,
-# la persona y la fecha están dentro de su redacción, así que cada campo dice en
-# qué frase vive. Las etiquetas (`printed`) quedan igual para la hoja que sí las
-# trae rotuladas, como un formulario municipal con casillas.
+# El código catastral, en las dos formas en que lo imprimen estas hojas.
+#
+# El plano lo escribe con 19 dígitos ("00-33-432-012-0-00-000-000") y el avalúo
+# con 17 ("33-432-012-0-00-000-000"): es el mismo predio, y el par de adelante no
+# es parte del código -- es lo que ya decía cadastral_code.to_gis_code(), que
+# acepta las dos. Por eso el primer grupo es opcional y no hay dos patrones.
+# "SUPERFICIE TOTAL UTIL......294.66m2", "Sup. Total Util 299.02 m2" (o "TTAL":
+# el OCR se come letras). Tiene que terminar en m2: un "SUP. TOTAL UTIL" seguido
+# de un lado de 30.18m no es la superficie.
+_USABLE_AREA = r"SUP(?:ERFICIE|\.)?\s*(?:T[A-Z]{2,4}\s+)?UTIL\W{0,40}?(\d[\d.,]*\s*M[2\u00b2])"
+
+_CODE_SEP = r"\s*[-.]\s*"
+_CADASTRAL_CODE = (
+    rf"\b((?:\d{{2}}{_CODE_SEP})?\d{{2}}{_CODE_SEP}[0-9A-Z]{{3}}{_CODE_SEP}\d{{3}}"
+    rf"{_CODE_SEP}\d{_CODE_SEP}\d{{2}}{_CODE_SEP}\d{{3}}{_CODE_SEP}\d{{3}})(?![\d-])"
+)
+
+_NOT_NAME = (
+    "PRESENTE|PRESENTES|PRESENTO|PRESENTA|PRESENTAN|PRESENTARON|PRESENTAR"
+    "|HIZO|HICIERON|HACE|HACEN"
+    "|COMPARECE|COMPARECEN|COMPARECIO|COMPARECIERON|COMPARECIENTE|COMPARECIENTES"
+    "|APERSONA|APERSONAN|SUSCRIBE|SUSCRIBEN|DECLARA|DECLARAN|DECLARANTE|DECLARANTES"
+    "|SOLICITANTE|SOLICITANTES|POSEEDOR|POSEEDORA|PROPIETARIO|PROPIETARIA"
+    "|MAYOR|MENOR|EDAD|ANOS|ANO|HABIL|HABILES|VECINO|VECINA"
+    "|BOLIVIANO|BOLIVIANA|SOLTERO|SOLTERA|CASADO|CASADA|VIUDO|VIUDA"
+    "|DIVORCIADO|DIVORCIADA|CONVIVIENTE|ESTADO|CIVIL"
+    "|PROFESION|OCUPACION|DOMICILIO|DOMICILIADO|DOMICILIADA|DIRECCION"
+    "|CEDULA|IDENTIDAD|CARNET|NUMERO|NRO|CODIGO|CATASTRAL"
+    "|ANTE|NOTARIO|NOTARIA|NOTARIAL|PUBLICA|PUBLICO|ABOGADO|ABOGADA|FE"
+    "|SENOR|SENORA|SENORES|SENORITA|DON|DONA|SR|SRA|SRES|DR|DRA|LIC|ING|ARQ"
+    "|NOMBRE|NOMBRES|FIRMA|FIRMAS|HUELLA|HUELLAS|FORMULARIO|DECLARACION|DECLARACIONES"
+    "|MUNICIPIO|DEPARTAMENTO|ESTADO|PLURINACIONAL|GOBIERNO|AUTONOMO|MUNICIPAL"
+    "|CON|SIN|POR|PARA|SEGUN|SOBRE|ENTRE|DESDE|HASTA"
+    "|QUIEN|QUIENES|AMBOS|AMBAS|CONJUNTAMENTE|CONMIGO|MISMO|MISMA"
+    "|DEL|DE|LA|EL|LO|LOS|LAS|UN|UNA|Y|O|SU|SUS|EN|AL|A|QUE|SE|MI|ME|NI"
+)
+_NOT_A_NAME = rf"(?!(?:{_NOT_NAME})\b)"
+
+# Una palabra de un nombre: dos letras o más y ninguna de las de arriba.
+_NAME_WORD = rf"\b{_NOT_A_NAME}[A-Z]{{2,}}"
+
+# Los enlaces que SÍ van dentro de un apellido ("MARIA DE LA CRUZ PEREZ").
+_NAME_LINK = r"(?:DE|DEL|LA|LAS|LOS|Y|DA|DOS)"
+
+# Un nombre completo: de dos a cinco palabras, con sus enlaces.
+_NAME = rf"{_NAME_WORD}(?:\s+(?:{_NAME_LINK}\s+){{0,2}}{_NAME_WORD}){{1,4}}"
+
+# La prosa que un acta mete ENTRE el nombre y su cédula ("NOELIA ALMENDRAS RODRIGUEZ, boliviana, mayor de edad, con C.I.
+_BETWEEN = rf"(?:[\s,.;-]+(?:{_NOT_NAME})\b)*"
+
+
+# Lo que se le saca a un acta notarial.
 NOTARIAL_FIELDS: Tuple["DocumentField", ...] = (
     DocumentField(
         "notary_number",
@@ -374,77 +378,49 @@ NOTARIAL_FIELDS: Tuple["DocumentField", ...] = (
         printed=("NOTARIA DE FE PUBLICA", "NOTARIA", "NOTARIO"),
         number_only=True,
         patterns=(
-            # "Notario de Fe Pública N° 15", y sobre todo el sello, que es de
-            # donde sale el número cuando la minuta no lo escribe: redondo,
-            # girado y con el oficio en medio, el OCR lo devuelve hecho pedazos
-            # ("NOTARIA DEFE PULCA DEP.SMERA CLAN0.48", "NOTARIADEFE PURUCA
-            # DEPAIMERA CLASENo.48"). Por eso solo se exige "NOTARI(A|O) DE FE"
-            # --que sobrevive aun pegado-- y después, dentro de unos pocos
-            # caracteres de letras, el número con su marca.
-            #
-            # "PUBLICA" no se exige: sale "PULCA" o "PURUCA" casi siempre. La
-            # marca admite el cero que el OCR pone por O ("N0.48"); normalizado,
-            # "Nº" queda "NO" y "Nro." queda "NRO.".
-            #
-            # La marca no lleva límite de palabra delante a propósito: el sello
-            # sale con "CLASE No." pegado ("CLAN0.48", "CLASENO.48"), así que la
-            # N queda dentro de una palabra. Lo que sostiene el patrón es que
-            # detrás venga el número.
-            #
-            # Pedir "DE FE" es lo que distingue al notario de esta hoja del que
-            # reconoció el documento anterior ("ante Notario de Primera Clase
-            # Nro. 44"), que no lleva esas palabras.
             r"NOTARI[AO]\s*DE\s*FE[A-Z\s,.-]{0,40}?(?:NRO|N[O0°])\.?\s*(\d{1,3})\b",
         ),
-        # Y el sello mismo, que es de donde sale el número siempre: una minuta va
-        # dirigida al notario y no lo nombra, y el notario que sí nombra es el
-        # que reconoció el documento anterior. El sello se busca en la foto y se
-        # lee aparte, así que acá llega el texto de UN sello y nada más.
-        #
-        # Por eso no se exige "NOTARI(A|O) DE FE" delante: dentro del recorte ya
-        # se sabe que es el sello del notario, y exigirlo es justamente lo que
-        # falla cuando el desenrollado de la corona parte la leyenda en dos. Lo
-        # que sostiene el patrón es la marca de número con su número: en un sello
-        # no hay otra cifra de tres dígitos que pueda confundirse con esa (un
-        # teléfono y un año tienen más, y el patrón pide que el número termine
-        # ahí).
         seal_patterns=(
-            # "NOTARIA DE FE PUBLICA No. 48", "CLAN0.48" del sello partido.
+            # "NOTARIA DE FE PUBLICA No.
             r"(?:NRO|N[O0°])\.?\s*(\d{1,3})\b",
+            # El sello con la marca a secas, que es como sale impreso en el medio de muchos: "N 37" bajo "NOTARIA DE FE PUBLICA".
+            r"\bN\s*\.?\s*(\d{1,3})\b",
             # El sello al que el OCR le comió la marca: "DE PRIMERA CLASE 48".
             r"CLASE\s*(\d{1,3})\b",
+        ),
+        rejected_after=("RESOLUCION MINISTERIAL", "RESOLUCION", "MINISTERIAL", "R.M."),
+        vision_hint=(
+            "el número de la notaría, que está DENTRO del sello redondo estampado en la hoja "
+            '(dice "NOTARIA DE FE PUBLICA" alrededor y el número en el medio, por ejemplo "Nº 37"). '
+            "Devuelva solo el número. NUNCA el número de la Resolución Ministerial impresa bajo el "
+            'título "FORMULARIO NOTARIAL" (por ejemplo "Resolución Ministerial Nº 57/2020"), que no '
+            "es el notario; ni el número de la cédula, ni el del trámite, ni una fecha."
         ),
     ),
     DocumentField(
         "owner_name",
         "Nombres de los poseedores",
         printed=("NOMBRE DEL PROPIETARIO", "PROPIETARIO", "DECLARANTE"),
-        # Todos los que firman, no el primero: una carpeta de poseedores casi
-        # siempre va a nombre de dos (los cónyuges), y quedarse con uno obligaba
-        # a copiar el otro a mano sin que nada avisara que faltaba. Van separados
-        # por coma, en el orden en que la hoja los enumera.
         collect_all=True,
+        item_label="Poseedor",
         patterns=(
-            # "se hizo presente NOELIA ALMENDRAS RODRIGUEZ con Cédula de Identidad"
-            rf"SE HIZO PRESENTE[,:\s]+(.+?)[,\s]+CON {_ID_CARD}",
-            rf"(?:COMPARECE|COMPARECIO)[,:\s]+(.+?)[,\s]+CON {_ID_CARD}",
-            # Una minuta dirigida al notario no dice "compareció": enumera a las
-            # partes y cuelga la cédula de cada nombre ("1.- JUAN CHILE ARIAS.
-            # Con C.I:5918362", "2.- ROBERTA HUMACAYA MAMANI, con C.I: 5932821").
-            #
-            # Palabras de tres letras o más: el texto llega todo en mayúsculas,
-            # así que sin ese mínimo la prosa que a veces se mete entre el nombre
-            # y la cédula ("mayor de edad, con C.I.") pasaba por nombre. Cuando
-            # la cédula no sigue al nombre el campo queda vacío, que es lo que
-            # corresponde -- un nombre inventado nadie lo vuelve a mirar.
-            #
-            # El tratamiento queda fuera del nombre: la minuta nombra a la misma
-            # persona suelta al enumerarla y "el señor Fulano" más adelante, y sin
-            # descartarlo entraban las dos como si fueran dos poseedores. Ñ llega
-            # como N, que es lo que hace normalize().
-            r"\b(?:(?:EL|LA|LOS|LAS)\s+)?"
-            r"(?:(?:SENOR(?:A|ES|AS)?|SRA?|DON|DONA|DR|DRA|LIC|ING|ARQ)\.?\s+)?"
-            rf"([A-Z]{{3,}}(?:\s+[A-Z]{{3,}}){{1,3}})[,.\s]+CON {_ID_CARD}",
+            # El nombre que lleva su cédula detrás, que es como lo escriben todas estas hojas.
+            rf"({_NAME}){_BETWEEN}[\s,.;-]*\bCON\s+{_ID_NUMBER}",
+            # La hoja que presenta al declarante y no le escribe la cédula al lado.
+            rf"\bSE\s+HI(?:ZO|CIERON)\s+PRESENTES?\b[\s,:.;-]+({_NAME})",
+            rf"\bSE\s+PRESENT(?:O|ARON|A|AN)\b[\s,:.;-]+({_NAME})",
+            rf"\bCOMPAREC(?:E|EN|IO|IERON)\b[\s,:.;-]+({_NAME})",
+            rf"({_NAME})[\s,.;-]*{_ID_NUMBER}",
+        ),
+        vision_hint=(
+            "el nombre completo de cada poseedor que declara o comparece, tal como está escrito y en "
+            "el orden en que aparecen, separados por coma. Son los que la hoja presenta con "
+            '"se hizo presente", "compareció" o "declara", y los que llevan su cédula de identidad al '
+            "lado; el mismo nombre vuelve a estar en la tabla de firmas del pie, bajo "
+            '"Nombre". NUNCA el notario, aunque su nombre esté primero y en mayúsculas (va detrás de '
+            '"ANTE MÍ" y lleva "Notario de Fe Pública" al lado), ni el abogado, ni los testigos, ni '
+            "los colindantes. Solo el nombre: sin el tratamiento (señor, señora), sin la "
+            "nacionalidad, sin el estado civil y sin la profesión."
         ),
     ),
     DocumentField(
@@ -453,51 +429,44 @@ NOTARIAL_FIELDS: Tuple["DocumentField", ...] = (
         printed=("FECHA", "FECHAS"),
         patterns=spanish_dates.PATTERNS,
         transform="spanish_date",
+        vision_hint=(
+            "la fecha en que se hizo esta declaración, SIEMPRE en dd/mm/aaaa (por ejemplo "
+            "21/09/2026). Está en el párrafo que abre el acto y puede venir escrita de cualquiera "
+            'de estas formas: con letras ("del día, lunes veintiún del mes de septiembre del año '
+            'dos mil veintiséis", "Lunes veinte y uno del mes de septiembre del dos mil '
+            'veintiséis", "a los doce días del mes de marzo de dos mil veinticinco") o con cifras '
+            '("21 de septiembre de 2026", "21/09/2026"). Venga como venga, devuélvala en cifras. '
+            "NUNCA la fecha chica que está dentro del sello redondo (es la del nombramiento del "
+            "notario), ni el año de la Resolución Ministerial del encabezado, ni la fecha de un "
+            "documento anterior citado en el texto, ni la hora."
+        ),
     ),
 )
 
 
-# Keyed by (carpeta, document): the same document read inside two carpetas can
-# be asked for different values, which is the whole point of the catalogue.
-# A pair with nothing here is read with the generic OCR and stays at its text,
-# its labelled values and its cuadros.
 DOCUMENT_FIELDS: Dict[Tuple[str, str], Tuple[DocumentField, ...]] = {
     (POSSESSORS_KEY := "possessors", DocumentType.PLAN): (
         DocumentField(
             "cadastral_code",
             "Código catastral",
             printed=("CODIGO CATASTRAL", "COD CATASTRAL", "COD. CATASTRAL"),
-            # 00-33-432-012-0-00-000-000, with whatever the OCR made of the dashes.
-            patterns=(
-                r"(\d{2}\s*[-.]\s*\d{2}\s*[-.]\s*[0-9A-Z]{3}\s*[-.]\s*\d{3}\s*[-.]\s*\d\s*[-.]\s*\d{2}\s*[-.]\s*\d{3}\s*[-.]\s*\d{3})",
-            ),
+            patterns=(_CADASTRAL_CODE,),
         ),
         # What the sheet copies from the IDE: filled from the lookup of the code.
-        # The address and the colindancias are read under the croquis from the IDE
-        # (PossessorsPlanLookup), not from the sheet: they feed the carpeta but are
-        # not asked here.
         DocumentField("street", "Dirección / calle", from_ide=True, hidden=True),
         DocumentField("boundaries", "Colindancias", from_ide=True, hidden=True),
-        # What the sheet says about the streets it faces is their width ("CALLE DE
-        # 12.50 MTS." next to the lote, "Calle de 9.00 mts." in the VIA box).
         DocumentField(
             "street_width",
             "Ancho de calle",
             patterns=(r"CALLE\s*DE\s*(\d+(?:[.,]\d+)?)\s*(?:MTS?|M)\b",),
             collect_all=True,
+            item_label="Calle",
             transform="metres",
         ),
-        # Only the predio the plano says it is: whether it is the one of the code is
-        # what the table under the croquis checks against the IDE.
         DocumentField(
             "property_number",
             "Número de predio",
-            # Not read by label: a plano whose lote is blank ("LOTE N°" with nothing
-            # after it) would give back "N°" as the number.
-            # The ubicación box: "MANZANO 432 LOTE 002" (the manzana may be "B37", the
-            # separators dots). "LOTE N: 5" of the drawing has no digits right after the
-            # word and is not it. Then the lot the drawing writes over its own surface
-            # ("LOTE N° 002 / SUP. TOTAL UTIL"), never the neighbour's "LOTE N° 003".
+            # Not read by label: a plano whose lote is blank ("LOTE N°" with nothing after it) would give back "N°" as the number.
             patterns=(
                 r"MANZAN[AO]\W{0,8}[A-Z]?\d{1,4}\W{0,6}LOTE\W{0,8}(\d{3})",
                 r"SUP\.?\s*TOTAL\s*UTIL\s*LOTE\s*N\W{0,2}\s*(\d{1,3})(?![.,\d])(?!\s*M\b)",
@@ -506,8 +475,6 @@ DOCUMENT_FIELDS: Dict[Tuple[str, str], Tuple[DocumentField, ...]] = {
             ),
             transform="plain_number",
         ),
-        # Measured from the UTM table by the IDE lookup when the sheet does not
-        # print them: which side is on the street is what the GIS tells.
         DocumentField("frontage", "Frente", ("FRENTE",), from_ide=True),
         DocumentField("rear_frontage", "Contra frente", ("CONTRA FRENTE", "CONTRAFRENTE"), from_ide=True),
         DocumentField("depth", "Fondo", ("FONDO",), from_ide=True),
@@ -516,15 +483,54 @@ DOCUMENT_FIELDS: Dict[Tuple[str, str], Tuple[DocumentField, ...]] = {
             "usable_area",
             "Superficie útil",
             ("SUPERFICIE UTIL", "SUP. UTIL", "SUP UTIL", "AREA UTIL", "SUPERFICIE"),
-            # "SUPERFICIE TOTAL UTIL......294.66m2" (or "TTAL": the OCR drops letters). It must
-            # end in m2: "SUP. TOTAL UTIL" followed by a "30.18m" side is not the surface.
-            patterns=(r"SUP(?:ERFICIE|\.)?\s*(?:T[A-Z]{2,4}\s+)?UTIL\W{0,40}?(\d[\d.,]*\s*M[2²])",),
+            patterns=(_USABLE_AREA,),
         ),
     ),
-    (POSSESSORS_KEY, DocumentType.SWORN_STATEMENT): NOTARIAL_FIELDS,
-    # El acta notarial llega clasificada unas veces como declaración jurada y
-    # otras como formulario, y es la misma hoja: se le saca lo mismo.
     (POSSESSORS_KEY, DocumentType.FORM): NOTARIAL_FIELDS,
+    # El avalúo ("Formulario para actualización de datos técnicos") no identifica
+    # al predio por su matrícula --su casilla de información legal suele decir "No
+    # registra"-- sino por el código catastral, impreso grande en la cabecera. Es
+    # el mismo código del plano, sin el par de adelante.
+    (POSSESSORS_KEY, DocumentType.APPRAISAL): (
+        DocumentField(
+            "usable_area",
+            "Superficie útil",
+            # Sin "SUPERFICIE" a secas, a diferencia del plano: esta hoja imprime
+            # "Superficie Lote: 294.66" en su cuadro de descripción, que es el área
+            # del lote y NO la útil. La útil va escrita sobre el croquis
+            # ("Sup. Total Util 299.02 m2") y es la que pide la carpeta.
+            printed=(
+                "SUPERFICIE TOTAL UTIL",
+                "SUP TOTAL UTIL",
+                "SUPERFICIE UTIL",
+                "SUP. UTIL",
+                "SUP UTIL",
+                "AREA UTIL",
+            ),
+            patterns=(_USABLE_AREA,),
+            vision_hint=(
+                'la superficie útil total del lote, escrita SOBRE el croquis del predio ("Sup. '
+                'Total Util 299.02 m2"). Devuélvala con sus unidades. NUNCA la "Superficie Lote" '
+                "del cuadro de descripción, que es otra; ni los metros de una construcción del "
+                "cuadro de características; ni la medida de un lado del croquis."
+            ),
+        ),
+        DocumentField(
+            "cadastral_code",
+            "Código catastral",
+            # En esta hoja el rótulo va DEBAJO del número, como pie; por eso lo que
+            # lo encuentra es el patrón y no la etiqueta. Las etiquetas quedan para
+            # la hoja que sí lo rotula al lado.
+            printed=("CODIGO CATASTRAL", "COD CATASTRAL", "COD. CATASTRAL"),
+            patterns=(_CADASTRAL_CODE,),
+            vision_hint=(
+                "el código catastral, impreso grande en la cabecera de la hoja, con el rótulo "
+                '"Código catastral" DEBAJO del número. Son siete grupos de cifras separados por '
+                'guión ("33-432-012-0-00-000-000"). NUNCA el "# Inmueble", ni el "Formulario No.", '
+                'ni el "Código" alfanumérico de la derecha, ni el número de cédula.'
+            ),
+        ),
+    ),
 }
 
 

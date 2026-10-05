@@ -2,10 +2,7 @@ import re
 
 _MOBILE_RE = re.compile(r"Mobi|Android|iPhone|iPad|iPod", re.IGNORECASE)
 
-# Un navegador, cualquiera, se anuncia como "Mozilla/5.0 ...". Los clientes HTTP
-# de una app nativa no: okhttp (Android/Retrofit), Dart (Flutter), ktor
-# (Kotlin), CFNetwork/Darwin (iOS). Esa es la señal que de verdad distingue
-# "esto viene de la app" de "esto viene del navegador del PC".
+# Un navegador, cualquiera, se anuncia como "Mozilla/5.0 ...".
 _BROWSER_RE = re.compile(r"Mozilla/", re.IGNORECASE)
 _NATIVE_CLIENT_RE = re.compile(
     r"okhttp|retrofit|Dart/|dart:io|ktor|CFNetwork|Darwin/|AFNetworking|Alamofire"
@@ -45,10 +42,7 @@ def is_native_app_user_agent(user_agent: str) -> bool:
     """
     ua = (user_agent or "").strip()
     if not ua:
-        # Sin User-Agent no hay nada que afirmar. Un navegador siempre manda
-        # uno, así que esto es casi seguro un cliente programático, pero
-        # tratarlo como "la app" encendería el indicador con cualquier sonda de
-        # monitoreo. Se queda fuera a propósito.
+        # Sin User-Agent no hay nada que afirmar.
         return False
     if _NATIVE_CLIENT_RE.search(ua):
         return True

@@ -32,8 +32,6 @@ HEADERS = [
     "Estado", "Motivo de rechazo", "Años", "Campaña", "Prob. (%)",
     "Validado por", "Fecha de validación", "Longitud", "Latitud",
 ]
-# Must sum to <= ~27.3cm (landscape A4 minus margins) or the table overflows
-# the page -- verified by rendering a real export (12 rows) and measuring.
 COL_WIDTHS_CM = [0.9, 2.0, 2.4, 1.8, 2.2, 1.8, 2.8, 1.5, 1.8, 1.1, 2.0, 2.4, 1.6, 1.6]
 
 

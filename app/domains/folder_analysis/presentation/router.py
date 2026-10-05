@@ -18,8 +18,7 @@ logger = logging.getLogger("uvicorn.error")
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    # Merged into the app's lifespan by FastAPI: the domain creates its own
-    # schema without touching main.py or core.
+    # Merged into the app's lifespan by FastAPI: the domain creates its own schema without touching main.py or core.
     if engine.dialect.name == "postgresql":
         try:
             create_schema_and_tables(engine)
