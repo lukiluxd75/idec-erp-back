@@ -50,6 +50,8 @@ def init_db_tables() -> bool:
         from app.domains.geoextraction.infrastructure import models  # noqa: F401
         from app.domains.chatbot.infrastructure import models as chatbot_models  # noqa: F401
         from app.domains.folios.infrastructure import models as folios_models  # noqa: F401
+        from app.domains.cite.infrastructure import models as cite_models  # noqa: F401
+        from app.domains.templates.infrastructure import models as templates_models  # noqa: F401
 
         if not db_uri.startswith("sqlite"):
             # create_all() only creates tables, never the Postgres schema itself.
@@ -58,6 +60,7 @@ def init_db_tables() -> bool:
             with engine.begin() as conn:
                 conn.execute(CreateSchema(chatbot_models.SCHEMA, if_not_exists=True))
                 conn.execute(CreateSchema(folios_models.SCHEMA, if_not_exists=True))
+                conn.execute(CreateSchema(templates_models.SCHEMA, if_not_exists=True))
         Base.metadata.create_all(bind=engine)
         return True
     except Exception as exc:

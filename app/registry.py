@@ -70,3 +70,9 @@ try:
     api_router.include_router(folder_analysis_router, prefix="/folder-analysis")
 except Exception as exc:
     logger.warning("Could not load domain 'folder_analysis': %s", exc)
+
+try:
+    from app.domains.cite.presentation.router import router as cite_router
+    api_router.include_router(cite_router)
+except Exception as exc:
+    logger.warning("Could not load domain 'cite': %s", exc)
