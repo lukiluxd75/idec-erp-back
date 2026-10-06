@@ -23,32 +23,20 @@ from app.domains.folder_analysis.domain.services.text import (
     normalize,
 )
 
-# Two rules closer than this (as a share of the page height) are the two edges of
-# the same printed line, not a row with something written in it.
 MIN_ROW_HEIGHT_RATIO = 0.004
 
-# A grid needs at least this many row lines (a top, a bottom and one divider):
-# with fewer, what OpenCV found is a wall of the drawing, not a table.
 MIN_ROW_LINES = 3
 MIN_COLUMN_LINES = 2
 
 # Rules belong to the same table when they run over the same part of the sheet.
-# This is what tells a cuadro from the long walls of the drawing: a wall has no
-# three parallel neighbours above the same stretch of paper.
 MIN_OVERLAP_RATIO = 0.5
 
-# ...and when they are near each other. A row of a cuadro is never this tall.
+# ...and when they are near each other.
 MAX_ROW_GAP_RATIO = 0.12
 
 # A "NAME: value" longer than this is a sentence that happens to have a colon.
 MAX_FIELD_NAME_CHARS = 48
 
-# group_lines() clusters purely by height, so a strip along the bottom or a side
-# of the sheet -- ESC, the propietario, a handful of room notes, all sitting at
-# the same height because there was nowhere else to put them -- comes back as
-# ONE line and swallows every field into whichever of them has a colon first. A
-# gap this many times a block's own height is not the space between two words of
-# the same note, so that is where the line is cut back into its separate notes.
 MAX_WORD_GAP_RATIO = 4.0
 
 
@@ -106,8 +94,7 @@ def labelled_fields(lines: Sequence[Sequence[Block]]) -> List[Dict[str, str]]:
         if ":" not in text:
             continue
         raw_name, _, raw_value = text.partition(":")
-        # A colon between digits is a scale or a time ("ESC 1:100", "14:30"),
-        # never a label and its value.
+        # A colon between digits is a scale or a time ("ESC 1:100", "14:30"), never a label and its value.
         if raw_name[-1:].isdigit() and raw_value[:1].isdigit():
             continue
         name = clean_value(raw_name)
@@ -134,9 +121,6 @@ def table_regions(rules: Sequence[Segment], page_height: int) -> List[TableRegio
     maximum_gap = page_height * MAX_ROW_GAP_RATIO
     minimum_step = page_height * MIN_ROW_HEIGHT_RATIO
 
-    # Every open cuadro is looked at, not just the last one: a long wall of the
-    # drawing sits between the rows of a cuadro on the other side of the sheet,
-    # and it must not cut that cuadro in two.
     groups: List[List[Segment]] = []
     for rule in ordered:
         best, best_overlap = None, 0.0

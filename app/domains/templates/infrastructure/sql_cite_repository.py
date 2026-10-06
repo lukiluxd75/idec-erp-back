@@ -115,9 +115,6 @@ class SqlCiteRepository(CiteRepositoryPort):
         if row is None:
             ultimo_numero = 0
             if not reinicia_por_gestion:
-                # Carry the running total forward into the new gestion instead of
-                # starting over -- the most recent row for ANY gestion of this
-                # configuracion has the last number actually handed out.
                 previous = (
                     self._db.query(CiteCorrelativoModel)
                     .filter(CiteCorrelativoModel.cite_configuracion_id == configuracion_id)

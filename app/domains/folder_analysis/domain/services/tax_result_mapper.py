@@ -18,9 +18,7 @@ from app.domains.folder_analysis.domain.services.fur_parser import (
 )
 from app.domains.folder_analysis.domain.services.result_merger import conform
 
-# The parser lists the low-confidence fields in an observation, by key. The review
-# form marks those fields one by one instead, so repeating the key list at the
-# architect would only be noise.
+# The parser lists the low-confidence fields in an observation, by key.
 _LOW_CONFIDENCE_NOTE = "Campos con baja confianza de lectura:"
 
 
@@ -36,19 +34,14 @@ def to_tax_receipt_template(
         "parser_version": PARSER_VERSION,
         # In the review form's own keys, so it can mark them without translating.
         "low_confidence_fields": low_confidence_fields(reading, confidence_threshold),
-        # Read from the OCR text by the LLM step instead of by a rule: worth the
-        # architect's eyes even when the OCR was sure of the characters.
         "fields_filled_by_ai": list(filled_by_ai or []),
-        # Boxes whose printed label was never found on the photo: the field is
-        # empty because nothing was read, not because the receipt leaves it blank.
         "labels_not_found": sorted(
             {entry["campo"] for entry in reading.trace if entry.get("label") is None}
         ),
         "observations": [
             note for note in reading.observations if not note.startswith(_LOW_CONFIDENCE_NOTE)
         ],
-        # Every line the OCR read, so nothing read from the photo is silently
-        # dropped: the JSON tab shows it next to the fields.
+        # Every line the OCR read, so nothing read from the photo is silently dropped: the JSON tab shows it next to the fields.
         "ocr_lines": list(reading.lines),
     }
     return result

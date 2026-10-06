@@ -23,8 +23,7 @@ _OWNER_FIELDS = (
 )
 
 
-# Dotted key in the folios answer -> the key the review form renders. Asientos
-# are handled apart, because their index shifts when empty ones are dropped.
+# Dotted key in the folios answer -> the key the review form renders.
 _CONFIDENCE_KEYS = {
     "matricula.numero": "registration_number",
     "matricula.estado": "registration_status",
@@ -40,9 +39,7 @@ _CONFIDENCE_KEYS = {
     **{f"linderos.{source}": f"boundaries.{key}" for key, source in _BOUNDARIES},
 }
 _ASIENTO_KEY = re.compile(r"^titularidad_dominio\.asientos\.(\d+)$")
-# The pipeline lists the low-confidence fields in an observation, by their
-# internal dotted key. The review form marks those fields one by one instead,
-# so repeating the raw keys at the architect would only be noise.
+# The pipeline lists the low-confidence fields in an observation, by their internal dotted key.
 _LOW_CONFIDENCE_NOTE = "Campos con baja confianza de lectura:"
 
 
@@ -138,9 +135,6 @@ def to_folio_template(extracted: Dict[str, Any], fill_log: Optional[Dict[str, An
         "ownership_entries": [_entry(a) for a in titularidad.get("asientos") or []],
     }
     result = conform(FOLIO_TEMPLATE, data)
-    # Same rule the model path used: an "Asiento Numero" header with nothing
-    # under it (the next asiento starting at the bottom edge of the photo) is
-    # not an entry yet.
     kept, entry_index = [], {}
     for original, entry in enumerate(result["ownership_entries"]):
         if is_empty(entry.get("owners")) and all(
@@ -162,8 +156,6 @@ def to_folio_template(extracted: Dict[str, Any], fill_log: Optional[Dict[str, An
         "low_confidence_fields": _lane_confidence_keys(
             extracted.get("campos_baja_confianza") or [], entry_index
         ),
-        # Column A lines the rules could not attach to an asiento: shown in the
-        # JSON tab so nothing read from the photo is silently dropped.
         "unassigned_lines": titularidad.get("lineas_sin_asiento") or [],
         "observations": [
             note for note in extracted.get("observaciones") or []

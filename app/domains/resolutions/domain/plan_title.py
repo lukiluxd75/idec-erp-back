@@ -35,8 +35,6 @@ class TitleBlock:
 
     @property
     def tamano_letra(self) -> float:
-        # El título puede estar girado (plano de costado): el lado CORTO del
-        # rectángulo es la altura de la letra en cualquier orientación.
         return min(self.x1 - self.x0, self.y1 - self.y0)
 
 
@@ -57,8 +55,7 @@ def _normalizar(texto: str) -> str:
     return re.sub(r"\s+", " ", t).strip()
 
 
-# El OCR confunde el 0 con la O ("PIS0") y la I con el 1 ("I00"): se
-# corrigen solo dentro de las palabras del título.
+# El OCR confunde el 0 con la O ("PIS0") y la I con el 1 ("I00"): se corrigen solo dentro de las palabras del título.
 _PISO = r"PIS[O0]"
 _ORDINAL = r"(?:ER|RO|DO|TO|VO|NO|MO)?"
 _NUM = r"(\d{1,2}|[IL])"
@@ -120,8 +117,7 @@ def detect_plantas(bloques: List[TitleBlock]) -> PlantaDetection:
         if plantas:
             candidatos.append((b, plantas))
     if not candidatos:
-        # El OCR a veces parte el título en dos bloques ("PLANTA TIPO" /
-        # "2° - 4° PISO"): se prueba cada par de bloques pegados.
+        # El OCR a veces parte el título en dos bloques ("PLANTA TIPO" / "2° - 4° PISO"): se prueba cada par de bloques pegados.
         for a in bloques:
             for b in bloques:
                 if a is b or not _pegados(a, b):
@@ -136,8 +132,7 @@ def detect_plantas(bloques: List[TitleBlock]) -> PlantaDetection:
     if not candidatos:
         return PlantaDetection(motivo="no se encontró un título de planta en el plano", candidatos=detalle)
 
-    # El título es el texto más grande del plano. Si hay dos títulos
-    # DISTINTOS de tamaño parecido no se adivina.
+    # El título es el texto más grande del plano.
     candidatos.sort(key=lambda c: -c[0].tamano_letra)
     mejor, plantas = candidatos[0]
     for otro, otras in candidatos[1:]:

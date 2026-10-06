@@ -32,16 +32,9 @@ class ResumeSectorValidationUseCase:
 
         result["processed_sector_id"] = processed_sector_id
         result["processed_sector_status"] = context.status
-        # reporte.json has no `urls` field (that only exists on the engine's
-        # live job-result response) -- without this the frontend's asset
-        # gallery has nothing to hydrate and the before/after images are
-        # simply blank on a resumed sector.
         if context.urls:
             result["urls"] = context.urls
 
-        # Same positional enrichment as job_result's own response (see
-        # endpoints/detection.py) -- list_affected_parcels() returns rows in
-        # the same order/length as this run's cambios[]/reporte_arquitecto[].
         try:
             parcels = self._repository.list_affected_parcels(processed_sector_id)
             for array_key in ("cambios", "reporte_arquitecto"):

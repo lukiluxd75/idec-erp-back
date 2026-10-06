@@ -26,14 +26,11 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from app.domains.folder_analysis.domain.services.text import normalize
 
-# "29.61m", "9.96m:", "10,11 m": a number with two decimals and its unit, nothing
-# else. "295.31 m2" is a surface, not a side, and "30.18m SUP." is not a label.
+# "29.61m", "9.96m:", "10,11 m": a number with two decimals and its unit, nothing else.
 _DIMENSION = re.compile(r"^\W*(\d{1,3})\s*[.,]\s*(\d{2})\s*M\W*$")
 # "CALLE DE 10.00 mts.", "AVENIDA DE 12 MTS", "PASAJE 6.00 mts".
 _STREET = re.compile(r"(?:CALLE|AVENIDA|AV|PASAJE|PJE)\.?\s*(?:DE)?\s*(\d{1,3}(?:\s*[.,]\s*\d{1,2})?)\s*(?:MTS?|M)\b")
 
-# A label counts as running up and down (or across) when its box is clearly longer
-# one way than the other; a squarish box says nothing about the side it measures.
 ORIENTATION_RATIO = 1.3
 # The lot drawn by the labels must come out within this share of the declared surface.
 AREA_TOLERANCE = 0.15
@@ -139,8 +136,6 @@ def assign(
         if gap < MIN_SEPARATION * min(frente.w, frente.h):
             contra = None
 
-    # The fondos are the labels along the other axis, at its two ends; the ones in
-    # between measure something inside the lot (a diagonal) and are not sides.
     if len(across) < 2:
         return refuse("El dibujo no trae las dos medidas de fondo: se cargan a mano.")
     key = (lambda d: d.cy) if street_vertical else (lambda d: d.cx)

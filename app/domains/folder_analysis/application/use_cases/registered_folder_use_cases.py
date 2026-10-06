@@ -22,10 +22,12 @@ from app.domains.folder_analysis.domain.entities import (
     MAX_DOCUMENTS,
     MAX_NAME_LENGTH,
     MAX_NOTES_LENGTH,
+    CaptureVariant,
     DocumentStatus,
     RegisteredFolder,
 )
 from app.domains.folder_analysis.domain.exceptions import (
+    CaptureNotFoundException,
     DocumentAlreadyFiledException,
     DocumentNotFoundException,
     InvalidRegisteredFolderException,
@@ -37,12 +39,19 @@ from app.domains.folder_analysis.domain.folder_types import (
     clean_folder_data,
     folder_type,
 )
-from app.domains.folder_analysis.application.use_cases.capture_use_cases import forget_previews
+from app.domains.folder_analysis.application.use_cases.capture_use_cases import (
+    GetCaptureImageUseCase,
+    forget_previews,
+)
 from app.domains.folder_analysis.domain.ports import (
     CaptureRepositoryPort,
     DocumentRepositoryPort,
     RegisteredFolderRepositoryPort,
 )
+
+
+# Lo mínimo que hay que escribir para que una búsqueda sea una búsqueda.
+MIN_SEARCH_LENGTH = 2
 
 
 def _clean_name(name: Optional[str]) -> str:
@@ -126,8 +135,7 @@ class RegisteredFolderService:
         folder, not a finished document filed on its own."""
         if not document_ids:
             return
-        # One listing instead of a query per document: this is the summary list,
-        # so it carries no extracted/reviewed JSON.
+        # One listing instead of a query per document: this is the summary list, so it carries no extracted/reviewed JSON.
         status_by_id: Dict[str, str] = {
             document.id: document.status for document in self._documents.list(user_sub)
         }
@@ -160,6 +168,75 @@ class ListRegisteredFoldersUseCase:
 
     def execute(self, user_sub: str) -> List[RegisteredFolder]:
         return self._folders.list(user_sub)
+
+
+class SearchRegisteredFoldersUseCase:
+    """Encontrar una carpeta por su nombre, que es el número de la carpeta física.
+
+    Para quien solo usa el módulo busca entre las suyas, que es lo mismo que
+    filtrar su lista. Para quien lo administra busca entre las de todos los
+    usuarios: una carpeta la escanea quien la tiene en la mano, y hasta ahora el
+    resto no tenía forma de volver a encontrarla -- había que adivinar de quién
+    era. Solo por nombre y solo buscando: las carpetas ajenas no aparecen en la
+    lista de nadie, y escribir en una sigue siendo cosa de su dueño
+    (RegisteredFolderService.require_folder no cambió).
+
+    Un término demasiado corto no busca nada: con una letra, "buscar entre las de
+    todos" devuelve media base y ninguna de esas filas es una respuesta.
+    """
+
+    def __init__(self, folders: RegisteredFolderRepositoryPort):
+        self._folders = folders
+
+    def execute(
+        self, user_sub: str, name: str, across_users: bool = False
+    ) -> List[RegisteredFolder]:
+        term = " ".join((name or "").split())
+        if len(term) < MIN_SEARCH_LENGTH:
+            return []
+        return self._folders.search_by_name(term, None if across_users else user_sub)
+
+
+class GetFolderPhotoUseCase:
+    """Una foto de una carpeta, para mirarla.
+
+    El dueño llega acá igual que por la bandeja. Quien administra el módulo
+    llega también, pero solo hasta las fotos que son páginas de un documento
+    archivado en esa carpeta: no a una foto suelta de otro usuario, ni a un
+    documento que no esté en la carpeta, ni a la carpeta de alguien si no la
+    encontró antes. Es exactamente lo que ya ve en pantalla cuando la busca por
+    su nombre, y sigue sin poder tocar nada.
+
+    La imagen se lee a nombre del dueño de la carpeta, no de quien pregunta: la
+    foto es suya y el permiso ya se resolvió una línea más arriba.
+
+    Una carpeta que no existe y una a la que no se llega contestan lo mismo, para
+    no convertir esto en una forma de averiguar qué carpetas hay.
+    """
+
+    def __init__(
+        self,
+        folders: RegisteredFolderRepositoryPort,
+        images: GetCaptureImageUseCase,
+    ):
+        self._folders = folders
+        self._images = images
+
+    def execute(
+        self,
+        folder_id: str,
+        capture_id: str,
+        user_sub: str,
+        administra: bool = False,
+        variant: str = CaptureVariant.PREVIEW,
+    ):
+        folder = self._folders.find_any(folder_id)
+        if folder is None or (folder.user_sub != user_sub and not administra):
+            raise RegisteredFolderNotFoundException()
+        pages = (page for document in folder.documents for page in document.pages)
+        if not any(page.capture_id == capture_id for page in pages):
+            raise CaptureNotFoundException("Esa foto no es de esta carpeta.")
+        return self._images.execute(capture_id, folder.user_sub, variant)
 
 
 class GetRegisteredFolderUseCase:

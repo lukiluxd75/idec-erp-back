@@ -38,11 +38,6 @@ class StartDetectionJobUseCase:
                 created_by_sub=created_by_sub,
             )
         except Exception:
-            # The GPU job is already running at this point; failing to persist
-            # its processed_sector must not fail the request the frontend is
-            # waiting on for job_id. IngestDetectionResultUseCase simply becomes
-            # a no-op later for a job_id it can't find (see find_by_job_id) --
-            # the GPU run itself is not lost, only its ERP-side bookkeeping.
             logger.exception("Failed to persist processed_sector for job %s", job_id)
             return engine_response
 

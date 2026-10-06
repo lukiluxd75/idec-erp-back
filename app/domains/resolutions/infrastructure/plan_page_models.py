@@ -22,8 +22,6 @@ class ResolutionPlanPageModel(Base):
     plan_page_id = Column(String(36), primary_key=True)
     resolution_id = Column(String(36), nullable=False, index=True)
     order_index = Column(Integer, nullable=False)
-    # Primera de `plantas` ("" mientras se detecta o si no se pudo) -- se
-    # mantiene para lo que ya lee una sola planta por página.
     planta = Column(String(60), nullable=False)
     # Todas las plantas de la hoja (JSON list): varias en "PLANTA TIPO 2° - 4° PISO".
     plantas = Column(JSON)
@@ -34,15 +32,10 @@ class ResolutionPlanPageModel(Base):
     mime = Column(String(40), nullable=False)
     file_name = Column(String)
     image = Column(LargeBinary, nullable=False)
-    # 'app' (celular) o 'web' -- ver AddPlanPagesUseCase; ambos canales usan
-    # el mismo endpoint, esto es solo metadata de origen.
     source = Column(String(10), nullable=False, server_default=text("'app'"))
     created_at = Column(DateTime, nullable=False, server_default=text("now()"))
 
 
-# create_all() nunca altera una tabla que ya existe: las columnas agregadas
-# después del primer despliegue se agregan acá (solo ADD COLUMN IF NOT EXISTS,
-# idempotente). Lo llama el lifespan de presentation/router.py.
 _ADDED_COLUMNS = (
     "plantas JSON",
     "planta_status VARCHAR(20) NOT NULL DEFAULT 'manual'",

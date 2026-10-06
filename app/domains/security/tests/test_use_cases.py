@@ -101,8 +101,6 @@ class TestUseCases(unittest.TestCase):
             use_case.execute("")
 
     def test_sync_user_rbac_use_case(self):
-        # Arrange: ahora se identifica al usuario por keycloak_sub (JWT.sub), no por
-        # nombre, y no se le asignan roles desde Keycloak (CLAUDE.md §5).
         self.mock_user_repo.ensure_user_exists.return_value = UserEntity(
             user_id="11111111-1111-1111-1111-111111111111",
             username="carlos",

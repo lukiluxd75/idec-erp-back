@@ -1,4 +1,4 @@
-from typing import List
+from typing import Callable, List, Tuple
 
 from fastapi import APIRouter, Depends, File, Request, Response, UploadFile, status
 
@@ -56,20 +56,29 @@ def list_inbox(
     return [CaptureOut.from_entity(c) for c in use_case.execute(user.sub)]
 
 
-# A photo never changes once it is uploaded, so the browser may keep any of its
-# copies for as long as it likes: turning a page back, or coming back to the
-# screen tomorrow, costs nothing.
 IMMUTABLE_CACHE = "private, max-age=604800, immutable"
 
 
-def _cached_image(request: Request, use_case: GetCaptureImageUseCase, capture_id: str, user_sub: str, variant: str):
+def cached_image(request: Request, read: Callable[[], Tuple[bytes, str]], capture_id: str, variant: str):
     """The photo's copy, or 304 when the browser already has it. The tag is the
-    capture and the copy asked for: neither ever changes."""
+    capture and the copy asked for: neither ever changes.
+
+    `read` is the call that actually fetches the bytes, so the same caching
+    serves the bandeja (the photo is the architect's own) and the read-only view
+    of a carpeta found by searching it (registered_folders.py), which resolves
+    the photo through the carpeta instead of through its owner.
+    """
     etag = f'"{capture_id}-{variant}"'
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag, "Cache-Control": IMMUTABLE_CACHE})
-    content, mime = use_case.execute(capture_id, user_sub, variant)
+    content, mime = read()
     return Response(content=content, media_type=mime, headers={"ETag": etag, "Cache-Control": IMMUTABLE_CACHE})
+
+
+def _cached_image(request: Request, use_case: GetCaptureImageUseCase, capture_id: str, user_sub: str, variant: str):
+    return cached_image(
+        request, lambda: use_case.execute(capture_id, user_sub, variant), capture_id, variant
+    )
 
 
 @router.get("/{capture_id}/image")

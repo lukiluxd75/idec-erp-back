@@ -24,29 +24,14 @@ from app.core.database.connection import Base
 class DevicePresenceModel(Base):
     __tablename__ = "device_presence"
 
-    # One row per (account, channel, device). `device_id` is the websocket's own
-    # uuid for a socket-backed presence, or a stable key for an activity-backed
-    # one (see SqlPresenceStore.touch_activity), so one account with the app on
-    # two phones does not collapse into a single row.
+    # One row per (account, channel, device).
     user_sub = Column(String(64), primary_key=True)
     channel = Column(String(40), primary_key=True)
     device_id = Column(String(64), primary_key=True)
     is_mobile = Column(Boolean, nullable=False)
-    # Kept for diagnosis only ("when was this phone last heard from"); the
-    # reader never filters on it.
+    # Kept for diagnosis only ("when was this phone last heard from"); the reader never filters on it.
     last_seen_at = Column(DateTime, nullable=False)
-    # When this row stops counting as present. An absolute instant, not a TTL
-    # applied at read time, for two reasons:
-    #
-    #  * each writer gets its own lifetime -- a websocket heartbeats every 25s
-    #    and expires 70s out, while folder analysis' presence comes from bursts
-    #    of HTTP uploads and needs minutes of slack. A single global TTL would
-    #    have to lie about one of the two.
-    #  * comparing a stored instant against now() is the same SQL on Postgres
-    #    and on SQLite; `last_seen_at + interval` is not.
-    #
-    # It also means a worker killed mid-socket cannot pin the badge to
-    # "connected": nothing refreshes the row and it expires on its own.
+    # When this row stops counting as present.
     expires_at = Column(DateTime, nullable=False)
 
     __table_args__ = (
@@ -69,20 +54,11 @@ def ensure_schema(engine) -> None:
     columnas añadidas: idempotente, y en una instalación nueva no hace nada.
     """
     with engine.begin() as conn:
-        # ADD COLUMN pide ACCESS EXCLUSIVE y Postgres concede los locks por
-        # orden de llegada, así que un ALTER esperando a un lector largo encola
-        # a todos los demás detrás. Mejor rendirse: el llamador lo registra, el
-        # backend arranca igual y se reintenta en el siguiente arranque.
         conn.execute(text("SET LOCAL lock_timeout = '5s'"))
         conn.execute(text("ALTER TABLE device_presence ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP"))
-        # Las filas que venían de la versión anterior caducan en su último
-        # latido: no se sabe nada mejor de ellas, y dar por conectado a un
-        # celular del que no se sabe nada sería peor que darlo por ausente.
         conn.execute(text("UPDATE device_presence SET expires_at = last_seen_at WHERE expires_at IS NULL"))
         conn.execute(text("ALTER TABLE device_presence ALTER COLUMN expires_at SET NOT NULL"))
-        # El índice se declaraba sobre last_seen_at y ahora cubre expires_at,
-        # que es por donde filtra la lectura. Nombre nuevo para no depender de
-        # que el viejo se recree.
+        # El índice se declaraba sobre last_seen_at y ahora cubre expires_at, que es por donde filtra la lectura.
         conn.execute(text("DROP INDEX IF EXISTS ix_device_presence_lookup"))
         conn.execute(
             text(

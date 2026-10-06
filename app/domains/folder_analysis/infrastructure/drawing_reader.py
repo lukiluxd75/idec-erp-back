@@ -28,8 +28,7 @@ logger = logging.getLogger("uvicorn.error")
 _CARTOUCHE_ANCHORS = ("REGULARIZACION", "POSEEDORES", "RELACION DE SUPERFICIE", "CODIGO CATASTRAL")
 # Room left above the first anchor so the cut does not slice a label.
 _CUT_MARGIN = 10
-# A measure read in both copies is one measure: same value, centres this close
-# (in label heights).
+# A measure read in both copies is one measure: same value, centres this close (in label heights).
 _SAME_LABEL = 1.5
 
 

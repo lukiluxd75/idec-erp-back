@@ -8,8 +8,7 @@ class JobStatus:
     PROCESSING = "processing"
     DONE = "done"
     FAILED = "failed"
-    # Aborted mid-run from the PC monitor. A dead end like FAILED, but it was a
-    # person's decision, not a fault: shown and worded differently.
+    # Aborted mid-run from the PC monitor.
     STOPPED = "stopped"
 
 
@@ -31,8 +30,7 @@ class DigitizationJob:
     error: Optional[str] = None
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
-    # Set by other domains through contracts/: what to extract and the JSON shape
-    # to return. None means the generic digitization (text, fields, tables).
+    # Set by other domains through contracts/: what to extract and the JSON shape to return.
     instructions: Optional[str] = None
     output_template: Optional[Dict[str, Any]] = None
     source: Optional[str] = None

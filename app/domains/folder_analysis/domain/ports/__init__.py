@@ -7,10 +7,12 @@ from app.domains.folder_analysis.domain.ports.pdf_rasterizer_port import PdfRast
 from app.domains.folder_analysis.domain.ports.registered_folder_repository_port import (
     RegisteredFolderRepositoryPort,
 )
+from app.domains.folder_analysis.domain.ports.seal_reading_port import SealReadingPort
 from app.domains.folder_analysis.domain.ports.server_reading_port import ServerReadingPort
 from app.domains.folder_analysis.domain.ports.tax_extraction_port import TaxExtractionPort
 from app.domains.folder_analysis.domain.ports.tax_structurer_port import TaxStructurerPort
 from app.domains.folder_analysis.domain.ports.thumbnail_port import ThumbnailPort
+from app.domains.folder_analysis.domain.ports.vision_reading_port import VisionReadingPort
 
 __all__ = [
     "CadastralGisPort",
@@ -21,8 +23,10 @@ __all__ = [
     "FolioExtractionPort",
     "PdfRasterizerPort",
     "RegisteredFolderRepositoryPort",
+    "SealReadingPort",
     "ServerReadingPort",
     "TaxExtractionPort",
     "TaxStructurerPort",
     "ThumbnailPort",
+    "VisionReadingPort",
 ]

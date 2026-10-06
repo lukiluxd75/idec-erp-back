@@ -57,8 +57,6 @@ class OcrPlanExtractor(ServerReadingPort):
         return self._document(results, observations), observations
 
     def _read_sheet(self, content: bytes, number: int, observations: List[str]) -> Dict[str, Any]:
-        # Straighten first: the OCR is given the same page the lines are measured
-        # on, or the blocks and the grid would not line up.
         straightened = opencv_plan_reader.safe_deskew(content, number)
         image = straightened.image if straightened else content
 

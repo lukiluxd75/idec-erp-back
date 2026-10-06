@@ -17,10 +17,7 @@ from app.domains.detection.infrastructure.models import (
 )
 from app.domains.detection.infrastructure.user_lookup import resolve_user_id
 
-# architect_review.action -> affected_parcel.validation_status. Only these two
-# actions exist (see ReviewAffectedParcelUseCase) -- the schema's CHECK
-# constraint still allows 'mark_uncertain'/'add_manual'/'flag_for_retraining'
-# for historical rows, but nothing writes them anymore.
+# architect_review.action -> affected_parcel.validation_status.
 _ACTION_TO_VALIDATION_STATUS = {
     "confirm": "confirmed",
     "reject": "rejected",
@@ -69,10 +66,6 @@ class SqlAffectedParcelReviewRepository(AffectedParcelReviewPort):
             .first()
         )
         if latest_run is not None:
-            # Scoped to the latest run: an older, superseded run's leftover
-            # 'pending' parcels (see SqlProcessedSectorRepository.ingest_result
-            # on manual realignment) must not block completion forever just
-            # because nobody reviewed them before the sector moved on.
             query = query.join(
                 DetectionModel, DetectionModel.id == AffectedParcelModel.detection_id
             ).filter(DetectionModel.processing_run_id == latest_run.id)

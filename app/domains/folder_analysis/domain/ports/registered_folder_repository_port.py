@@ -28,6 +28,29 @@ class RegisteredFolderRepositoryPort(ABC):
         """The user's carpetas A->Z by name, each with its documents."""
 
     @abstractmethod
+    def find_any(self, folder_id: str) -> Optional[RegisteredFolder]:
+        """La carpeta sea de quien sea, sin comprobar el dueño.
+
+        Solo para una lectura que ya decidió por su cuenta que quien pregunta
+        puede verla -- el administrador que la encontró buscándola por nombre.
+        Todo lo demás usa get(), que exige ser el dueño, y por eso esto lleva
+        otro nombre: para que no se confunda con aquel por descuido.
+        """
+
+    @abstractmethod
+    def search_by_name(
+        self, name: str, user_sub: Optional[str] = None, limit: int = 50
+    ) -> List[RegisteredFolder]:
+        """Carpetas whose name contains `name` (case-insensitive), A->Z.
+
+        `user_sub` narrows the search to one person's carpetas; left out, it
+        searches every user's -- which is as far as only an administrator of the
+        module gets (see the endpoint). `limit` is what keeps a two-letter search
+        from pulling the whole table, since each carpeta is read with its
+        documents.
+        """
+
+    @abstractmethod
     def update_details(
         self, folder_id: str, name: str, notes: Optional[str], data: Dict[str, Any]
     ) -> None:

@@ -7,9 +7,6 @@ from app.domains.alignment.domain.ports.alignment_block_repository_port import (
 )
 from app.domains.alignment.domain.services.affine_fit import fit_affine
 
-# The fixed reference year (its own predios/manzanas polygon layer is the
-# "ground truth" every other year gets corrected against) -- see
-# doc/alignment_schema.sql. Aligning it against itself makes no sense.
 REFERENCE_YEAR = 2015
 
 

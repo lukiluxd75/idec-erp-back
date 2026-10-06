@@ -1,7 +1,7 @@
 import logging
 import re
 from dataclasses import replace
-from typing import Any, Callable, Dict, List, Mapping, Optional, Set
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set
 
 from app.core.errors.exceptions import DomainException
 from app.domains.folder_analysis.application.document_synchronizer import DocumentSynchronizer
@@ -12,6 +12,7 @@ from app.domains.folder_analysis.domain.entities import (
     DocumentType,
     FolderDocument,
     PageStatus,
+    ReadingStage,
 )
 from app.domains.folder_analysis.domain.exceptions import (
     CaptureNotAvailableException,
@@ -29,24 +30,29 @@ from app.domains.folder_analysis.domain.folder_types import (
     folder_type,
 )
 from app.domains.folder_analysis.domain.services import drawing_sides, plan_survey
-from app.domains.folder_analysis.domain.services.field_harvest import harvest, observation
+from app.domains.folder_analysis.domain.services.field_harvest import (
+    from_seals,
+    from_vision,
+    harvest,
+    missing_labels,
+    observation,
+    vision_wanted,
+)
 from app.domains.folder_analysis.domain.ports import (
     CaptureRepositoryPort,
     DocumentRepositoryPort,
     ExtractionQueuePort,
     RegisteredFolderRepositoryPort,
+    SealReadingPort,
     ServerReadingPort,
+    VisionReadingPort,
 )
 
 logger = logging.getLogger("uvicorn.error")
 
-# Cuántas fotos admite un documento. Una declaración jurada protocolizada o un
-# avalúo pasan holgadamente de diez hojas, así que el tope vive acá y no en el
-# largo que tenía el folio cuando era el único carril.
+# Cuántas fotos admite un documento.
 MAX_PAGES = 20
 
-# How the lanes read on the server name themselves in a message to the architect,
-# taken from the catalogue so a document type is named in one place only.
 DOC_LABEL = {key: spec.noun for key, spec in DOCUMENT_TYPES.items()}
 
 
@@ -119,8 +125,6 @@ class CreateDocumentUseCase:
         if doc_type not in DocumentType.ALL:
             raise InvalidDocumentRequestException("El tipo de documento no es válido.")
         folder = self._require_folder(folder_id, user_sub) if folder_id else None
-        # Inside a carpeta its kind wins over anything the screen sent: the
-        # document is in it, and that is what it will be read as.
         kind = folder_type(folder.folder_type if folder else folder_type_key)
         if folder is not None and not kind.holds(doc_type):
             raise InvalidDocumentRequestException(
@@ -134,8 +138,6 @@ class CreateDocumentUseCase:
             _file_without_reading(self._documents, document)
             document = _require_document(self._documents, document.id, user_sub)
         if folder is not None:
-            # It joins the carpeta as a draft: it was opened in it, so it belongs
-            # to it from the start and not once its review is saved.
             self._folders.file_document(folder.id, document.id)
             document = _require_document(self._documents, document.id, user_sub)
         return document
@@ -196,11 +198,6 @@ class ConsolidateDocumentsUseCase:
                 f'La carpeta "{folder.name}" no trabaja con ese tipo de documento.'
             )
 
-        # El más viejo manda: es el que ya estaba en la carpeta, así que conserva
-        # su número y las demás se le suman detrás, en el orden en que entraron.
-        # Se ordena acá por fecha en vez de confiar en el orden en que vengan.
-        # On the loose board only the documents not filed yet count: the ones
-        # already saved into a carpeta belong to that carpeta, not to this board.
         existing = sorted(
             (
                 document
@@ -216,9 +213,7 @@ class ConsolidateDocumentsUseCase:
             raise InvalidDocumentRequestException(
                 "No hay fotos sueltas en la bandeja ni documentos en el carril para juntar."
             )
-        # El tope es por documento, así que juntar es justo donde se alcanza. Se
-        # dice cuántas son y cuántas entran, que es lo que hace falta para
-        # decidir qué dejar afuera; partirlas por la mitad no lo decide un botón.
+        # El tope es por documento, así que juntar es justo donde se alcanza.
         if len(ids) > MAX_PAGES:
             raise InvalidDocumentRequestException(
                 f"Son {len(ids)} fotos y un documento admite {MAX_PAGES}. "
@@ -226,8 +221,6 @@ class ConsolidateDocumentsUseCase:
             )
 
         target = existing[0] if existing else None
-        # Las demás tarjetas se borran ANTES de rearmar la que queda: sus páginas
-        # tienen tomado el capture_id y chocarían con las nuevas.
         merged = [p.capture_id for d in existing[1:] for p in d.pages]
         for document in existing[1:]:
             self._documents.delete(document.id)
@@ -238,9 +231,6 @@ class ConsolidateDocumentsUseCase:
             else:
                 self._documents.replace_pages(target.id, ids)
         except Exception:
-            # Las tarjetas que se borraron ya no están y sus fotos quedaron sin
-            # dueño: a la bandeja, donde se ven y se pueden volver a clasificar.
-            # Perderlas de vista sería peor que el error que trajo hasta acá.
             self._captures.set_status(merged, CaptureStatus.INBOX)
             raise
         self._captures.set_status(loose, CaptureStatus.ASSIGNED)
@@ -279,8 +269,6 @@ class SetDocumentPagesUseCase:
         self._captures.set_status(added, CaptureStatus.ASSIGNED)
         self._captures.set_status(removed, CaptureStatus.INBOX)
         document = _require_document(self._documents, document_id, user_sub)
-        # replace_pages lo devuelve a borrador para que se vuelva a analizar; el
-        # carril que no se lee no tiene a qué volver, así que queda archivado.
         if document.doc_type in DocumentType.NOT_READ:
             _file_without_reading(self._documents, document)
             document = _require_document(self._documents, document_id, user_sub)
@@ -315,8 +303,6 @@ class AnalyzeDocumentUseCase:
     def execute(self, document_id: str, user_sub: str, force: bool = False) -> FolderDocument:
         document = _require_document(self._documents, document_id, user_sub)
         # El carril que no se lee no se analiza ni a pedido: se guarda y listo.
-        # La pantalla ya no ofrece el botón, pero la regla vive acá -- una
-        # petición vieja o repetida no puede mandarlo al OCR por la ventana.
         if document.doc_type in DocumentType.NOT_READ:
             _file_without_reading(self._documents, document)
             return _require_document(self._documents, document_id, user_sub)
@@ -328,8 +314,7 @@ class AnalyzeDocumentUseCase:
             )
 
         if document.doc_type in DocumentType.SERVER_READ:
-            # No job ids: RunServerReadingUseCase does the reading and writes the
-            # result. The synchronizer skips pages without a job id.
+            # No job ids: RunServerReadingUseCase does the reading and writes the result.
             self._documents.mark_submitted(document_id, {})
             return _require_document(self._documents, document_id, user_sub)
 
@@ -357,7 +342,16 @@ class RunServerReadingUseCase:
     folios pipeline, a tax receipt with the FUR rules) and stores the result.
     Runs in a BackgroundTask after `analyze` returned, so -- like the folios
     domain's own pipeline -- nothing is allowed to escape: every failure is
-    stored on the document, where the architect can see it and retry."""
+    stored on the document, where the architect can see it and retry.
+
+    `seals` is the pass over the image that finds the stamps and reads them, for
+    a carpeta whose field is stamped and not written (the number of the notary).
+    Optional: without it the reading is what the text of the sheet gives.
+
+    `vision` es la última pasada: el modelo de visión de las computadoras de los
+    arquitectos mirando la foto, para lo que ni el texto ni el recorte del sello
+    saben distinguir. También opcional, y también por fuera de la petición: cuesta
+    entre veinte y treinta segundos por foto."""
 
     def __init__(
         self,
@@ -365,11 +359,17 @@ class RunServerReadingUseCase:
         captures: CaptureRepositoryPort,
         extractors: Mapping[str, ServerReadingPort],
         folders: Optional[RegisteredFolderRepositoryPort] = None,
+        seals: Optional[SealReadingPort] = None,
+        vision: Optional[VisionReadingPort] = None,
+        vision_max_pages: int = 3,
     ):
         self._documents = documents
         self._captures = captures
         self._extractors = extractors
         self._folders = folders
+        self._seals = seals
+        self._vision = vision
+        self._vision_max_pages = vision_max_pages
 
     def execute(self, document_id: str, user_sub: str) -> None:
         document = self._documents.get(document_id, user_sub)
@@ -415,7 +415,7 @@ class RunServerReadingUseCase:
             )
             return
 
-        data = self._with_harvested_values(document, data, observations)
+        data = self._with_harvested_values(document, data, observations, images)
 
         logger.info(
             "Folder analysis: %s %s leído con %d observación(es)",
@@ -425,7 +425,11 @@ class RunServerReadingUseCase:
         self._feed_folder_sheet(document, user_sub, data)
 
     def _with_harvested_values(
-        self, document: FolderDocument, data: Dict[str, Any], observations: List[str]
+        self,
+        document: FolderDocument,
+        data: Dict[str, Any],
+        observations: List[str],
+        images: List[bytes],
     ) -> Dict[str, Any]:
         """The values the carpeta asks for, pulled out of what was read.
 
@@ -439,14 +443,150 @@ class RunServerReadingUseCase:
         specs = document_fields(document.folder_type, document.doc_type)
         if not specs or not isinstance(data, dict):
             return data
-        values, missing = harvest(data, specs)
-        notes = [observation(missing), self._complete_plan_values(data, values)]
+        values, _missing = harvest(data, specs)
+        stamped = self._from_seals(document.id, specs, values, images)
+        seen = self._from_vision(document.id, specs, values, images)
+        notes = [
+            stamped,
+            seen,
+            observation(missing_labels(values, specs)),
+            # Solo para el plano, como dice su nombre: buscar la cifra que la hoja
+            # repite y repartir los lados medidos sobre el dibujo son reglas del
+            # plano. Un avalúo repite "93.00 M2" por cada construcción, así que la
+            # más repetida no es su superficie; y a un formulario le agregaba
+            # frente y fondo que esa hoja no declara.
+            self._complete_plan_values(data, values)
+            if document.doc_type == DocumentType.PLAN
+            else None,
+        ]
         reading = data.get("reading")
         for note in filter(None, notes):
             observations.append(note)
             if isinstance(reading, dict):
                 reading.setdefault("observations", []).append(note)
         return {**data, "values": values}
+
+    def _from_seals(
+        self,
+        document_id: str,
+        specs: Sequence[Any],
+        values: Dict[str, Optional[str]],
+        images: List[bytes],
+    ) -> Optional[str]:
+        """Lo que los sellos estampados en las fotos dicen, buscándolos en la imagen.
+
+        Solo se hace para los campos que declaran vivir en un sello (hoy el
+        número del notario) y solo si la lectura de sellos está cableada; un
+        documento que no pide nada de un sello no gasta ni una llamada al OCR.
+
+        Lo que diga el sello manda sobre lo que se leyó de la redacción, porque
+        es donde el número está siempre: una minuta va dirigida al notario y no
+        lo nombra, y el notario que sí aparece escrito suele ser el que reconoció
+        el documento anterior. Si los dos dicen algo y no coinciden, queda dicho
+        en las observaciones: es un caso para mirar la foto, no para elegir
+        callado.
+
+        Nunca levanta: un sello que no se pudo buscar o leer deja el campo como
+        lo dejó el texto, que es exactamente lo que había antes de esta pasada.
+        """
+        if self._seals is None or not any(getattr(spec, "seal_patterns", ()) for spec in specs):
+            return None
+        self._announce(document_id, ReadingStage.SEALS)
+        try:
+            stamped = from_seals(self._seals.read(images), specs)
+        except Exception:
+            logger.exception("Folder analysis: no se pudieron leer los sellos del documento")
+            return None
+        disagreed = []
+        for spec in specs:
+            value = stamped.get(spec.key)
+            if not value:
+                continue
+            written = values.get(spec.key)
+            values[spec.key] = value
+            if written and written != value:
+                disagreed.append(f"{spec.label}: el sello dice {value} y el texto {written}")
+        if not disagreed:
+            return None
+        return (
+            "Se tomó lo que dice el sello; conviene comparar con la foto. "
+            + "; ".join(disagreed)
+            + "."
+        )
+
+    def _from_vision(
+        self,
+        document_id: str,
+        specs: Sequence[Any],
+        values: Dict[str, Optional[str]],
+        images: List[bytes],
+    ) -> Optional[str]:
+        """La última pasada: el modelo de visión mirando la foto.
+
+        Va al final porque es la más cara -- entre veinte y treinta segundos por
+        foto en una computadora de los arquitectos-- y porque así se le pregunta
+        lo menos posible: solo los campos que la carpeta declara con
+        `vision_hint` y que el OCR no resolvió (vision_wanted), y solo hasta
+        encontrarlos. Si el OCR leyó todo, no se gasta ni una llamada.
+
+        Lo que ve el modelo manda sobre lo que se leyó del texto y del sello,
+        porque es lo único que mira la hoja como hoja: el número del notario está
+        estampado en una corona curva y a un centímetro está impresa la
+        "Resolución Ministerial Nº 57/2020", que como texto se lee igual de bien.
+        Cuando lo que ve no coincide con lo que se había leído, queda dicho en las
+        observaciones: es un caso para mirar la foto, no para elegir callado.
+
+        Nunca levanta: una computadora apagada, ocupada o lenta deja los valores
+        como estaban, que es exactamente lo que había antes de esta pasada.
+        """
+        wanted = vision_wanted(specs, values)
+        if not wanted:
+            return None
+        if self._vision is None or not self._vision.is_configured():
+            # La pasada apagada no es un silencio: había algo que preguntarle a la foto y no se pudo.
+            missing = ", ".join(spec.label for spec in wanted)
+            logger.info(
+                "Folder analysis: la pasada del modelo de visión está apagada; quedaron %s",
+                missing,
+            )
+            return (
+                "No se miró la foto con el modelo de visión (ninguna computadora conectada lo "
+                f"tiene, o la pasada está apagada): {missing} quedó como lo leyó el texto."
+            )
+        self._announce(document_id, ReadingStage.VISION)
+        by_key = {spec.key: spec for spec in specs}
+        disagreed: List[str] = []
+        failure: Optional[str] = None
+        for page, image in enumerate(images[: max(self._vision_max_pages, 0)], start=1):
+            try:
+                answer = from_vision(self._vision.read(image, wanted), wanted)
+            except DomainException as exc:
+                # La primera hoja que no se pudo mirar ya dice por qué; las siguientes fallarían igual, así que no se insiste.
+                logger.warning("Folder analysis: la foto %d no se pudo mirar: %s", page, exc.message)
+                failure = exc.message
+                break
+            except Exception:
+                logger.exception("Folder analysis: error inesperado mirando la foto %d", page)
+                failure = "Error inesperado al mirar la foto."
+                break
+            for key, value in answer.items():
+                written = values.get(key)
+                values[key] = value
+                if written and written != value:
+                    disagreed.append(f"{by_key[key].label}: la foto dice {value} y el texto {written}")
+            wanted = [spec for spec in wanted if spec.key not in answer]
+            if not wanted:
+                break
+        # Las dos cosas pueden haber pasado: una hoja mirada que no coincidió y la siguiente que ya no se pudo mirar.
+        notes = []
+        if disagreed:
+            notes.append("Se tomó lo que se ve en la foto; conviene comparar. " + "; ".join(disagreed) + ".")
+        if failure:
+            notes.append(
+                "No se pudo revisar la foto con el modelo de visión, así que lo que falta quedó "
+                f"como lo leyó el texto: {failure} Revíselo contra la foto."
+            )
+        return " ".join(notes) or None
 
     @staticmethod
     def _complete_plan_values(data: Dict[str, Any], values: Dict[str, Optional[str]]) -> Optional[str]:
@@ -466,8 +606,6 @@ class RunServerReadingUseCase:
         pages = data.get("pages") or []
         dimensions = [d for page in pages for d in (page.get("dimensions") or [])]
         street = next((page["street"] for page in pages if page.get("street")), None)
-        # The whole-page reading sometimes misses the street label that the pass over
-        # the drawing does read: its width fills "Ancho de calle" when the text did not.
         if street and not values.get("street_width") and street.get("width_m"):
             values["street_width"] = f"{float(street['width_m']):.2f} m"
         if not dimensions:
@@ -504,6 +642,26 @@ class RunServerReadingUseCase:
                 filled = True
         if filled:
             self._folders.update_details(folder.id, folder.name, folder.notes, sheet)
+
+    def _announce(self, document_id: str, stage: Optional[str]) -> None:
+        """Deja dicho en qué pasada anda la lectura, para la pantalla que la mira.
+
+        Mientras se leen las fotos no hace falta: eso ya lo cuenta el estado de
+        cada una. Hace falta después, cuando el trabajo es sobre el documento
+        entero y la pantalla no tendría de dónde saber si sigue avanzando -- la
+        pasada del modelo de visión se lleva entre veinte y treinta segundos por
+        foto, y sin esto el cartel decía "Interpretando" y se quedaba quieto.
+
+        No se apaga acá: lo apaga el guardado final, que es el único lugar por el
+        que salen todas las lecturas (sql_document_repository.save_progress).
+
+        Nunca levanta: un cartel que no se pudo escribir no puede tirar abajo una
+        lectura que está saliendo bien.
+        """
+        try:
+            self._documents.set_stage(document_id, stage)
+        except Exception:
+            logger.exception("Folder analysis: no se pudo anunciar la etapa de %s", document_id)
 
     def _page_done(self, document_id: str, pages: List[DocumentPage]) -> Callable[[int], None]:
         """Marks each photo as read as soon as it is, so the screen can show how

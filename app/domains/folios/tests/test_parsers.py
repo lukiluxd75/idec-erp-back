@@ -42,8 +42,7 @@ class TestOrientation(unittest.TestCase):
         self.assertLess(abs(detect_rotation(_blocks(page["blocks_page"]))), 2)
 
     def test_page_scanned_sideways_is_detected(self):
-        # Turn the upright boxes 90° clockwise (what the sample scan looked like):
-        # (x, y) -> (H - y, x). Undoing it needs +90° counter-clockwise.
+        # Turn the upright boxes 90° clockwise (what the sample scan looked like): (x, y) -> (H - y, x).
         page = load_pages()[1]
         height = page["size"][1]
         cw = ((0.0, -1.0, float(height)), (1.0, 0.0, 0.0))
@@ -250,9 +249,6 @@ class TestTitularidadParser(unittest.TestCase):
         self.assertNotIn("numero_inferido", r["asientos"][1])
 
     def test_low_resolution_ocr_variants(self):
-        # What the OCR returned for a ~1000 px wide photo of the sample folio
-        # (names anonymized): digits of 'Asiento Numero' lost, glued words,
-        # 'Vendedor(es):' without colon, the 'CI' of the CI line lost.
         r = parse_titularidad(self._lines(
             "Asiento-Numeco:",
             "Vendedorles",

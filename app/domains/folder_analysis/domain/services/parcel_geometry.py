@@ -23,21 +23,13 @@ Ring = Sequence[Sequence[float]]
 POINTS = ("Norte", "Noreste", "Este", "Sudeste", "Sud", "Sudoeste", "Oeste", "Noroeste")
 POINT_ABBREVIATIONS = ("N", "NE", "E", "SE", "S", "SO", "O", "NO")
 
-# An edge belongs to a neighbour when this much of it runs along the neighbour's
-# line, and "along" means closer than this (the cadastre is digitized, so two
-# lots never share an edge to the centimetre).
 SHARED_TOLERANCE_M = 0.8
 MIN_SHARED_RATIO = 0.3
-# A street is the colindante of an edge that nobody else touches when it is within
-# this distance and on the side the edge faces. A lot is rarely deeper than this
-# from the street it fronts, and the GIS draws streets by their axis.
 STREET_REACH_M = 30.0
 # Streets within this of the predio are listed as the ones it faces.
 NEAR_STREET_M = 25.0
 # Edges shorter than this are digitizing noise.
 MIN_EDGE_M = 0.05
-# A side that turns more than this from where it started stops being one side: a
-# rounded corner is a curve, not a wall, and gets split into the sides it faces.
 MAX_TURN_DEG = 45.0
 
 UNNAMED_STREET = "calle innominada"
@@ -66,9 +58,7 @@ class Street:
     kind: str
     name: str
     paths: Sequence[Ring]
-    # Which street this axis belongs to. Two unnamed streets read the same on the
-    # sheet ("calle innominada") and are still two streets: it is what tells a
-    # corner from a lot on a single street. Axes of one street share it.
+    # Which street this axis belongs to.
     key: str = ""
 
     @property
@@ -194,8 +184,7 @@ def _street_of(edge: _Edge, streets: Sequence[Tuple[Street, List[LineString]]]) 
                 continue
             nearest = line.interpolate(line.project(middle))
             toward = (nearest.x - middle.x, nearest.y - middle.y)
-            # The street has to be on the side the edge faces, or the back of a
-            # lot would be given the street of its front.
+            # The street has to be on the side the edge faces, or the back of a lot would be given the street of its front.
             if toward[0] * normal[0] + toward[1] * normal[1] <= 0:
                 continue
             if best is None or distance < best[1]:
@@ -210,8 +199,7 @@ def _turn(a: float, b: float) -> float:
 def _sides(edges: List[_Edge]) -> List[Side]:
     if not edges:
         return []
-    # Start the walk where the colindante changes, so a run that crosses the
-    # first vertex of the ring is not cut in two.
+    # Start the walk where the colindante changes, so a run that crosses the first vertex of the ring is not cut in two.
     cut = next((i for i in range(len(edges)) if edges[i].key != edges[i - 1].key), 0)
     edges = edges[cut:] + edges[:cut]
 

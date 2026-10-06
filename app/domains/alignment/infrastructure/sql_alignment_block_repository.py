@@ -141,8 +141,6 @@ class SqlAlignmentBlockRepository(AlignmentBlockRepositoryPort):
         row.transform_params = transform_params
         row.rmse_m = rmse_m
         row.updated_at = datetime.utcnow()
-        # An edited block no longer matches its old confirmation -- back to
-        # draft, needs re-confirming (see AlignmentBlockRepositoryPort.update).
         row.status = "draft"
         row.confirmed_by = None
         row.confirmed_at = None

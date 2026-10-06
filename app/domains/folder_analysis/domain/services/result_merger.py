@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 from app.domains.folder_analysis.domain.entities import DocumentType
 from app.domains.folder_analysis.domain.extraction_profiles import FOLIO_TEMPLATE, TAX_RECEIPT_TEMPLATE
 
-# A lone "x" is how these forms mark a blank field (e.g. "CATASTRO: x").
+# A lone "x" marks a blank field.
 _EMPTY_STRINGS = {"", "null", "none", "n/a", "-", "x"}
 
 
@@ -67,8 +67,7 @@ def _merge_folio(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
     by_number: Dict[str, int] = {}
     for page in pages:
         for entry in page["ownership_entries"]:
-            # An "Asiento Numero" header with nothing under it (e.g. the next asiento
-            # starting at the bottom edge of the photo) is not an entry yet.
+            # Skip entries with no owners or other identifying values.
             if is_empty(entry.get("owners")) and all(
                 is_empty(entry.get(k)) for k in ("act", "document", "authority", "filing")
             ):

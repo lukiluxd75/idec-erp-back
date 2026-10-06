@@ -20,8 +20,7 @@ from fastapi import APIRouter
 
 logger = logging.getLogger("uvicorn.error")
 
-# (package name under app.domains, URL prefix). An empty prefix means the
-# domain's own router already carries whatever path it wants to live at.
+# (package name under app.domains, URL prefix).
 _DOMAINS: tuple[tuple[str, str], ...] = (
     ("security", ""),
     ("geoextraction", "/geoextraction"),
@@ -44,8 +43,7 @@ for _name, _prefix in _DOMAINS:
         _module = importlib.import_module(f"app.domains.{_name}.presentation.router")
         api_router.include_router(_module.router, **({"prefix": _prefix} if _prefix else {}))
     except Exception as exc:
-        # exc_info so the log carries the traceback: "No module named 'geoalchemy2'"
-        # alone does not say which import pulled it in.
+        # exc_info so the log carries the traceback: "No module named 'geoalchemy2'" alone does not say which import pulled it in.
         logger.warning("Could not load domain '%s': %s", _name, exc, exc_info=True)
 
 
@@ -73,8 +71,7 @@ def check_unregistered_domains() -> Iterable[str]:
         try:
             spec = importlib.util.find_spec(router_path)
         except (ImportError, AttributeError, ValueError):
-            # find_spec imports parent packages, so a domain whose __init__ is
-            # broken raises here. That is not "unregistered", so skip it.
+            # find_spec imports parent packages, so a domain whose __init__ is broken raises here.
             continue
         if spec is not None:
             found.append(module.name)

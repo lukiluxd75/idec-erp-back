@@ -18,8 +18,7 @@ class OpenCvThumbnail(ThumbnailPort):
         return self._resize(content, self._max_side, self._jpeg_quality)
 
     def preview(self, content: bytes) -> bytes:
-        # A little more quality than the thumbnail: this is the copy the
-        # architect reads the folio from.
+        # A little more quality than the thumbnail: this is the copy the architect reads the folio from.
         return self._resize(content, self._preview_max_side, 85)
 
     def _resize(self, content: bytes, max_side: int, quality: int) -> bytes:

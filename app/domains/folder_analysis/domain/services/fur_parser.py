@@ -42,13 +42,8 @@ from app.domains.folder_analysis.domain.services.text import (
 
 PARSER_VERSION = 1
 
-# A block that IS the label scores 1 or more (see text.label_score); below that
-# the score is how closely it reads, and 0.85 is about one wrong character in a
-# short label. Under it the field is left to the LLM pass instead of guessed at.
 MIN_LABEL_SCORE = 0.85
 
-# What a value must look like for its field, so a label's neighbour is not stored
-# just because it happens to be next to it (see step 3 above).
 TEXT = "text"
 AMOUNT = "amount"      # 1.234,56 / 1234.56 / 0.00
 AREA = "area"          # an amount, with or without its unit
@@ -65,8 +60,7 @@ _DATE_RE = re.compile(r"\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}")
 # "Bs", and the box borders the OCR reads as text: never part of a value.
 _NOISE = {"BS", "BS.", "SBS", "|", ":", "-"}
 
-# key -> (labels to look for, kind of value). The order is the form's own reading
-# order, which is also the order the fill log lists the fields in.
+# key -> (labels to look for, kind of value).
 FIELDS: Tuple[Tuple[str, Tuple[str, ...], str], ...] = (
     ("collecting_entity", ("ENTIDAD RECAUDADORA", "ENTIDAD"), TEXT),
     ("correspondent", ("CORRESP.", "CORRESPONSAL"), TEXT),
@@ -75,8 +69,6 @@ FIELDS: Tuple[Tuple[str, Tuple[str, ...], str], ...] = (
     ("cashier", ("CAJERO", "CAJA"), TEXT),
     ("folio", ("FOLIO",), CODE),
     ("paid_at", ("FECHA",), DATE),
-    # "Nº INMUEBLE" reaches the parser as "NO INMUEBLE" or as "N INMUEBLE",
-    # depending on which ordinal sign the form was printed with.
     ("property_number", ("NO INMUEBLE", "N INMUEBLE", "NRO INMUEBLE", "INMUEBLE NRO"), INTEGER),
     ("cadastral_code", ("COD. CAT.", "CODIGO CATASTRAL", "COD CATASTRO"), CODE),
     ("property_class", ("CLASE",), TEXT),
@@ -96,8 +88,7 @@ FIELDS: Tuple[Tuple[str, Tuple[str, ...], str], ...] = (
     ("balance", ("SALDO GESTION", "SALDO"), AMOUNT),
 )
 
-# Labels that carry no value of their own: they are here only so a value does not
-# swallow the box that follows it.
+# Labels that carry no value of their own: they are here only so a value does not swallow the box that follows it.
 _STOP_LABELS = ("CONTRIBUYENTE", "TOTAL", "GESTION", "PROPIETARIO", "OBSERVACIONES")
 
 _ALL_LABELS = tuple({label for _key, labels, _kind in FIELDS for label in labels} | set(_STOP_LABELS))
@@ -122,11 +113,8 @@ class FurReading:
     # Per field (dotted for the taxpayer): the OCR's own confidence in it.
     confidence: Dict[str, Optional[float]] = field(default_factory=dict)
     observations: List[str] = field(default_factory=list)
-    # Per field: the label that was found, where the value was read and its raw
-    # OCR text -- so a wrong value can be traced back to the rule that read it.
     trace: List[Dict[str, Any]] = field(default_factory=list)
-    # The OCR text of the receipt in reading order: what the LLM pass is allowed
-    # to work from, and what the JSON tab shows.
+    # The OCR text of the receipt in reading order: what the LLM pass is allowed to work from, and what the JSON tab shows.
     lines: List[str] = field(default_factory=list)
 
 
@@ -220,9 +208,7 @@ def _read_field(
         return None, None, {"label": None, "puntaje": round(score, 3)}
 
     right, below = _right_of(lines[index], label), _below(lines, index, label)
-    # (where it was read, the value there, the blocks it came from -- for the
-    # confidence). A place with no value at all is skipped, never fallen back to:
-    # the label's own block reads as its own value if one is not careful.
+    # (where it was read, the value there, the blocks it came from -- for the confidence).
     places = (
         ("mismo bloque", after_label(label.text, matched), [label]),
         ("derecha", clean_value(join_text(right)), right),
@@ -247,17 +233,10 @@ def _read_field(
     }
 
 
-# "Nº 59122836" reaches this already normalized, and NFKD turns the ordinal sign
-# into an "o" -- hence the NO spelling next to the others.
 _RECEIPT_NUMBER_RE = re.compile(r"(?:FUR|NUMERO|NRO|NO|N)\.?\s*[:\-]?\s*(\d{4,})")
-# The same thing on the raw line, where the ordinal sign is still there: only to
-# take the number out of the title it is printed on.
 _RECEIPT_NUMBER_AS_PRINTED = re.compile(
     r"(?:FUR|NUMERO|NRO|N)[°ºo]?\.?\s*[:\-]?\s*\d{4,}", re.IGNORECASE
 )
-# No word boundaries anywhere below: the OCR glues a whole printed line into one
-# block and drops its spaces ("INMUEBLESIMPBI2024TOTAL"), so a boundary would
-# never be there to find.
 _YEAR_RE = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")
 _CI_RE = re.compile(r"C\.?\s*I\.?\s*[-:]?\s*([\d.]{5,})")
 _TAXPAYER_TYPE_RE = re.compile(r"(NATURAL|JURIDICA|JURIDICO)")
@@ -267,8 +246,7 @@ def _read_lines(text_lines: Sequence[Tuple[str, Optional[float]]], reading: FurR
     """The values the form prints as a whole line instead of next to a label."""
     for text, confidence in text_lines:
         flat, plain = compact(text), normalize(text)
-        # The number is usually printed on the title's own line, so it is taken
-        # out of the type instead of being stored in both.
+        # The number is usually printed on the title's own line, so it is taken out of the type instead of being stored in both.
         number = _RECEIPT_NUMBER_RE.search(plain)
         if reading.data["receipt_type"] is None and "COMPROBANTEDEPAGO" in flat:
             without_number = _RECEIPT_NUMBER_AS_PRINTED.sub(" ", text) if number is not None else text
@@ -305,7 +283,7 @@ def _read_taxpayer(lines: Sequence[Sequence[Block]], reading: FurReading, page_i
     if ci is not None:
         reading.data["taxpayer"]["id_number"] = ci.group(1).strip(".")
         rest = rest[: ci.start()] + " " + rest[ci.end() :]
-    # Whatever is left once the type and the C.I. are out is the name.
+    # Whatever is left once the type and the C.I.
     reading.data["taxpayer"]["name"] = clean_value(re.sub(r"\bC\.?\s*I\.?\b", " ", rest))
     for key in ("type", "id_number", "name"):
         if reading.data["taxpayer"][key] is not None:

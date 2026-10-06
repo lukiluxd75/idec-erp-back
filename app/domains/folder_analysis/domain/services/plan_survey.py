@@ -15,8 +15,7 @@ import math
 import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-# 00-33-432-012-0-00-000-000 as printed (OCR may swap a dash for a space or dot). The
-# manzana may carry a letter ("00-30-B37-002-0-00-000-000").
+# 00-33-432-012-0-00-000-000 as printed (OCR may swap a dash for a space or dot).
 _CODE_PRINTED = re.compile(
     r"(\d{2})\s*[-–.]\s*(\d{2})\s*[-–.]\s*([0-9A-Z]{3})\s*[-–.]\s*(\d{3})\s*[-–.]\s*(\d)\s*[-–.]\s*(\d{2})\s*[-–.]\s*(\d{3})\s*[-–.]\s*(\d{3})", re.IGNORECASE
 )
@@ -24,8 +23,7 @@ _CODE_PRINTED = re.compile(
 _POINT = re.compile(
     r"\bP\s*(\d{1,2})\b[^0-9]{0,8}(\d{6}(?:[.,]\d+)?)[^0-9]{1,10}(\d{7}(?:[.,]\d+)?)", re.IGNORECASE
 )
-# "SUPERFICIE TOTAL UTIL", as the OCR misreads it ("TTAL"). It must end in m2: a side
-# ("30.18m") that the OCR put after the label is not the surface.
+# "SUPERFICIE TOTAL UTIL", as the OCR misreads it ("TTAL").
 _SURFACE = re.compile(
     r"SUP(?:ERFICIE|\.)?\s*(?:T[A-Z]{2,4}\s*)?UTIL[^0-9]{0,40}(\d[\d.,]*)\s*M[2²]", re.IGNORECASE
 )
@@ -121,9 +119,7 @@ def declared_surface(text: str) -> Optional[float]:
             return float(match.group(1).rstrip(".,").replace(",", "."))
         except ValueError:
             pass
-    # The OCR often separates the label from its figure. The surface útil is the one
-    # the sheet states over and over (s/mensura, total útil, the drawing), so the most
-    # repeated figure is it; the one that appears once (s/doc privado) is not.
+    # The OCR often separates the label from its figure.
     counts: Dict[float, int] = {}
     for found in _ANY_SURFACE.finditer(text or ""):
         value = _number(found.group(1))
@@ -164,13 +160,8 @@ def survey(vertices: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     return {"vertices": vertices, "sides": sides, "area_m2": round(abs(twice_area) / 2.0, 2)}
 
 
-# The area of the vertices may differ this much from the one the plano prints
-# before the sides are not trusted: a point misread by the OCR moves it by far more.
 AREA_TOLERANCE = 0.02
 AREA_TOLERANCE_MIN_M2 = 1.0
-# The side that faces a street is the one whose middle is closest to its axis; if
-# a second side is nearly as close the lot is on a corner (or between two streets)
-# and which one is the frente is the architect's call, not a guess.
 STREET_MAX_DISTANCE_M = 40.0
 STREET_TIE_M = 1.0
 
@@ -233,9 +224,6 @@ def measures(
     ):
         return refuse("Las coordenadas del plano se cruzan: revise que estén bien leídas.")
     area_checked = declared_area is not None
-    # A rounded corner of radius r cuts (1 - pi/4) * r2 from the square corner the
-    # vertices draw, so a lot with two R5.00 corners has 10.7 m2 less than its
-    # vertices enclose and the plano still prints the right surface.
     rounded = rounded_corners_area(corner_radii)
     tolerance = max(AREA_TOLERANCE_MIN_M2, (declared_area or 0) * AREA_TOLERANCE)
     if area_checked and min(
@@ -277,8 +265,7 @@ def read_plan(text: str) -> Dict[str, Any]:
     radii = corner_radii(text)
     drawn = survey(vertices)
     if drawn and radii:
-        # The vertices draw square corners: the surface of the lot is what is left
-        # once the rounded ones are cut.
+        # The vertices draw square corners: the surface of the lot is what is left once the rounded ones are cut.
         drawn["corner_radii"] = radii
         drawn["area_net_m2"] = round(drawn["area_m2"] - rounded_corners_area(radii), 2)
     return {

@@ -61,14 +61,14 @@ class DocumentModel(FolderAnalysisBase):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_sub = Column(String(64), nullable=False)
     doc_type = Column(String(20), nullable=False)
-    # Bajo qué tipo de carpeta se clasificó. Es lo que decide qué campos se le
-    # sacan al analizarlo, y lo lleva el documento y no la carpeta porque en el
-    # tablero suelto se elige el tipo sin abrir ninguna carpeta.
+    # Bajo qué tipo de carpeta se clasificó.
     folder_type = Column(String(40))
     status = Column(String(20), nullable=False)
     extracted_data = deferred(Column(JSONB))
     reviewed_data = deferred(Column(JSONB))
     error = Column(Text)
+    # En qué anda la lectura ahora mismo (ReadingStage), mientras dura.
+    stage = Column(String(20))
     analyzed_at = Column(DateTime(timezone=True))
     reviewed_at = Column(DateTime(timezone=True))
     created_at, updated_at = _timestamps()
@@ -81,10 +81,7 @@ class DocumentModel(FolderAnalysisBase):
         lazy="selectin",
     )
 
-    # Which carpeta holds it, read off the row that files it. It is viewonly on
-    # purpose: filing stays the carpeta's business (RegisteredFolderItemModel is
-    # the one table that says where a document is), and this only saves the
-    # board a second query to find out which carpeta it is working in.
+    # Which carpeta holds it, read off the row that files it.
     folder_item = relationship(
         "RegisteredFolderItemModel",
         back_populates="document",
@@ -212,9 +209,7 @@ class RegisteredFolderModel(FolderAnalysisBase):
     user_sub = Column(String(64), nullable=False)
     name = Column(String(120), nullable=False)
     notes = Column(Text)
-    # Which kind of carpeta this is (domain/folder_types.py): what documents it
-    # holds and what its own sheet asks for. The carpetas that existed before the
-    # catalogue carry the general kind, which is the three original lanes.
+    # Which kind of carpeta this is (domain/folder_types.py): what documents it holds and what its own sheet asks for.
     folder_type = Column(String(40), nullable=False, server_default=text("'general'"))
     # The carpeta's own sheet, keyed by the field keys of its kind.
     data = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
@@ -269,10 +264,8 @@ class RegisteredFolderItemModel(FolderAnalysisBase):
 
 
 # Columns added to tables that already existed in deployed databases.
-# metadata.create_all() only creates missing tables, so these go by hand (same as
-# digitization). The SQL of record is database/folder_analysis_folder_types.sql.
 _ADDED_COLUMNS = {
-    "documents": ("folder_type VARCHAR(40)",),
+    "documents": ("folder_type VARCHAR(40)", "stage VARCHAR(20)"),
     "registered_folders": (
         "folder_type VARCHAR(40) NOT NULL DEFAULT 'general'",
         "data JSONB NOT NULL DEFAULT '{}'::jsonb",
@@ -285,10 +278,6 @@ def create_schema_and_tables(engine: Engine) -> None:
         conn.execute(CreateSchema(SCHEMA, if_not_exists=True))
     FolderAnalysisBase.metadata.create_all(bind=engine)
     with engine.begin() as conn:
-        # ADD COLUMN needs ACCESS EXCLUSIVE and Postgres grants locks in arrival
-        # order, so an ALTER waiting on a long reader also queues everything
-        # behind it. Give up on the lock instead: the caller logs it, the backend
-        # starts anyway and the column is added on a later start.
         conn.execute(text("SET LOCAL lock_timeout = '5s'"))
         for table, columns in _ADDED_COLUMNS.items():
             for column in columns:

@@ -30,8 +30,8 @@ def _database_error(exc: Exception) -> HTTPException:
     if isinstance(exc, RuntimeError):
         return HTTPException(status_code=503, detail=str(exc))
     if isinstance(exc, pyodbc.Error):
-        return HTTPException(status_code=503, detail="No se pudo conectar a SQL Server. Revisa las credenciales y el acceso de la cuenta configurada en el .env del backend.")
-    return HTTPException(status_code=503, detail="No se pudo consultar la base de datos. Revisa la terminal del backend.")
+        return HTTPException(status_code=503, detail="No se pudo conectar a SQL Server. Revise las credenciales y el acceso de la cuenta configurada en el .env del backend.")
+    return HTTPException(status_code=503, detail="No se pudo consultar la base de datos. Revise la terminal del backend.")
 
 
 def _district_param(district: int | None) -> int | None:

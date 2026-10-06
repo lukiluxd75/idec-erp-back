@@ -48,10 +48,6 @@ def _drivers(monkeypatch, names):
     )
 
 
-# Windows sin el ODBC 17/18 instalado: pyodbc.drivers() trae el "SQL Server" de
-# siempre junto a los de Office, y el .env puede seguir pidiendo FreeTDS. Antes
-# eso terminaba en RuntimeError diciendo que no habia driver de SQL Server
-# mientras lo listaba como instalado, y los reportes respondian 503.
 _WINDOWS_WITH_OFFICE = [
     "SQL Server",
     "Microsoft Access Driver (*.mdb, *.accdb)",
@@ -95,8 +91,7 @@ def test_modern_driver_keeps_tls_keywords(monkeypatch):
 
 
 def test_requested_driver_never_matches_an_office_driver(monkeypatch):
-    # "Driver" aparece en los de Office: el match por subcadena no debe salirse
-    # de la familia SQL Server.
+    # "Driver" aparece en los de Office: el match por subcadena no debe salirse de la familia SQL Server.
     _drivers(monkeypatch, ["Microsoft Access Text Driver (*.txt, *.csv)"])
     with pytest.raises(RuntimeError, match="No SQL Server ODBC driver found"):
         resolve_odbc_driver("Driver")

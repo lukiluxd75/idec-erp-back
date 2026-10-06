@@ -3,18 +3,10 @@ from typing import Optional
 from app.domains.detection.domain.entities.architect_review import ArchitectReview
 from app.domains.detection.domain.ports.affected_parcel_review_port import AffectedParcelReviewPort
 
-# The only two verdicts an architect can record on an affected_parcel. The
-# retraining-feedback workflow was dropped (alignment wasn't reliable enough
-# for it to be worth building) -- see AffectedParcelReviewPort's docstring.
+# The only two verdicts an architect can record on an affected_parcel.
 ALLOWED_ACTIONS = {"confirm", "reject"}
 
 # Fixed catalog offered by the frontend's dropdown for affected_parcel.
-# construction_type -- the real-world categories a confirmed change usually
-# falls into. Not an exhaustive whitelist: picking "Otro" there reveals a
-# free-text field, and *that* short title is what actually gets sent and
-# stored here instead of the literal word "otro" (see
-# CONSTRUCTION_TYPE_MAX_LENGTH below) -- there is no dedicated column for it,
-# it goes straight into construction_type like every other value.
 ALLOWED_CONSTRUCTION_TYPES = {
     "nueva_construccion",
     "ampliacion",
@@ -23,9 +15,6 @@ ALLOWED_CONSTRUCTION_TYPES = {
     "demolicion",
 }
 
-# Matches affected_parcel.construction_type's VARCHAR(30) -- a short title,
-# not a description, whether it's one of the catalog values above or a
-# custom one typed under "Otro".
 CONSTRUCTION_TYPE_MAX_LENGTH = 30
 
 

@@ -27,9 +27,6 @@ def _boom():
 
 class SocketPresenceTests(unittest.TestCase):
     def setUp(self):
-        # StaticPool: SocketPresence escribe desde otro hilo (asyncio.to_thread),
-        # y un SQLite ":memory:" normal da una base DISTINTA por conexion, asi
-        # que el hilo de escritura no veria la misma que el de lectura.
         self.engine = create_engine(
             "sqlite://",
             connect_args={"check_same_thread": False},

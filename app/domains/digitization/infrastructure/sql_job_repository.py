@@ -161,8 +161,6 @@ class SqlJobRepository(JobRepositoryPort):
         parsed = _parse_id(job_id)
         if parsed is None:
             return False
-        # A plain column read: the flag is written by another process, so the
-        # session's cached copy of the row must not be consulted.
         return bool(self._db.execute(select(Job.stop_requested).where(Job.id == parsed)).scalar_one_or_none())
 
     def mark_stopped(self, job_id: str, error: str) -> None:

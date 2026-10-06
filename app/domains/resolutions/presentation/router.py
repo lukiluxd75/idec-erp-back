@@ -12,8 +12,6 @@ logger = logging.getLogger("uvicorn.error")
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    # FastAPI junta este lifespan con el de la app: el dominio agrega sus
-    # columnas nuevas sin tocar main.py ni core (ver plan_page_models.py).
     if engine.dialect.name == "postgresql":
         try:
             ensure_added_columns(engine)

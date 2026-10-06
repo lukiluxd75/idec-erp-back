@@ -4,14 +4,9 @@ from typing import Any, Dict, List, Optional
 
 from app.domains.folder_analysis.domain.entities.folder_document import FolderDocument
 
-# The name is what the architect types to recognise the project, and the note is
-# the one line they may add under it; both are trimmed and capped here so the
-# column width is a domain rule and not a database detail.
 MAX_NAME_LENGTH = 120
 MAX_NOTES_LENGTH = 500
-# A carpeta holds the reviewed documents of one project. Ten folios, ten
-# comprobantes and ten planos is already a very large project; the cap only
-# exists so one request cannot ask for thousands of rows.
+# A carpeta holds the reviewed documents of one project.
 MAX_DOCUMENTS = 60
 
 
@@ -57,9 +52,6 @@ class RegisteredFolder:
         carpeta had a kind) is still counted, so nothing disappears from the
         tally.
         """
-        # Importado acá dentro y no arriba: el catálogo necesita los tipos de
-        # documento de este paquete, así que pedirlo al importar la entidad sería
-        # un círculo -- y quien importe primero el catálogo se lo come.
         from app.domains.folder_analysis.domain.folder_types import folder_type
 
         counts = {doc_type: 0 for doc_type in folder_type(self.folder_type).document_types}

@@ -240,3 +240,25 @@ def require_permission(codigo: str):
         return current_user
 
     return _dependency
+
+
+def has_permission(codigo: str):
+    """
+    FastAPI dependency factory: answers whether the authenticated user holds
+    'codigo', instead of cutting the request off like require_permission does.
+
+    For an endpoint that does not demand the permission but serves differently
+    depending on who is asking -- a search an administrator sees wider than
+    everyone else. It never replaces the permission that protects the endpoint:
+    that stays a require_permission of its own next to this one.
+    """
+
+    def _dependency(
+        current_user: UserProfile = Depends(get_current_user),
+        user_repository: UserRepositoryPort = Depends(get_user_repository),
+    ) -> bool:
+        if not current_user.sub:
+            return False
+        return codigo in user_repository.get_user_permissions(current_user.sub)
+
+    return _dependency

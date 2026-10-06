@@ -16,8 +16,6 @@ from app.domains.detection.infrastructure.export_labels import (
 
 PURPLE = "#341A67"
 GRAY = "#6B7280"
-# Soft tints so a long list reads at a glance -- confirmed vs rejected --
-# without the pure red/green eye-strain pure colors would cause on a whole row.
 CONFIRMED_TINT = "#EAF7EF"
 REJECTED_TINT = "#FDECEC"
 

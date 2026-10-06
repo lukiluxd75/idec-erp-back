@@ -11,6 +11,6 @@ Usage from another domain, e.g. cadastre:
     def create_parcel(current_user = Depends(require_permission("catastro.predios.crear"))):
         ...
 """
-from app.domains.security.presentation.deps import require_permission
+from app.domains.security.presentation.deps import has_permission, require_permission
 
-__all__ = ["require_permission"]
+__all__ = ["has_permission", "require_permission"]

@@ -128,25 +128,16 @@ class ExtractionProfile:
     output_template: Optional[Dict[str, Any]]
 
 
-# What a lane sends to the architects' PCs. Every lane is read on the server now
-# (DocumentType.SERVER_READ), so nothing reaches the queue and these are only the
-# templates the stored results are shaped against.
+# What a lane sends to the architects' PCs.
 PROFILES: Dict[str, ExtractionProfile] = {
     DocumentType.FOLIO: ExtractionProfile(FOLIO_INSTRUCTIONS, FOLIO_TEMPLATE),
     DocumentType.TAX_RECEIPT: ExtractionProfile(TAX_RECEIPT_INSTRUCTIONS, TAX_RECEIPT_TEMPLATE),
 }
 
-# A lane with nothing to declare gets the queue's generic digitization (text,
-# fields and tables) -- what the plano was sent with before it was read here.
 GENERIC_PROFILE = ExtractionProfile(None, None)
 
 
-# What a carpeta asks for instead of the base profile, keyed by (carpeta,
-# document). Empty on purpose: the carpeta de poseedores has its documents
-# declared (domain/folder_types.py) but not yet the fields to pull out of them,
-# so every carpeta is still read with the base profile of each document. An
-# entry here is how a carpeta stops sharing the reading of a document with the
-# rest -- e.g. ("possessors", DocumentType.FOLIO).
+# What a carpeta asks for instead of the base profile, keyed by (carpeta, document).
 FOLDER_PROFILES: Dict[Tuple[str, str], ExtractionProfile] = {}
 
 

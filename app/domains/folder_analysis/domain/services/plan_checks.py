@@ -20,11 +20,6 @@ OK = "ok"
 DIFFERS = "differs"
 MISSING = "missing"
 
-# The OCR reads this box badly: colons go missing ("SUB DISTRITO33"), a word is
-# misspelled ("MANZANO 432") and the zone runs into the next label
-# ("KHARA KHARAARRUMANI"). So the separator is optional, the numbers must follow
-# the label directly (which keeps "LOTE N: 5" of the drawing out of it) and a
-# value ends where the next label starts.
 _NEXT = r"(?=\s+(?:SUB\s*-?\s*DISTRITO|DISTRITO|MANZAN[AO]|LOTE|VIA|ZONA|ARQUITECTO|SELLO)\b|\s+PROCESAMIENTO|\s*$)"
 _SEP = r"[\s:;.]*"
 _FIELDS = {
@@ -38,10 +33,6 @@ _FIELDS = {
 }
 
 
-# The second format of the plano heads the box with the zone ("DATOS DE UBICACION :
-# PUKARA GRANDE NORTE") and then lists ZONA, DISTRITO... with the values in other
-# blocks, so the zone is not after its own label. A zone "found" after ZONA that is
-# really the next label (MANZANA : 494...) is not a zone.
 _ZONE_HEADING = re.compile(r"\bDATOS\s*DE\s*UBICACION\s*[:;.]\s*(.+?)" + _NEXT)
 _LABEL_START = re.compile(r"^(?:SUB\s*-?\s*DISTRITO|DISTRITO|MANZAN[AO]|LOTE|VIA)\b")
 
@@ -54,8 +45,6 @@ def read_location_block(text: str) -> Dict[str, Optional[str]]:
     prose = normalize(text or "")
     found: Dict[str, Optional[str]] = {}
     for key, pattern in _FIELDS.items():
-        # The box is the last thing on the sheet that says these words: the first
-        # "ZONA" or "LOTE" can belong to the drawing or to its coordinates table.
         matches = list(pattern.finditer(prose))
         found[key] = matches[-1].group(1).strip(" .") if matches else None
     if found["zone"] and _LABEL_START.match(found["zone"]):
