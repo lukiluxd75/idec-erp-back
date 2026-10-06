@@ -1,28 +1,35 @@
 import json
 from typing import List, Optional
 
-from fastapi import APIRouter, Body, Depends, Query, Response, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, Query, Response, status
 
 from app.domains.folder_analysis.application.use_cases import (
     AnalyzeDocumentUseCase,
+    ConsolidateDocumentsUseCase,
     CreateDocumentUseCase,
     DeleteDocumentUseCase,
     GetDocumentUseCase,
     ListDocumentsUseCase,
+    ListReviewedDocumentsUseCase,
     ReviewDocumentUseCase,
     SetDocumentPagesUseCase,
 )
+from app.domains.folder_analysis.domain.entities import DocumentType
 from app.domains.folder_analysis.presentation.deps import (
     get_analyze_document_use_case,
+    get_consolidate_documents_use_case,
     get_create_document_use_case,
     get_delete_document_use_case,
     get_get_document_use_case,
     get_list_documents_use_case,
+    get_list_reviewed_documents_use_case,
     get_review_document_use_case,
     get_set_pages_use_case,
+    run_server_reading,
 )
 from app.domains.folder_analysis.presentation.schemas.folder_analysis_schema import (
     AnalyzeRequest,
+    ConsolidateRequest,
     CreateDocumentRequest,
     DocType,
     DocumentDetail,
@@ -41,18 +48,49 @@ def create_document(
     use_case: CreateDocumentUseCase = Depends(get_create_document_use_case),
     user: UserProfile = Depends(require_permission("folder-analysis.edit")),
 ):
-    """Photos dropped onto a section (folio, tax_receipt or plan), in page order."""
-    return DocumentDetail.from_entity(use_case.execute(body.doc_type, body.capture_ids, user.sub))
+    """Photos dropped onto a lane, in page order. With `folder_id`, the document
+    is opened inside that carpeta and has to be one of the types it holds."""
+    document = use_case.execute(
+        body.doc_type, body.capture_ids, user.sub, body.folder_id, body.folder_type
+    )
+    return DocumentDetail.from_entity(document)
+
+
+@router.post("/consolidate", response_model=DocumentDetail)
+def consolidate_documents(
+    body: ConsolidateRequest,
+    use_case: ConsolidateDocumentsUseCase = Depends(get_consolidate_documents_use_case),
+    user: UserProfile = Depends(require_permission("folder-analysis.edit")),
+):
+    """Deja en un solo documento lo que quedó suelto en el carril que la carpeta
+    guarda sin leer: sus tarjetas y las fotos que sigan en la bandeja."""
+    document = use_case.execute(body.doc_type, user.sub, body.folder_id, body.folder_type)
+    return DocumentDetail.from_entity(document)
 
 
 @router.get("", response_model=List[DocumentSummary])
 def list_documents(
     doc_type: Optional[DocType] = Query(None),
+    folder_id: Optional[str] = Query(None, description="Solo los documentos de esa carpeta."),
     use_case: ListDocumentsUseCase = Depends(get_list_documents_use_case),
     user: UserProfile = Depends(require_permission("folder-analysis.view")),
 ):
-    """The user's documents, newest first. Refreshes the ones being analyzed."""
-    return [DocumentSummary.from_entity(d) for d in use_case.execute(user.sub, doc_type)]
+    """The user's documents, newest first. Refreshes the ones being analyzed.
+
+    With `folder_id`, only the ones worked on inside that carpeta -- which is
+    what its board shows."""
+    return [DocumentSummary.from_entity(d) for d in use_case.execute(user.sub, doc_type, folder_id)]
+
+
+@router.get("/reviewed", response_model=List[DocumentDetail])
+def list_reviewed_documents(
+    doc_type: Optional[DocType] = Query(None),
+    folder_id: Optional[str] = Query(None, description="Solo los documentos de esa carpeta."),
+    use_case: ListReviewedDocumentsUseCase = Depends(get_list_reviewed_documents_use_case),
+    user: UserProfile = Depends(require_permission("folder-analysis.view")),
+):
+    """Saved reviews only, with the confirmed data for the current user."""
+    return [DocumentDetail.from_entity(d) for d in use_case.execute(user.sub, doc_type, folder_id)]
 
 
 @router.get("/{document_id}", response_model=DocumentDetail)
@@ -88,12 +126,19 @@ def delete_document(
 @router.post("/{document_id}/analyze", response_model=DocumentDetail, status_code=status.HTTP_202_ACCEPTED)
 def analyze_document(
     document_id: str,
+    background: BackgroundTasks,
     body: AnalyzeRequest = Body(default_factory=AnalyzeRequest),
     use_case: AnalyzeDocumentUseCase = Depends(get_analyze_document_use_case),
     user: UserProfile = Depends(require_permission("folder-analysis.edit")),
 ):
-    """Sends every page to the architects' PCs. Returns right away; poll GET."""
-    return DocumentDetail.from_entity(use_case.execute(document_id, user.sub, body.force))
+    """Starts the analysis. Returns right away; poll GET.
+
+    A folio and a tax receipt are read here on the server (OCR + rules, seconds);
+    a plan goes to the architects' PCs through the digitization queue."""
+    document = use_case.execute(document_id, user.sub, body.force)
+    if document.doc_type in DocumentType.SERVER_READ:
+        background.add_task(run_server_reading, document_id, user.sub)
+    return DocumentDetail.from_entity(document)
 
 
 @router.put("/{document_id}/review", response_model=DocumentDetail)

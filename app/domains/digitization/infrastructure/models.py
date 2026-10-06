@@ -47,8 +47,7 @@ class DigitizationJobModel(DigitizationBase):
     instructions = deferred(Column(Text, nullable=True))
     output_template = deferred(Column(JSONB, nullable=True))
     source = Column(String(40), nullable=True)
-    # Raised from the monitor to ask the PC running this job to drop it. Read by
-    # the dispatching process, which may not be the one that got the request.
+    # Raised from the monitor to ask the PC running this job to drop it.
     stop_requested = Column(Boolean, nullable=False, server_default=text("false"))
     started_at = Column(DateTime(timezone=True), nullable=True)
     finished_at = Column(DateTime(timezone=True), nullable=True)
@@ -61,8 +60,7 @@ class DigitizationJobModel(DigitizationBase):
     )
 
 
-# create_all() never alters an existing table, so columns added after the first
-# deploy are added here. Only safe, idempotent ADD COLUMN IF NOT EXISTS.
+# create_all() never alters an existing table, so columns added after the first deploy are added here.
 _ADDED_COLUMNS = {
     "jobs": (
         "instructions TEXT",
@@ -97,6 +95,7 @@ def create_schema_and_tables(engine: Engine) -> None:
         conn.execute(CreateSchema(SCHEMA, if_not_exists=True))
     DigitizationBase.metadata.create_all(bind=engine)
     with engine.begin() as conn:
+        conn.execute(text("SET LOCAL lock_timeout = '5s'"))
         for table, columns in _ADDED_COLUMNS.items():
             for column in columns:
                 conn.execute(text(f"ALTER TABLE {SCHEMA}.{table} ADD COLUMN IF NOT EXISTS {column}"))

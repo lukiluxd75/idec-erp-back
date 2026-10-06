@@ -1,38 +1,92 @@
+import logging
 from functools import lru_cache
+from typing import Dict
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
-from app.core.database.connection import get_db
+from app.core.config.settings import settings
+from app.core.database.connection import SessionLocal, get_db
+from app.core.presence import (
+    CHANNEL_FOLDER_ANALYSIS,
+    SqlPresenceStore,
+    device_id_for_request,
+)
+from app.core.utils.user_agent import looks_like_phone
+from app.domains.security.contracts import UserProfile, get_current_user
+from app.domains.digitization.contracts import get_borrow_host, get_worker_host_picker
 from app.domains.folder_analysis.application.document_synchronizer import DocumentSynchronizer
 from app.domains.folder_analysis.application.use_cases import (
+    AddDocumentsToRegisteredFolderUseCase,
     AnalyzeDocumentUseCase,
+    ConsolidateDocumentsUseCase,
     CreateDocumentUseCase,
+    CreateRegisteredFolderUseCase,
+    ClearInboxUseCase,
     DeleteCaptureUseCase,
     DeleteDocumentUseCase,
+    DeleteRegisteredFolderUseCase,
     GetCaptureImageUseCase,
     GetDocumentUseCase,
+    GetFolderPhotoUseCase,
+    GetRegisteredFolderUseCase,
     ListDocumentsUseCase,
+    ListReviewedDocumentsUseCase,
     ListInboxUseCase,
+    GenerateCadastralCroquisUseCase,
+    ListRegisteredFoldersUseCase,
+    LookupCadastralParcelUseCase,
+    RegisteredFolderService,
+    RemoveDocumentFromRegisteredFolderUseCase,
+    SaveBoardToFolderUseCase,
+    SearchRegisteredFoldersUseCase,
     ReviewDocumentUseCase,
+    RunServerReadingUseCase,
     SetDocumentPagesUseCase,
+    UpdateRegisteredFolderUseCase,
     UploadCapturesUseCase,
 )
+from app.domains.folder_analysis.domain.entities import DocumentType
 from app.domains.folder_analysis.domain.ports import (
     CaptureRepositoryPort,
     DocumentRepositoryPort,
+    CadastralGisPort,
     ExtractionQueuePort,
+    FolioExtractionPort,
+    PdfRasterizerPort,
+    RegisteredFolderRepositoryPort,
+    SealReadingPort,
+    ServerReadingPort,
+    TaxExtractionPort,
+    TaxStructurerPort,
     ThumbnailPort,
+    VisionReadingPort,
 )
+from app.domains.folder_analysis.infrastructure.arcgis_cadastral_gis import ArcGisCadastralGis
 from app.domains.folder_analysis.infrastructure.digitization_queue import DigitizationQueue
+from app.domains.folder_analysis.infrastructure.folios_extractor import FoliosExtractor
+from app.domains.folder_analysis.infrastructure.ocr_plan_extractor import OcrPlanExtractor
+from app.domains.folder_analysis.infrastructure.ocr_tax_extractor import OcrTaxExtractor
+from app.domains.folder_analysis.infrastructure.ollama_fur_structurer import OllamaFurStructurer
+from app.domains.folder_analysis.infrastructure.ollama_vision_reader import OllamaVisionReader
+from app.domains.folder_analysis.infrastructure.opencv_seal_reader import OpenCvSealReader
 from app.domains.folder_analysis.infrastructure.opencv_thumbnail import OpenCvThumbnail
+from app.domains.folder_analysis.infrastructure.pdfium_rasterizer import PdfiumRasterizer
 from app.domains.folder_analysis.infrastructure.sql_capture_repository import SqlCaptureRepository
 from app.domains.folder_analysis.infrastructure.sql_document_repository import SqlDocumentRepository
+from app.domains.folder_analysis.infrastructure.sql_registered_folder_repository import (
+    SqlRegisteredFolderRepository,
+)
 
 
 @lru_cache()
 def get_thumbnails() -> ThumbnailPort:
     return OpenCvThumbnail()
+
+
+@lru_cache()
+def get_pdf_rasterizer() -> PdfRasterizerPort:
+    return PdfiumRasterizer()
 
 
 def get_capture_repository(db: Session = Depends(get_db)) -> CaptureRepositoryPort:
@@ -43,8 +97,100 @@ def get_document_repository(db: Session = Depends(get_db)) -> DocumentRepository
     return SqlDocumentRepository(db)
 
 
+def get_registered_folder_repository(
+    db: Session = Depends(get_db),
+) -> RegisteredFolderRepositoryPort:
+    return SqlRegisteredFolderRepository(db)
+
+
 def get_queue(db: Session = Depends(get_db)) -> ExtractionQueuePort:
     return DigitizationQueue(db)
+
+
+@lru_cache()
+def get_folio_extractor() -> FolioExtractionPort:
+    return FoliosExtractor()
+
+
+@lru_cache()
+def get_tax_structurer() -> TaxStructurerPort:
+    """Borrows the architects' PCs from digitization (its public contract), the
+    same way the folios pipeline does, instead of pinning one Ollama host."""
+    return OllamaFurStructurer(
+        host_provider=get_worker_host_picker().execute,
+        borrow=get_borrow_host("folder-analysis").execute,
+    )
+
+
+@lru_cache()
+def get_tax_extractor() -> TaxExtractionPort:
+    return OcrTaxExtractor(structurer=get_tax_structurer())
+
+
+@lru_cache()
+def get_plan_extractor() -> ServerReadingPort:
+    return OcrPlanExtractor()
+
+
+@lru_cache()
+def get_seal_reader() -> SealReadingPort:
+    """La pasada que busca los sellos en la foto y los lee aparte del resto de la
+    hoja. Va con la lectura en servidor y no con una lectura de carril, porque lo
+    que se busca en el sello lo declara la carpeta (folder_types.seal_patterns) y
+    no el documento."""
+    return OpenCvSealReader()
+
+
+@lru_cache()
+def get_vision_reader() -> VisionReadingPort:
+    """La última pasada de la lectura: qwen3-vl mirando la foto, en las mismas
+    computadoras de los arquitectos que presta el dominio de digitización.
+
+    Va junto a la lectura en servidor y no dentro de un carril, como el sello,
+    porque lo que se le pregunta lo declara la carpeta
+    (folder_types.vision_hint) y no el documento.
+    """
+    return OllamaVisionReader(
+        host_provider=get_worker_host_picker().execute,
+        borrow=get_borrow_host("folder-analysis").execute,
+    )
+
+
+@lru_cache()
+def get_server_readers() -> Dict[str, ServerReadingPort]:
+    """Every lane is read here with PaddleOCR and OpenCV instead of on the
+    architects' PCs.
+
+    A folio and a comprobante have rules that know their layout. The rest -- the
+    plano and the documents the carpeta de poseedores brought in -- have no rules
+    yet, so they get the same generic reading the plano already used: the sheet's
+    text, its labelled values and its tables, with the meaning left to the
+    architect. When one of them gets its own reader, it replaces its entry here.
+    """
+    generic = get_plan_extractor()
+    readers = {doc_type: generic for doc_type in DocumentType.SERVER_READ}
+    readers[DocumentType.FOLIO] = get_folio_extractor()
+    readers[DocumentType.TAX_RECEIPT] = get_tax_extractor()
+    return readers
+
+
+def run_server_reading(document_id: str, user_sub: str) -> None:
+    """Entry point for the background reading of a folio or a tax receipt. Runs
+    after the `analyze` request returned, so the request's session is already
+    closed -- it opens and closes its own, like the folios domain's pipeline."""
+    db = SessionLocal()
+    try:
+        RunServerReadingUseCase(
+            documents=SqlDocumentRepository(db),
+            captures=SqlCaptureRepository(db),
+            extractors=get_server_readers(),
+            folders=SqlRegisteredFolderRepository(db),
+            seals=get_seal_reader(),
+            vision=get_vision_reader(),
+            vision_max_pages=settings.FOLDER_VISION_MAX_PAGES,
+        ).execute(document_id, user_sub)
+    finally:
+        db.close()
 
 
 def get_synchronizer(
@@ -57,7 +203,7 @@ def get_synchronizer(
 def get_upload_captures_use_case(
     captures: CaptureRepositoryPort = Depends(get_capture_repository),
 ) -> UploadCapturesUseCase:
-    return UploadCapturesUseCase(captures, get_thumbnails())
+    return UploadCapturesUseCase(captures, get_thumbnails(), get_pdf_rasterizer())
 
 
 def get_list_inbox_use_case(captures: CaptureRepositoryPort = Depends(get_capture_repository)) -> ListInboxUseCase:
@@ -67,7 +213,7 @@ def get_list_inbox_use_case(captures: CaptureRepositoryPort = Depends(get_captur
 def get_capture_image_use_case(
     captures: CaptureRepositoryPort = Depends(get_capture_repository),
 ) -> GetCaptureImageUseCase:
-    return GetCaptureImageUseCase(captures)
+    return GetCaptureImageUseCase(captures, get_thumbnails())
 
 
 def get_delete_capture_use_case(
@@ -76,11 +222,26 @@ def get_delete_capture_use_case(
     return DeleteCaptureUseCase(captures)
 
 
+def get_clear_inbox_use_case(
+    captures: CaptureRepositoryPort = Depends(get_capture_repository),
+) -> ClearInboxUseCase:
+    return ClearInboxUseCase(captures)
+
+
 def get_create_document_use_case(
     documents: DocumentRepositoryPort = Depends(get_document_repository),
     captures: CaptureRepositoryPort = Depends(get_capture_repository),
+    folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
 ) -> CreateDocumentUseCase:
-    return CreateDocumentUseCase(documents, captures)
+    return CreateDocumentUseCase(documents, captures, folders)
+
+
+def get_consolidate_documents_use_case(
+    documents: DocumentRepositoryPort = Depends(get_document_repository),
+    captures: CaptureRepositoryPort = Depends(get_capture_repository),
+    folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
+) -> ConsolidateDocumentsUseCase:
+    return ConsolidateDocumentsUseCase(documents, captures, folders)
 
 
 def get_set_pages_use_case(
@@ -119,7 +280,153 @@ def get_list_documents_use_case(
     return ListDocumentsUseCase(documents, synchronizer)
 
 
+def get_list_reviewed_documents_use_case(
+    documents: DocumentRepositoryPort = Depends(get_document_repository),
+) -> ListReviewedDocumentsUseCase:
+    return ListReviewedDocumentsUseCase(documents)
+
+
 def get_review_document_use_case(
     documents: DocumentRepositoryPort = Depends(get_document_repository),
 ) -> ReviewDocumentUseCase:
     return ReviewDocumentUseCase(documents)
+
+
+# --------------------------------------------------------- carpetas registradas
+
+
+def get_registered_folder_service(
+    folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
+    documents: DocumentRepositoryPort = Depends(get_document_repository),
+) -> RegisteredFolderService:
+    """The rules every carpeta write shares (free name, filable documents)."""
+    return RegisteredFolderService(folders, documents)
+
+
+def get_list_registered_folders_use_case(
+    folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
+) -> ListRegisteredFoldersUseCase:
+    return ListRegisteredFoldersUseCase(folders)
+
+
+def get_folder_photo_use_case(
+    folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
+    captures: CaptureRepositoryPort = Depends(get_capture_repository),
+) -> GetFolderPhotoUseCase:
+    """Las fotos de una carpeta, de solo lectura. La imagen se lee con el mismo
+    caso de uso de siempre; lo que agrega este es a nombre de quién se la pide y
+    con qué permiso."""
+    return GetFolderPhotoUseCase(folders, GetCaptureImageUseCase(captures, get_thumbnails()))
+
+
+def get_search_registered_folders_use_case(
+    folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
+) -> SearchRegisteredFoldersUseCase:
+    return SearchRegisteredFoldersUseCase(folders)
+
+
+def get_get_registered_folder_use_case(
+    service: RegisteredFolderService = Depends(get_registered_folder_service),
+) -> GetRegisteredFolderUseCase:
+    return GetRegisteredFolderUseCase(service)
+
+
+def get_create_registered_folder_use_case(
+    folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
+    service: RegisteredFolderService = Depends(get_registered_folder_service),
+) -> CreateRegisteredFolderUseCase:
+    return CreateRegisteredFolderUseCase(folders, service)
+
+
+def get_save_board_to_folder_use_case(
+    folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
+    documents: DocumentRepositoryPort = Depends(get_document_repository),
+    service: RegisteredFolderService = Depends(get_registered_folder_service),
+) -> SaveBoardToFolderUseCase:
+    return SaveBoardToFolderUseCase(folders, documents, service)
+
+
+def get_update_registered_folder_use_case(
+    folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
+    service: RegisteredFolderService = Depends(get_registered_folder_service),
+) -> UpdateRegisteredFolderUseCase:
+    return UpdateRegisteredFolderUseCase(folders, service)
+
+
+def get_add_folder_documents_use_case(
+    folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
+    service: RegisteredFolderService = Depends(get_registered_folder_service),
+) -> AddDocumentsToRegisteredFolderUseCase:
+    return AddDocumentsToRegisteredFolderUseCase(folders, service)
+
+
+def get_remove_folder_document_use_case(
+    folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
+    service: RegisteredFolderService = Depends(get_registered_folder_service),
+    documents: DocumentRepositoryPort = Depends(get_document_repository),
+    captures: CaptureRepositoryPort = Depends(get_capture_repository),
+) -> RemoveDocumentFromRegisteredFolderUseCase:
+    return RemoveDocumentFromRegisteredFolderUseCase(folders, service, documents, captures)
+
+
+def get_delete_registered_folder_use_case(
+    folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
+    service: RegisteredFolderService = Depends(get_registered_folder_service),
+    documents: DocumentRepositoryPort = Depends(get_document_repository),
+    captures: CaptureRepositoryPort = Depends(get_capture_repository),
+) -> DeleteRegisteredFolderUseCase:
+    return DeleteRegisteredFolderUseCase(folders, service, documents, captures)
+
+
+@lru_cache()
+def get_cadastral_gis() -> CadastralGisPort:
+    return ArcGisCadastralGis()
+
+
+def get_lookup_cadastral_parcel_use_case(
+    gis: CadastralGisPort = Depends(get_cadastral_gis),
+) -> LookupCadastralParcelUseCase:
+    return LookupCadastralParcelUseCase(gis)
+
+
+def get_generate_cadastral_croquis_use_case(
+    gis: CadastralGisPort = Depends(get_cadastral_gis),
+) -> GenerateCadastralCroquisUseCase:
+    return GenerateCadastralCroquisUseCase(gis)
+
+
+
+
+def get_presence_store(db: Session = Depends(get_db)) -> SqlPresenceStore:
+    """Sesión por petición, no singleton: el estado es compartido, no del proceso."""
+    return SqlPresenceStore(db=db)
+
+
+def record_mobile_presence(
+    request: Request,
+    user: UserProfile = Depends(get_current_user),
+    presence: SqlPresenceStore = Depends(get_presence_store),
+) -> None:
+    """Marca "celular conectado" cuando la petición viene de un celular.
+
+    Se cuelga de los endpoints que la app móvil usa. El filtro por User-Agent es
+    lo que impide que una subida hecha desde el escritorio (el arquitecto puede
+    arrastrar archivos, ver captureUpload.js) encienda el indicador.
+
+    Depende de `get_current_user` y no de `require_permission` a propósito: el
+    endpoint al que se engancha ya exige su permiso, y repetirlo aquí solo
+    duplicaría la consulta de permisos en cada subida.
+    """
+    user_agent = request.headers.get("user-agent", "")
+    if not looks_like_phone(user_agent):
+        logging.getLogger("uvicorn.error").info(
+            "presence: subida a folder-analysis tomada como escritorio, "
+            "no enciende el indicador. User-Agent=%r",
+            user_agent,
+        )
+        return
+    presence.touch_activity(
+        user.sub,
+        CHANNEL_FOLDER_ANALYSIS,
+        device_id_for_request(user.sub, user_agent),
+    )

@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -5,13 +6,24 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.database.connection import init_db_tables
 from app.core.errors.handlers import register_exception_handlers
-from app.registry import api_router
+from app.registry import api_router, check_unregistered_domains
+
+logger = logging.getLogger("uvicorn.error")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
     init_db_tables()
+
+    unregistered = check_unregistered_domains()
+    if unregistered:
+        logger.warning(
+            "Dominios presentes en app/domains/ pero NO registrados en registry.py "
+            "(sus endpoints no existen): %s",
+            ", ".join(unregistered),
+        )
+
     yield
 
 
@@ -31,6 +43,8 @@ def create_application() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        # Expose Content-Disposition so the browser can read download filenames.
+        expose_headers=["Content-Disposition"],
     )
 
     # Register domain exception handlers

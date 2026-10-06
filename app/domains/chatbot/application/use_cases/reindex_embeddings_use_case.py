@@ -20,8 +20,6 @@ class ReindexEmbeddingsUseCase:
         self._embedding_model = embedding_model
 
     def execute(self) -> int:
-        # list_active() already loads aliases + search_description, which is all
-        # reindexing needs -- no need for a per-procedure get_by_id() round trip.
         procedures = self._procedures.list_active()
         for procedure in procedures:
             reindex_procedure(procedure, self._engine, self._procedures, self._embedding_model)

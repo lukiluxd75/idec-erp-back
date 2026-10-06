@@ -60,9 +60,6 @@ class AnswerQuestionUseCase:
         embeddings = self._procedures.list_all_embeddings()
         match = find_best_match(query_vector, embeddings, self._threshold)
 
-        # Session-memory fallback: a vague follow-up ("¿y cuánto cuesta?") with no
-        # match of its own resolves against whatever procedure this conversation
-        # was already discussing -- same fallback the prototype used.
         if not match.is_found:
             last_id = self._history.get_last_detected_procedure_id(conversation_id, user_sub)
             if last_id:
@@ -87,6 +84,9 @@ class AnswerQuestionUseCase:
 
         history = self._history.list_messages(conversation_id, user_sub)
         engine_messages = [{"role": m.role, "content": m.content} for m in history]
+        # Everything this answer needs has been read; let go of the database before the model runs.
+        self._history.end_read()
+
         reply = self._engine.chat(system_prompt, engine_messages)
         reply = _normalize_if_audit_json(reply)
 

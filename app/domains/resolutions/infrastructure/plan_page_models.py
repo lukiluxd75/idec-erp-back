@@ -9,7 +9,8 @@ Postgres schema (already created externally) for locality with the rest of
 the domain's data, with a plain string `resolution_id` (no DB-level FK) so
 `create_all()` never needs to know about the mobile-owned table.
 """
-from sqlalchemy import Column, DateTime, Integer, LargeBinary, String, text
+from sqlalchemy import JSON, Column, DateTime, Integer, LargeBinary, String, text
+from sqlalchemy.engine import Engine
 
 from app.core.database.connection import Base
 
@@ -22,10 +23,29 @@ class ResolutionPlanPageModel(Base):
     resolution_id = Column(String(36), nullable=False, index=True)
     order_index = Column(Integer, nullable=False)
     planta = Column(String(60), nullable=False)
+    # Todas las plantas de la hoja (JSON list): varias en "PLANTA TIPO 2° - 4° PISO".
+    plantas = Column(JSON)
+    # Cómo se asignó: ver domain.entities.resolution.PlantaStatus.
+    planta_status = Column(String(20), nullable=False, server_default=text("'manual'"))
+    planta_title = Column(String(200))
+    planta_detection = Column(JSON)
     mime = Column(String(40), nullable=False)
     file_name = Column(String)
     image = Column(LargeBinary, nullable=False)
-    # 'app' (celular) o 'web' -- ver AddPlanPagesUseCase; ambos canales usan
-    # el mismo endpoint, esto es solo metadata de origen.
     source = Column(String(10), nullable=False, server_default=text("'app'"))
     created_at = Column(DateTime, nullable=False, server_default=text("now()"))
+
+
+_ADDED_COLUMNS = (
+    "plantas JSON",
+    "planta_status VARCHAR(20) NOT NULL DEFAULT 'manual'",
+    "planta_title VARCHAR(200)",
+    "planta_detection JSON",
+)
+
+
+def ensure_added_columns(engine: Engine) -> None:
+    table = f"{ResolutionPlanPageModel.__table_args__['schema']}.{ResolutionPlanPageModel.__tablename__}"
+    with engine.begin() as conn:
+        for column in _ADDED_COLUMNS:
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column}"))

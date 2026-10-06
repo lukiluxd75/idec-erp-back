@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Security
+from fastapi import APIRouter, Depends, Request, Security
 from fastapi.security import HTTPAuthorizationCredentials
 import logging
 
@@ -26,6 +26,10 @@ from app.domains.security.application.dtos.auth_dto import (
     ChangePasswordInputDTO,
     ResetInstitutionalPasswordInputDTO,
 )
+from sqlalchemy.orm import Session
+
+from app.core.database.connection import get_db
+from app.domains.security.presentation.endpoints.presence import record_session_from_request
 from app.domains.security.domain.exceptions import InvalidDomainException, InactiveUserException
 from app.domains.security.domain.entities.user import UserProfile
 from app.domains.security.presentation.deps import (
@@ -36,7 +40,7 @@ from app.domains.security.presentation.deps import (
     get_sync_user_rbac_use_case,
     get_change_password_use_case,
     get_reset_institutional_password_use_case,
-    get_current_user,
+    require_permission,
     security,
 )
 
@@ -48,6 +52,8 @@ router = APIRouter(tags=["Autenticación"])
 @router.post("/login", response_model=LoginResponse)
 def login(
     payload: LoginRequest,
+    request: Request,
+    db: Session = Depends(get_db),
     domain_use_case: AuthenticateDomainUseCase = Depends(get_authenticate_domain_use_case),
     credentials_use_case: AuthenticateCredentialsUseCase = Depends(get_authenticate_credentials_use_case),
     verify_use_case: VerifyTokenUseCase = Depends(get_verify_token_use_case),
@@ -76,9 +82,6 @@ def login(
         )
 
         # Ensure the user exists in 'usuario' (linked by keycloak_sub).
-        # InactiveUserException is allowed to propagate on purpose: if the user is
-        # marked inactive, login must fail here — do not return a valid token and
-        # fail only on the next screen.
         try:
             profile = verify_use_case.execute(result.access_token)
             sync_rbac.execute(
@@ -86,6 +89,7 @@ def login(
                 username=profile.username,
                 email=profile.email,
             )
+            record_session_from_request(request, db, profile.sub)
         except InactiveUserException:
             raise
         except Exception as exc:
@@ -104,13 +108,22 @@ def login(
 @router.post("/refresh", response_model=LoginResponse)
 def refresh(
     payload: RefreshRequest,
+    request: Request,
+    db: Session = Depends(get_db),
     refresh_use_case: RefreshTokenUseCase = Depends(get_refresh_token_use_case),
+    verify_use_case: VerifyTokenUseCase = Depends(get_verify_token_use_case),
 ):
     """
     Renew the session from a valid refresh_token without requiring credentials.
     Allows a silent refresh from the frontend before the access_token expires.
     """
     result = refresh_use_case.execute(RefreshTokenInputDTO(refresh_token=payload.refresh_token))
+
+    try:
+        profile = verify_use_case.execute(result.access_token)
+        record_session_from_request(request, db, profile.sub)
+    except Exception as exc:
+        logger.warning(f"Aviso al renovar la presencia del celular: {exc}")
 
     return LoginResponse(
         message=result.message,
@@ -143,7 +156,7 @@ def change_password(
 @router.post("/change-password-institutional", response_model=PublicMessageResponse)
 def reset_institutional_password(
     payload: ResetInstitutionalPasswordRequest,
-    current_user: UserProfile = Depends(get_current_user),
+    _current_user: UserProfile = Depends(require_permission("security.edit")),
     use_case: ResetInstitutionalPasswordUseCase = Depends(get_reset_institutional_password_use_case),
 ):
     """
@@ -151,12 +164,11 @@ def reset_institutional_password(
     (LDAPS + unicodePwd), using the administrative service account configured
     by environment. Not self-service: does not validate the current password.
 
-    ⚠️ Only requires a valid Bearer token (`get_current_user`). Does NOT yet check a
-    fine-grained business permission (e.g. `seguridad.users.resetear_password_institucional`)
-    because that permission-based authorization mechanism is not implemented in the
-    backend yet (CLAUDE.md §4/§10). Today any authenticated user can reset any other
-    institutional user's password — do not expose this endpoint outside a test
-    environment until that is resolved.
+    Gated on `security.edit` — the same permission every other write in the
+    security module requires (see endpoints/rbac_admin.py). That matters more here
+    than anywhere else: the bind account this runs under can rewrite any
+    `unicodePwd` in the directory, so a plain `get_current_user` would have let any
+    authenticated user take over any institutional account.
     """
     use_case.execute(
         ResetInstitutionalPasswordInputDTO(

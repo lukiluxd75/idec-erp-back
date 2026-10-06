@@ -23,12 +23,7 @@ from app.domains.security.infrastructure.models import (
     UserRoleAreaModel,
 )
 
-# System/subsystem names that hold resources representing ERP modules (one per
-# business module, e.g. 'geoextraction', 'security'). The module catalog itself
-# is not defined by the backend: the frontend sends it (derived from NAV_SECTIONS,
-# see Frontend/src/domains/seguridad/data/mockSeguridad.js) when assigning
-# permissions to a role; here we only ensure each used module has a real row in
-# 'recurso'/'permiso' (CLAUDE.md §4: never an implicit permission without a table row).
+# System and subsystem names must match the ERP module catalog.
 _SYSTEM_NAME = "ERP Catastro"
 _SUBSYSTEM_NAME = "Módulos ERP"
 

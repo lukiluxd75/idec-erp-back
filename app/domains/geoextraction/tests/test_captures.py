@@ -123,8 +123,6 @@ class TestTTL(unittest.TestCase):
         capture = create.execute(content=b"foto", mime="image/jpeg", user_sub="user-a")
         self.assertEqual(len(list_pending.execute("user-a")), 1)
 
-        # Simulate 31 minutes elapsed by rewinding created_at on the row,
-        # instead of mocking datetime.now() globally (simpler and less brittle).
         row = store._db.query(CaptureModel).filter_by(capture_id=capture.capture_id).first()
         row.created_at -= timedelta(minutes=31)
         store._db.commit()

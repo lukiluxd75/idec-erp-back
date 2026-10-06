@@ -9,6 +9,17 @@ sqlalchemy>=2.0.30
 psycopg2-binary>=2.9.9
 ldap3==2.9.1
 
+# detection/alignment domains — map PostGIS geometry columns in schemas detection_results/alignment_results
+# xlsxwriter backs the campaign parcels report export (.xlsx) and procedurereports' export
+geoalchemy2>=0.14
+xlsxwriter>=3.2
+
+# procedurereports domain — reads a separate SQL Server (see REPORTS_DB_* in
+# .env); pyodbc needs "ODBC Driver 17 for SQL Server" installed on the host,
+# not just this package. reportlab backs its PDF export.
+pyodbc>=5.1
+reportlab>=4.2
+
 # geoextraction domain
 python-multipart>=0.0.9
 geopandas>=0.14
@@ -18,4 +29,9 @@ pandas>=2.0
 # chatbot domain
 pytesseract>=0.3.10
 opencv-python-headless>=4.9
+# also used by alignment domain's least-squares affine fit
 numpy>=1.26
+
+# folder analysis domain: PDFs arrive as one photo per page (self-contained
+# wheel, no poppler or ghostscript to install next to Python)
+pypdfium2>=4.30

@@ -1,5 +1,6 @@
+import logging
 from typing import Generator
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 from sqlalchemy.schema import CreateSchema
 from app.core.config import settings
@@ -12,16 +13,36 @@ if db_uri.startswith("sqlite"):
         connect_args={"check_same_thread": False},
     )
 else:
+    # Guards asked of the server for every connection this app opens.
+    _SERVER_GUARDS = (
+        f"idle_in_transaction_session_timeout={settings.DB_IDLE_IN_TRANSACTION_TIMEOUT_MS}",
+        f"lock_timeout={settings.DB_LOCK_TIMEOUT_MS}",
+    )
     engine = create_engine(
         db_uri,
-        # No pool_pre_ping: the DB (172.16.66.103) is ~120ms away, and pre_ping
-        # adds a full round trip to EVERY checkout from the pool -- i.e. to every
-        # single DB-touching request, all the time. pool_recycle already discards
-        # connections older than an hour, which is enough given how often this
-        # app hits the DB (polling every 10s on some pages) to keep connections
-        # from going stale between uses.
         pool_recycle=3600,
+        pool_size=settings.DB_POOL_SIZE,
+        max_overflow=settings.DB_POOL_MAX_OVERFLOW,
+        pool_timeout=settings.DB_POOL_TIMEOUT_SECONDS,
+        connect_args={
+            "connect_timeout": settings.DB_CONNECT_TIMEOUT_SECONDS,
+            "keepalives": 1,
+            "keepalives_idle": 30,
+            "keepalives_interval": 10,
+            "keepalives_count": 5,
+        },
     )
+
+    @event.listens_for(engine, "connect")
+    def _apply_server_guards(dbapi_connection, _connection_record):
+        cursor = dbapi_connection.cursor()
+        try:
+            for guard in _SERVER_GUARDS:
+                name, value = guard.split("=", 1)
+                cursor.execute(f"SET {name} = {value}")
+        finally:
+            cursor.close()
+        dbapi_connection.commit()
 
 # Database session factory
 SessionLocal = sessionmaker(
@@ -39,13 +60,8 @@ def init_db_tables() -> bool:
     Automatically create database tables if they do not exist.
     """
     try:
+        from app.core.presence import models as presence_models  # noqa: F401
         from app.domains.security.infrastructure import models  # noqa: F401
-        # The 'resolutions' domain's MIRRORED models (resolutions/resolution_pages,
-        # owned by the mobile app) are deliberately NOT imported here — see
-        # app/domains/resolutions/infrastructure/models.py. `plan_page_models` is
-        # different: it's a table the ERP itself owns (added 2026-09, floor-plan
-        # photos for colindancias), living in the same already-existing
-        # `resolutions` schema, so it IS registered for create_all() below.
         from app.domains.resolutions.infrastructure import plan_page_models  # noqa: F401
         from app.domains.geoextraction.infrastructure import models  # noqa: F401
         from app.domains.chatbot.infrastructure import models as chatbot_models  # noqa: F401
@@ -55,16 +71,27 @@ def init_db_tables() -> bool:
 
         if not db_uri.startswith("sqlite"):
             # create_all() only creates tables, never the Postgres schema itself.
-            # Unlike 'resolutions'/'detection', 'chatbot' and 'folios' own their
-            # schemas outright (nothing external creates them), so it has to happen here.
             with engine.begin() as conn:
                 conn.execute(CreateSchema(chatbot_models.SCHEMA, if_not_exists=True))
                 conn.execute(CreateSchema(folios_models.SCHEMA, if_not_exists=True))
                 conn.execute(CreateSchema(templates_models.SCHEMA, if_not_exists=True))
+
         Base.metadata.create_all(bind=engine)
+
+        if not db_uri.startswith("sqlite"):
+            # create_all() no altera tablas existentes, y a `device_presence` le cambió una columna después de su primera versión.
+            try:
+                presence_models.ensure_schema(engine)
+            except Exception as exc:
+                logging.getLogger("uvicorn.error").error(
+                    "No se pudo poner al dia la tabla device_presence: %s. "
+                    "El indicador 'Celular conectado' quedara apagado hasta que se resuelva.",
+                    exc,
+                    exc_info=True,
+                )
+
         return True
     except Exception as exc:
-        import logging
         logging.getLogger("uvicorn.error").warning(f"Aviso al inicializar tablas en la BD: {exc}")
         return False
 

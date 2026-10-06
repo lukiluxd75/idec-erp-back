@@ -1,4 +1,4 @@
-﻿from app.core.errors.exceptions import DomainException
+from app.core.errors.exceptions import DomainException
 
 
 class TemplateNotFoundException(DomainException):
@@ -7,7 +7,7 @@ class TemplateNotFoundException(DomainException):
 
 
 class DuplicateTemplateCodeException(DomainException):
-    """Ya existe una plantilla con ese cÃ³digo (columna `codigo`, UNIQUE)."""
+    """Ya existe una plantilla con ese código (columna `codigo`, UNIQUE)."""
     http_status = 409
 
 
@@ -22,22 +22,32 @@ class DuplicateVariableKeyException(DomainException):
 
 
 class CiteConfigurationNotFoundException(DomainException):
-    """No hay una configuraciÃ³n de CITE (sigla) registrada para esa combinaciÃ³n
-    de Ã¡rea + tipo de documento -- hay que crearla antes de poder generar CITEs
+    """No hay una configuración de CITE (sigla) registrada para esa combinación
+    de área + tipo de documento -- hay que crearla antes de poder generar CITEs
     con ella."""
     http_status = 404
 
 
 class DuplicateCiteConfigurationException(DomainException):
-    """Ya existe una configuraciÃ³n de CITE para esa combinaciÃ³n de Ã¡rea + tipo
+    """Ya existe una configuración de CITE para esa combinación de área + tipo
     de documento (UNIQUE (area_codigo, tipo_documento_codigo))."""
     http_status = 409
 
 
 class InvalidCiteFormatException(DomainException):
     """El campo `formato` de la sigla usa un placeholder que no es {area}, {tipo},
-    {numero} o {gestaion} (o tiene una llave sin cerrar)."""
+    {numero} o {gestion} (o tiene una llave sin cerrar)."""
     http_status = 400
+
+
+class TemplateEngineUnavailableException(DomainException):
+    """No se pudo conectar con el Motor de Plantillas Externo, o no está configurado."""
+    http_status = 503
+
+
+class TemplateEngineErrorException(DomainException):
+    """El Motor de Plantillas Externo respondió con un error de negocio."""
+    http_status = 502
 
 
 __all__ = [
@@ -48,12 +58,6 @@ __all__ = [
     "CiteConfigurationNotFoundException",
     "DuplicateCiteConfigurationException",
     "InvalidCiteFormatException",
+    "TemplateEngineUnavailableException",
+    "TemplateEngineErrorException",
 ]
-
-class TemplateEngineUnavailableException(DomainException):
-    """No se pudo conectar con el Motor de Plantillas Externo, o no estaá configurado."""
-    http_status = 503
-
-class TemplateEngineErrorException(DomainException):
-    """El Motor de Plantillas Externo respondioó con un error de negocio."""
-    http_status = 502

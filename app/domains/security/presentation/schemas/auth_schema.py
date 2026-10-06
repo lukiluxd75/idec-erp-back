@@ -41,9 +41,15 @@ class PublicMessageResponse(BaseModel):
 
 
 class DatabaseHealthResponse(BaseModel):
-    """Response schema for PostgreSQL health check."""
+    """Response schema for PostgreSQL health check.
+
+    `database` queda opcional a propósito: el endpoint que usa este esquema no
+    pide autenticación, así que no publica el nombre de la base ni el detalle
+    del error. Se conserva el campo (en None) para no romper sondas externas
+    que ya parseen este JSON.
+    """
     status: str
-    database: str
+    database: Optional[str] = None
     message: str
 
 
@@ -56,3 +62,11 @@ class PrivateProfileResponse(BaseModel):
     client_id: Optional[str] = None
     user_id: Optional[str] = None
     permisos: List[str] = []
+
+
+class PhonePresenceOut(BaseModel):
+    """Si la cuenta tiene un celular conectado ahora mismo. Mismo nombre de
+    campo que devuelven los endpoints equivalentes de geoextraction,
+    resolutions y folder analysis, para que el frontend los lea igual."""
+
+    mobile_connected: bool

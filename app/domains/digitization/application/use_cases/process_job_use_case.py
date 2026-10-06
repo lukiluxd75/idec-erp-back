@@ -31,14 +31,15 @@ class ProcessJobUseCase:
             self._repository.mark_failed(job.id, "No se encontró la imagen del documento.")
             return
 
+        self._repository.end_read()
+
         try:
             result = self._worker.extract(host, image, job.instructions, job.output_template, should_stop)
         except JobStoppedException:
             self._repository.mark_stopped(job.id, "Detenido desde el monitor de computadoras.")
             return
         except WorkerTimeoutException as exc:
-            # Not given back to the queue: the next PC would spend the same time
-            # on the same image. Whoever sent it decides whether to insist.
+            # Not given back to the queue: the next PC would spend the same time on the same image.
             self._repository.mark_failed(job.id, f"Se cortó la digitalización porque {exc}.")
             return
         except WorkerUnavailableException as exc:

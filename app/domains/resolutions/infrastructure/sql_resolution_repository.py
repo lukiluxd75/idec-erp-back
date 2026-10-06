@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session, joinedload
 
-from app.domains.resolutions.domain.entities.resolution import PlanPage, ResolutionPage, Resolution
+from app.domains.resolutions.domain.entities.resolution import PlanPage, PlantaStatus, ResolutionPage, Resolution
 from app.domains.resolutions.domain.ports.resolution_repository_port import ResolutionRepositoryPort
 from app.domains.resolutions.infrastructure.models import ResolutionModel, ResolutionPageModel
 from app.domains.resolutions.infrastructure.plan_page_models import ResolutionPlanPageModel
@@ -33,8 +33,6 @@ class SqlResolutionRepository(ResolutionRepositoryPort):
         return self._to_entity(model) if model else None
 
     def get_page(self, resolution_id: str, order_index: int, user_sub: str) -> Optional[Tuple[bytes, str]]:
-        # Ownership check without pulling every page's image (see _get_model):
-        # this only needs to know the resolution exists and belongs to user_sub.
         owned = (
             self._db.query(ResolutionModel.resolution_id)
             .filter(
@@ -59,11 +57,6 @@ class SqlResolutionRepository(ResolutionRepositoryPort):
 
     @staticmethod
     def _pages_without_image():
-        # list()/_get_model() only need order_index + mime (see _to_entity) — the
-        # `image` BLOB (avg ~550KB/page here) is only ever needed by get_page(),
-        # which queries it directly. Eager-loading it everywhere else meant every
-        # resolutions list/detail pulled every photo's full bytes across a DB link
-        # with ~120ms latency for nothing.
         return joinedload(ResolutionModel.pages).load_only(
             ResolutionPageModel.order_index, ResolutionPageModel.mime
         )
@@ -119,8 +112,6 @@ class SqlResolutionRepository(ResolutionRepositoryPort):
         if model is None:
             return False
 
-        # Soft delete (`deleted_at` column): the row and its pages stay in the DB,
-        # they just stop being listed/fetched — see deleted_at IS NULL filter above.
         model.deleted_at = datetime.utcnow()
         self._db.commit()
         return True
@@ -128,7 +119,7 @@ class SqlResolutionRepository(ResolutionRepositoryPort):
     def add_plan_pages(
         self,
         resolution_id: str,
-        pages: List[Tuple[bytes, str, str]],
+        pages: List[Tuple[bytes, str, List[str]]],
         source: str,
         user_sub: str,
     ) -> Optional[Resolution]:
@@ -143,13 +134,15 @@ class SqlResolutionRepository(ResolutionRepositoryPort):
             .first()
         )
         inicio = (siguiente[0] + 1) if siguiente else 1
-        for i, (content, mime, planta) in enumerate(pages):
+        for i, (content, mime, plantas) in enumerate(pages):
             self._db.add(
                 ResolutionPlanPageModel(
                     plan_page_id=str(uuid.uuid4()),
                     resolution_id=resolution_id,
                     order_index=inicio + i,
-                    planta=planta,
+                    planta=plantas[0] if plantas else "",
+                    plantas=list(plantas),
+                    planta_status=PlantaStatus.MANUAL if plantas else PlantaStatus.DETECTANDO,
                     image=content,
                     mime=mime,
                     file_name=f"plano_{inicio + i}.jpg",
@@ -181,6 +174,43 @@ class SqlResolutionRepository(ResolutionRepositoryPort):
             .first()
         )
         return (page.image, page.mime) if page else None
+
+    def get_plan_page_for_processing(self, resolution_id: str, order_index: int) -> Optional[Tuple[bytes, str]]:
+        page = self._plan_page_model(resolution_id, order_index)
+        return (page.image, page.mime) if page else None
+
+    def update_plan_page_planta(
+        self,
+        resolution_id: str,
+        order_index: int,
+        plantas: List[str],
+        status: str,
+        title: Optional[str] = None,
+        detection: Optional[Dict[str, Any]] = None,
+        user_sub: Optional[str] = None,
+    ) -> Optional[PlanPage]:
+        if user_sub is not None and self._get_model(resolution_id, user_sub) is None:
+            return None
+        page = self._plan_page_model(resolution_id, order_index)
+        if page is None:
+            return None
+        page.planta = plantas[0] if plantas else ""
+        page.plantas = list(plantas)
+        page.planta_status = status
+        page.planta_title = title[:200] if title else None
+        page.planta_detection = detection
+        self._db.commit()
+        return self._to_plan_page(page)
+
+    def _plan_page_model(self, resolution_id: str, order_index: int) -> Optional[ResolutionPlanPageModel]:
+        return (
+            self._db.query(ResolutionPlanPageModel)
+            .filter(
+                ResolutionPlanPageModel.resolution_id == resolution_id,
+                ResolutionPlanPageModel.order_index == order_index,
+            )
+            .first()
+        )
 
     def delete_plan_page(self, resolution_id: str, order_index: int, user_sub: str) -> Optional[Resolution]:
         model = self._get_model(resolution_id, user_sub)
@@ -221,10 +251,21 @@ class SqlResolutionRepository(ResolutionRepositoryPort):
             .order_by(ResolutionPlanPageModel.order_index)
             .all()
         )
-        return [
-            PlanPage(order_index=p.order_index, content_type=p.mime, planta=p.planta, source=p.source)
-            for p in rows
-        ]
+        return [self._to_plan_page(p) for p in rows]
+
+    @staticmethod
+    def _to_plan_page(p: ResolutionPlanPageModel) -> PlanPage:
+        # Filas anteriores a `plantas` (una sola planta por página): se usa `planta`.
+        plantas = list(p.plantas) if p.plantas is not None else ([p.planta] if p.planta else [])
+        return PlanPage(
+            order_index=p.order_index,
+            content_type=p.mime,
+            plantas=plantas,
+            source=p.source,
+            planta_status=p.planta_status or PlantaStatus.MANUAL,
+            planta_title=p.planta_title,
+            planta_detection=p.planta_detection,
+        )
 
     def _to_entity(self, model: ResolutionModel) -> Resolution:
         return Resolution(

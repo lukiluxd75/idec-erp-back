@@ -1,0 +1,7754 @@
+{
+  "job_id": "changes_wms_20260916_231304_e0a1b875",
+  "ecc_cc": 0.8230389525767803,
+  "align_method": "ecc_edge_affine+tiles+featwarp",
+  "align_quality": {
+    "level": "good",
+    "ecc_cc": 0.823,
+    "align_mad": 36.65,
+    "diff_mean": 26.18,
+    "min_diff_scale": 1.0,
+    "btc_threshold_boost": 0.0,
+    "min_prob_boost": 0,
+    "message": "Alineación buena (residual≈0.23 m, cc=0.823). Detecciones fiables con revisión habitual.",
+    "residual_px": 2.24,
+    "residual_m": 0.233,
+    "inlier_ratio": 0.775,
+    "gsd_m": 0.1042,
+    "method": "ecc_edge_affine+tiles+featwarp"
+  },
+  "align_residual_m": 0.23304523337487043,
+  "align_residual_px": 2.236985921859741,
+  "backend": "btc",
+  "n_nueva": 0,
+  "n_eliminada": 3,
+  "n_cambio": 0,
+  "n_sin_cambio": 0,
+  "n_construcciones_ref": 3,
+  "n_construcciones_mov": 0,
+  "n_filtradas_por_prob": 0,
+  "min_prob_pct": 70.0,
+  "urls": {
+    "aligned_a": "/outputs/changes_wms_20260916_231304_e0a1b875/result/aligned_a.png",
+    "aligned_b": "/outputs/changes_wms_20260916_231304_e0a1b875/result/aligned_b.png",
+    "resultado": "/outputs/changes_wms_20260916_231304_e0a1b875/result/cambios_overlay.png",
+    "panel_resultado": "/outputs/changes_wms_20260916_231304_e0a1b875/result/panel_resultado.png",
+    "aligned": "/outputs/changes_wms_20260916_231304_e0a1b875/result/mov_aligned.png",
+    "align_check": "/outputs/changes_wms_20260916_231304_e0a1b875/result/align_check.png",
+    "overlay": "/outputs/changes_wms_20260916_231304_e0a1b875/result/cambios_overlay.png",
+    "cambios_rgb": "/outputs/changes_wms_20260916_231304_e0a1b875/result/cambios_rgb.png",
+    "construcciones_ref": "/outputs/changes_wms_20260916_231304_e0a1b875/result/construcciones_ref.png",
+    "construcciones_mov": "/outputs/changes_wms_20260916_231304_e0a1b875/result/construcciones_mov.png",
+    "reporte": "/outputs/changes_wms_20260916_231304_e0a1b875/result/reporte.json",
+    "diff_map": "/outputs/changes_wms_20260916_231304_e0a1b875/result/diff_map.png",
+    "reporte_arquitecto": "/outputs/changes_wms_20260916_231304_e0a1b875/result/reporte_arquitecto.json",
+    "reporte_arquitecto_csv": "/outputs/changes_wms_20260916_231304_e0a1b875/result/reporte_arquitecto.csv",
+    "orto_ref": "/outputs/changes_wms_20260916_231304_e0a1b875/ref.png",
+    "orto_mov": "/outputs/changes_wms_20260916_231304_e0a1b875/mov.png"
+  },
+  "vista": {
+    "1_periodo_a_alineado": "/outputs/changes_wms_20260916_231304_e0a1b875/result/aligned_a.png",
+    "2_periodo_b_alineado": "/outputs/changes_wms_20260916_231304_e0a1b875/result/aligned_b.png",
+    "3_resultado_cambios": "/outputs/changes_wms_20260916_231304_e0a1b875/result/cambios_overlay.png",
+    "panel_tres_en_uno": "/outputs/changes_wms_20260916_231304_e0a1b875/result/panel_resultado.png"
+  },
+  "cambios": [
+    {
+      "tipo": "eliminada",
+      "id_ref": 0,
+      "id_mov": null,
+      "iou": 0.0,
+      "area_ref": 1899,
+      "area_mov": 0,
+      "bbox": [
+        778,
+        911,
+        840,
+        958
+      ],
+      "diff_score": 25.284465789794922,
+      "sam2_score": 0.9579611420631409,
+      "prob": 0.983,
+      "prob_pct": 98,
+      "estado": "confirmado",
+      "detalle_estado": "Alineación buena; candidato confiable.",
+      "confiable": true,
+      "lon": -66.155892,
+      "lat": -17.39289,
+      "codigo_catastral": "08074012000000000",
+      "predio": {
+        "codigo_catastral": "08074012000000000",
+        "nro_manzana": "074",
+        "nro_predio": "012",
+        "nro_inmueble": 55970,
+        "subdistrito": "NORESTE",
+        "distrito": 10,
+        "comuna": "ADELA ZAMUDIO"
+      },
+      "cruce_predio": {
+        "metodo": "buffer_10m",
+        "distancia_m": 0.0,
+        "distancia_predio_m": 0.0,
+        "confianza": "alta",
+        "buffer_m": 10.0,
+        "motivo": "ok",
+        "detalle": "Cruce con capa predios ArcGIS dentro del buffer."
+      },
+      "asientos_catastro": {
+        "codigo_catastral": "08074012000000000",
+        "es_ph": false,
+        "disponible": true,
+        "motivo": "ok",
+        "detalle": null,
+        "registros": [
+          {
+            "idRegistroCatastral": 77566,
+            "codigoCatastral": "08074012000000000",
+            "nroInscripcion": 914439,
+            "nroRegistro": 914439,
+            "nroFormulario": 0,
+            "estado": "AC",
+            "estadoActual": "AC",
+            "estadoInscripcion": "TR",
+            "estadoEmision": "NE",
+            "fechaIngresoCatastro": "1967-07-11 00:00:00",
+            "fechaEmision": "2002-03-06 12:00:00",
+            "fechaTransferencia": null,
+            "resolucionMunicipal": null,
+            "gestionResolucionMunicipal": null,
+            "aclaracionRegistro": null,
+            "aclaracionTransferencia": null,
+            "observacionRegistro": "",
+            "idTramite": 0,
+            "asiento": null,
+            "vigente": 1
+          }
+        ],
+        "construcciones": [],
+        "vigente": {
+          "idRegistroCatastral": 77566,
+          "codigoCatastral": "08074012000000000",
+          "nroInscripcion": 914439,
+          "nroRegistro": 914439,
+          "nroFormulario": 0,
+          "estado": "AC",
+          "estadoActual": "AC",
+          "estadoInscripcion": "TR",
+          "estadoEmision": "NE",
+          "fechaIngresoCatastro": "1967-07-11 00:00:00",
+          "fechaEmision": "2002-03-06 12:00:00",
+          "fechaTransferencia": null,
+          "resolucionMunicipal": null,
+          "gestionResolucionMunicipal": null,
+          "aclaracionRegistro": null,
+          "aclaracionTransferencia": null,
+          "observacionRegistro": "",
+          "idTramite": 0,
+          "asiento": null,
+          "vigente": 1
+        },
+        "resumen": "1 inscripción(es) en catastro · 1 vigente(s) AC · última vigente nro 914439",
+        "n_registros": 1,
+        "n_construcciones": 0
+      },
+      "asientos_fields": {
+        "asientos_resumen": "1 inscripción(es) en catastro · 1 vigente(s) AC · última vigente nro 914439",
+        "n_asientos_registro": 1,
+        "n_construcciones_catastro": 0,
+        "rc_vigente_asiento": null,
+        "rc_vigente_nro_inscripcion": 914439,
+        "rc_vigente_nro_registro": 914439,
+        "rc_vigente_resolucion": null,
+        "rc_vigente_fecha_emision": "2002-03-06 12:00:00",
+        "rc_vigente_aclaracion": null,
+        "asientos_catastro": {
+          "codigo_catastral": "08074012000000000",
+          "es_ph": false,
+          "disponible": true,
+          "motivo": "ok",
+          "detalle": null,
+          "registros": [
+            {
+              "idRegistroCatastral": 77566,
+              "codigoCatastral": "08074012000000000",
+              "nroInscripcion": 914439,
+              "nroRegistro": 914439,
+              "nroFormulario": 0,
+              "estado": "AC",
+              "estadoActual": "AC",
+              "estadoInscripcion": "TR",
+              "estadoEmision": "NE",
+              "fechaIngresoCatastro": "1967-07-11 00:00:00",
+              "fechaEmision": "2002-03-06 12:00:00",
+              "fechaTransferencia": null,
+              "resolucionMunicipal": null,
+              "gestionResolucionMunicipal": null,
+              "aclaracionRegistro": null,
+              "aclaracionTransferencia": null,
+              "observacionRegistro": "",
+              "idTramite": 0,
+              "asiento": null,
+              "vigente": 1
+            }
+          ],
+          "construcciones": [],
+          "vigente": {
+            "idRegistroCatastral": 77566,
+            "codigoCatastral": "08074012000000000",
+            "nroInscripcion": 914439,
+            "nroRegistro": 914439,
+            "nroFormulario": 0,
+            "estado": "AC",
+            "estadoActual": "AC",
+            "estadoInscripcion": "TR",
+            "estadoEmision": "NE",
+            "fechaIngresoCatastro": "1967-07-11 00:00:00",
+            "fechaEmision": "2002-03-06 12:00:00",
+            "fechaTransferencia": null,
+            "resolucionMunicipal": null,
+            "gestionResolucionMunicipal": null,
+            "aclaracionRegistro": null,
+            "aclaracionTransferencia": null,
+            "observacionRegistro": "",
+            "idTramite": 0,
+            "asiento": null,
+            "vigente": 1
+          },
+          "resumen": "1 inscripción(es) en catastro · 1 vigente(s) AC · última vigente nro 914439",
+          "n_registros": 1,
+          "n_construcciones": 0
+        }
+      }
+    },
+    {
+      "tipo": "eliminada",
+      "id_ref": 1,
+      "id_mov": null,
+      "iou": 0.0,
+      "area_ref": 1446,
+      "area_mov": 0,
+      "bbox": [
+        256,
+        900,
+        285,
+        960
+      ],
+      "diff_score": 18.95905876159668,
+      "sam2_score": 0.9201289415359497,
+      "prob": 0.968,
+      "prob_pct": 97,
+      "estado": "confirmado",
+      "detalle_estado": "Alineación buena; candidato confiable.",
+      "confiable": true,
+      "lon": -66.1564201,
+      "lat": -17.392886,
+      "codigo_catastral": "08074001000000000",
+      "predio": {
+        "codigo_catastral": "08074001000000000",
+        "nro_manzana": "074",
+        "nro_predio": "001",
+        "nro_inmueble": 77824,
+        "subdistrito": "NORESTE",
+        "distrito": 10,
+        "comuna": "ADELA ZAMUDIO"
+      },
+      "cruce_predio": {
+        "metodo": "buffer_10m",
+        "distancia_m": 0.0,
+        "distancia_predio_m": 0.0,
+        "confianza": "alta",
+        "buffer_m": 10.0,
+        "motivo": "ok",
+        "detalle": "Cruce con capa predios ArcGIS dentro del buffer."
+      },
+      "asientos_catastro": {
+        "codigo_catastral": "08074001000000000",
+        "es_ph": false,
+        "disponible": true,
+        "motivo": "ok",
+        "detalle": null,
+        "registros": [
+          {
+            "idRegistroCatastral": 77555,
+            "codigoCatastral": "08074001000000000",
+            "nroInscripcion": 914424,
+            "nroRegistro": 914424,
+            "nroFormulario": 0,
+            "estado": "AC",
+            "estadoActual": "AC",
+            "estadoInscripcion": "TR",
+            "estadoEmision": "NE",
+            "fechaIngresoCatastro": "1999-11-30 00:00:00",
+            "fechaEmision": "2002-03-06 10:47:00",
+            "fechaTransferencia": null,
+            "resolucionMunicipal": null,
+            "gestionResolucionMunicipal": null,
+            "aclaracionRegistro": null,
+            "aclaracionTransferencia": null,
+            "observacionRegistro": "",
+            "idTramite": 0,
+            "asiento": null,
+            "vigente": 1
+          }
+        ],
+        "construcciones": [],
+        "vigente": {
+          "idRegistroCatastral": 77555,
+          "codigoCatastral": "08074001000000000",
+          "nroInscripcion": 914424,
+          "nroRegistro": 914424,
+          "nroFormulario": 0,
+          "estado": "AC",
+          "estadoActual": "AC",
+          "estadoInscripcion": "TR",
+          "estadoEmision": "NE",
+          "fechaIngresoCatastro": "1999-11-30 00:00:00",
+          "fechaEmision": "2002-03-06 10:47:00",
+          "fechaTransferencia": null,
+          "resolucionMunicipal": null,
+          "gestionResolucionMunicipal": null,
+          "aclaracionRegistro": null,
+          "aclaracionTransferencia": null,
+          "observacionRegistro": "",
+          "idTramite": 0,
+          "asiento": null,
+          "vigente": 1
+        },
+        "resumen": "1 inscripción(es) en catastro · 1 vigente(s) AC · última vigente nro 914424",
+        "n_registros": 1,
+        "n_construcciones": 0
+      },
+      "asientos_fields": {
+        "asientos_resumen": "1 inscripción(es) en catastro · 1 vigente(s) AC · última vigente nro 914424",
+        "n_asientos_registro": 1,
+        "n_construcciones_catastro": 0,
+        "rc_vigente_asiento": null,
+        "rc_vigente_nro_inscripcion": 914424,
+        "rc_vigente_nro_registro": 914424,
+        "rc_vigente_resolucion": null,
+        "rc_vigente_fecha_emision": "2002-03-06 10:47:00",
+        "rc_vigente_aclaracion": null,
+        "asientos_catastro": {
+          "codigo_catastral": "08074001000000000",
+          "es_ph": false,
+          "disponible": true,
+          "motivo": "ok",
+          "detalle": null,
+          "registros": [
+            {
+              "idRegistroCatastral": 77555,
+              "codigoCatastral": "08074001000000000",
+              "nroInscripcion": 914424,
+              "nroRegistro": 914424,
+              "nroFormulario": 0,
+              "estado": "AC",
+              "estadoActual": "AC",
+              "estadoInscripcion": "TR",
+              "estadoEmision": "NE",
+              "fechaIngresoCatastro": "1999-11-30 00:00:00",
+              "fechaEmision": "2002-03-06 10:47:00",
+              "fechaTransferencia": null,
+              "resolucionMunicipal": null,
+              "gestionResolucionMunicipal": null,
+              "aclaracionRegistro": null,
+              "aclaracionTransferencia": null,
+              "observacionRegistro": "",
+              "idTramite": 0,
+              "asiento": null,
+              "vigente": 1
+            }
+          ],
+          "construcciones": [],
+          "vigente": {
+            "idRegistroCatastral": 77555,
+            "codigoCatastral": "08074001000000000",
+            "nroInscripcion": 914424,
+            "nroRegistro": 914424,
+            "nroFormulario": 0,
+            "estado": "AC",
+            "estadoActual": "AC",
+            "estadoInscripcion": "TR",
+            "estadoEmision": "NE",
+            "fechaIngresoCatastro": "1999-11-30 00:00:00",
+            "fechaEmision": "2002-03-06 10:47:00",
+            "fechaTransferencia": null,
+            "resolucionMunicipal": null,
+            "gestionResolucionMunicipal": null,
+            "aclaracionRegistro": null,
+            "aclaracionTransferencia": null,
+            "observacionRegistro": "",
+            "idTramite": 0,
+            "asiento": null,
+            "vigente": 1
+          },
+          "resumen": "1 inscripción(es) en catastro · 1 vigente(s) AC · última vigente nro 914424",
+          "n_registros": 1,
+          "n_construcciones": 0
+        }
+      }
+    },
+    {
+      "tipo": "eliminada",
+      "id_ref": 2,
+      "id_mov": null,
+      "iou": 0.0,
+      "area_ref": 3852,
+      "area_mov": 0,
+      "bbox": [
+        353,
+        229,
+        482,
+        284
+      ],
+      "diff_score": 49.58317565917969,
+      "sam2_score": 0.8298713564872742,
+      "prob": 0.932,
+      "prob_pct": 93,
+      "estado": "confirmado",
+      "detalle_estado": "Alineación buena; candidato confiable.",
+      "confiable": true,
+      "lon": -66.1562759,
+      "lat": -17.3922866,
+      "codigo_catastral": "08073004000000000",
+      "predio": {
+        "codigo_catastral": "08073004000000000",
+        "nro_manzana": "073",
+        "nro_predio": "004",
+        "nro_inmueble": 91722,
+        "subdistrito": "NORESTE",
+        "distrito": 10,
+        "comuna": "ADELA ZAMUDIO"
+      },
+      "cruce_predio": {
+        "metodo": "buffer_10m",
+        "distancia_m": 0.0,
+        "distancia_predio_m": 0.0,
+        "confianza": "alta",
+        "buffer_m": 10.0,
+        "motivo": "ok",
+        "detalle": "Cruce con capa predios ArcGIS dentro del buffer."
+      },
+      "asientos_catastro": {
+        "codigo_catastral": "08073004000000000",
+        "es_ph": false,
+        "disponible": true,
+        "motivo": "ok",
+        "detalle": null,
+        "registros": [
+          {
+            "idRegistroCatastral": 532592,
+            "codigoCatastral": "08073004000000000",
+            "nroInscripcion": 1293919,
+            "nroRegistro": 1324120,
+            "nroFormulario": 0,
+            "estado": "AC",
+            "estadoActual": "IN",
+            "estadoInscripcion": "PT",
+            "estadoEmision": "EM",
+            "fechaIngresoCatastro": "2025-11-07 09:18:16",
+            "fechaEmision": "2025-11-26 08:50:38",
+            "fechaTransferencia": null,
+            "resolucionMunicipal": 114006,
+            "gestionResolucionMunicipal": 2025,
+            "aclaracionRegistro": null,
+            "aclaracionTransferencia": null,
+            "observacionRegistro": null,
+            "idTramite": 456116,
+            "asiento": "A - 2",
+            "vigente": 0
+          }
+        ],
+        "construcciones": [],
+        "vigente": {
+          "idRegistroCatastral": 532592,
+          "codigoCatastral": "08073004000000000",
+          "nroInscripcion": 1293919,
+          "nroRegistro": 1324120,
+          "nroFormulario": 0,
+          "estado": "AC",
+          "estadoActual": "IN",
+          "estadoInscripcion": "PT",
+          "estadoEmision": "EM",
+          "fechaIngresoCatastro": "2025-11-07 09:18:16",
+          "fechaEmision": "2025-11-26 08:50:38",
+          "fechaTransferencia": null,
+          "resolucionMunicipal": 114006,
+          "gestionResolucionMunicipal": 2025,
+          "aclaracionRegistro": null,
+          "aclaracionTransferencia": null,
+          "observacionRegistro": null,
+          "idTramite": 456116,
+          "asiento": "A - 2",
+          "vigente": 0
+        },
+        "resumen": "1 inscripción(es) en catastro · asiento vigente A - 2",
+        "n_registros": 1,
+        "n_construcciones": 0
+      },
+      "asientos_fields": {
+        "asientos_resumen": "1 inscripción(es) en catastro · asiento vigente A - 2",
+        "n_asientos_registro": 1,
+        "n_construcciones_catastro": 0,
+        "rc_vigente_asiento": "A - 2",
+        "rc_vigente_nro_inscripcion": 1293919,
+        "rc_vigente_nro_registro": 1324120,
+        "rc_vigente_resolucion": "114006/2025",
+        "rc_vigente_fecha_emision": "2025-11-26 08:50:38",
+        "rc_vigente_aclaracion": null,
+        "asientos_catastro": {
+          "codigo_catastral": "08073004000000000",
+          "es_ph": false,
+          "disponible": true,
+          "motivo": "ok",
+          "detalle": null,
+          "registros": [
+            {
+              "idRegistroCatastral": 532592,
+              "codigoCatastral": "08073004000000000",
+              "nroInscripcion": 1293919,
+              "nroRegistro": 1324120,
+              "nroFormulario": 0,
+              "estado": "AC",
+              "estadoActual": "IN",
+              "estadoInscripcion": "PT",
+              "estadoEmision": "EM",
+              "fechaIngresoCatastro": "2025-11-07 09:18:16",
+              "fechaEmision": "2025-11-26 08:50:38",
+              "fechaTransferencia": null,
+              "resolucionMunicipal": 114006,
+              "gestionResolucionMunicipal": 2025,
+              "aclaracionRegistro": null,
+              "aclaracionTransferencia": null,
+              "observacionRegistro": null,
+              "idTramite": 456116,
+              "asiento": "A - 2",
+              "vigente": 0
+            }
+          ],
+          "construcciones": [],
+          "vigente": {
+            "idRegistroCatastral": 532592,
+            "codigoCatastral": "08073004000000000",
+            "nroInscripcion": 1293919,
+            "nroRegistro": 1324120,
+            "nroFormulario": 0,
+            "estado": "AC",
+            "estadoActual": "IN",
+            "estadoInscripcion": "PT",
+            "estadoEmision": "EM",
+            "fechaIngresoCatastro": "2025-11-07 09:18:16",
+            "fechaEmision": "2025-11-26 08:50:38",
+            "fechaTransferencia": null,
+            "resolucionMunicipal": 114006,
+            "gestionResolucionMunicipal": 2025,
+            "aclaracionRegistro": null,
+            "aclaracionTransferencia": null,
+            "observacionRegistro": null,
+            "idTramite": 456116,
+            "asiento": "A - 2",
+            "vigente": 0
+          },
+          "resumen": "1 inscripción(es) en catastro · asiento vigente A - 2",
+          "n_registros": 1,
+          "n_construcciones": 0
+        }
+      }
+    }
+  ],
+  "reporte_arquitecto": [
+    {
+      "nro": 1,
+      "tipo": "eliminada",
+      "prob_pct": 98,
+      "prob": 0.983,
+      "codigo_catastral": "08074012000000000",
+      "nro_inmueble": 55970,
+      "manzana": "074",
+      "predio": "012",
+      "distrito": 10,
+      "comuna": "ADELA ZAMUDIO",
+      "subdistrito": "NORESTE",
+      "lon": -66.155892,
+      "lat": -17.39289,
+      "distancia_predio_m": 0.0,
+      "confianza_cruce": "alta",
+      "motivo_sin_predio": "ok",
+      "detalle_sin_predio": "Cruce con capa predios ArcGIS dentro del buffer.",
+      "cruce_predio": {
+        "metodo": "buffer_10m",
+        "distancia_m": 0.0,
+        "distancia_predio_m": 0.0,
+        "confianza": "alta",
+        "buffer_m": 10.0,
+        "motivo": "ok",
+        "detalle": "Cruce con capa predios ArcGIS dentro del buffer."
+      },
+      "asientos_resumen": "1 inscripción(es) en catastro · 1 vigente(s) AC · última vigente nro 914439",
+      "n_asientos_registro": 1,
+      "n_construcciones_catastro": 0,
+      "rc_vigente_asiento": null,
+      "rc_vigente_nro_inscripcion": 914439,
+      "rc_vigente_nro_registro": 914439,
+      "rc_vigente_resolucion": null,
+      "rc_vigente_fecha_emision": "2002-03-06 12:00:00",
+      "rc_vigente_aclaracion": null,
+      "asientos_catastro": {
+        "codigo_catastral": "08074012000000000",
+        "es_ph": false,
+        "disponible": true,
+        "motivo": "ok",
+        "detalle": null,
+        "registros": [
+          {
+            "idRegistroCatastral": 77566,
+            "codigoCatastral": "08074012000000000",
+            "nroInscripcion": 914439,
+            "nroRegistro": 914439,
+            "nroFormulario": 0,
+            "estado": "AC",
+            "estadoActual": "AC",
+            "estadoInscripcion": "TR",
+            "estadoEmision": "NE",
+            "fechaIngresoCatastro": "1967-07-11 00:00:00",
+            "fechaEmision": "2002-03-06 12:00:00",
+            "fechaTransferencia": null,
+            "resolucionMunicipal": null,
+            "gestionResolucionMunicipal": null,
+            "aclaracionRegistro": null,
+            "aclaracionTransferencia": null,
+            "observacionRegistro": "",
+            "idTramite": 0,
+            "asiento": null,
+            "vigente": 1
+          }
+        ],
+        "construcciones": [],
+        "vigente": {
+          "idRegistroCatastral": 77566,
+          "codigoCatastral": "08074012000000000",
+          "nroInscripcion": 914439,
+          "nroRegistro": 914439,
+          "nroFormulario": 0,
+          "estado": "AC",
+          "estadoActual": "AC",
+          "estadoInscripcion": "TR",
+          "estadoEmision": "NE",
+          "fechaIngresoCatastro": "1967-07-11 00:00:00",
+          "fechaEmision": "2002-03-06 12:00:00",
+          "fechaTransferencia": null,
+          "resolucionMunicipal": null,
+          "gestionResolucionMunicipal": null,
+          "aclaracionRegistro": null,
+          "aclaracionTransferencia": null,
+          "observacionRegistro": "",
+          "idTramite": 0,
+          "asiento": null,
+          "vigente": 1
+        },
+        "resumen": "1 inscripción(es) en catastro · 1 vigente(s) AC · última vigente nro 914439",
+        "n_registros": 1,
+        "n_construcciones": 0
+      },
+      "estado": "confirmado",
+      "detalle_estado": "Alineación buena; candidato confiable.",
+      "confiable": true,
+      "diff_score": 25.284465789794922,
+      "sam2_score": 0.9579611420631409,
+      "bbox_px": [
+        778,
+        911,
+        840,
+        958
+      ]
+    },
+    {
+      "nro": 2,
+      "tipo": "eliminada",
+      "prob_pct": 97,
+      "prob": 0.968,
+      "codigo_catastral": "08074001000000000",
+      "nro_inmueble": 77824,
+      "manzana": "074",
+      "predio": "001",
+      "distrito": 10,
+      "comuna": "ADELA ZAMUDIO",
+      "subdistrito": "NORESTE",
+      "lon": -66.1564201,
+      "lat": -17.392886,
+      "distancia_predio_m": 0.0,
+      "confianza_cruce": "alta",
+      "motivo_sin_predio": "ok",
+      "detalle_sin_predio": "Cruce con capa predios ArcGIS dentro del buffer.",
+      "cruce_predio": {
+        "metodo": "buffer_10m",
+        "distancia_m": 0.0,
+        "distancia_predio_m": 0.0,
+        "confianza": "alta",
+        "buffer_m": 10.0,
+        "motivo": "ok",
+        "detalle": "Cruce con capa predios ArcGIS dentro del buffer."
+      },
+      "asientos_resumen": "1 inscripción(es) en catastro · 1 vigente(s) AC · última vigente nro 914424",
+      "n_asientos_registro": 1,
+      "n_construcciones_catastro": 0,
+      "rc_vigente_asiento": null,
+      "rc_vigente_nro_inscripcion": 914424,
+      "rc_vigente_nro_registro": 914424,
+      "rc_vigente_resolucion": null,
+      "rc_vigente_fecha_emision": "2002-03-06 10:47:00",
+      "rc_vigente_aclaracion": null,
+      "asientos_catastro": {
+        "codigo_catastral": "08074001000000000",
+        "es_ph": false,
+        "disponible": true,
+        "motivo": "ok",
+        "detalle": null,
+        "registros": [
+          {
+            "idRegistroCatastral": 77555,
+            "codigoCatastral": "08074001000000000",
+            "nroInscripcion": 914424,
+            "nroRegistro": 914424,
+            "nroFormulario": 0,
+            "estado": "AC",
+            "estadoActual": "AC",
+            "estadoInscripcion": "TR",
+            "estadoEmision": "NE",
+            "fechaIngresoCatastro": "1999-11-30 00:00:00",
+            "fechaEmision": "2002-03-06 10:47:00",
+            "fechaTransferencia": null,
+            "resolucionMunicipal": null,
+            "gestionResolucionMunicipal": null,
+            "aclaracionRegistro": null,
+            "aclaracionTransferencia": null,
+            "observacionRegistro": "",
+            "idTramite": 0,
+            "asiento": null,
+            "vigente": 1
+          }
+        ],
+        "construcciones": [],
+        "vigente": {
+          "idRegistroCatastral": 77555,
+          "codigoCatastral": "08074001000000000",
+          "nroInscripcion": 914424,
+          "nroRegistro": 914424,
+          "nroFormulario": 0,
+          "estado": "AC",
+          "estadoActual": "AC",
+          "estadoInscripcion": "TR",
+          "estadoEmision": "NE",
+          "fechaIngresoCatastro": "1999-11-30 00:00:00",
+          "fechaEmision": "2002-03-06 10:47:00",
+          "fechaTransferencia": null,
+          "resolucionMunicipal": null,
+          "gestionResolucionMunicipal": null,
+          "aclaracionRegistro": null,
+          "aclaracionTransferencia": null,
+          "observacionRegistro": "",
+          "idTramite": 0,
+          "asiento": null,
+          "vigente": 1
+        },
+        "resumen": "1 inscripción(es) en catastro · 1 vigente(s) AC · última vigente nro 914424",
+        "n_registros": 1,
+        "n_construcciones": 0
+      },
+      "estado": "confirmado",
+      "detalle_estado": "Alineación buena; candidato confiable.",
+      "confiable": true,
+      "diff_score": 18.95905876159668,
+      "sam2_score": 0.9201289415359497,
+      "bbox_px": [
+        256,
+        900,
+        285,
+        960
+      ]
+    },
+    {
+      "nro": 3,
+      "tipo": "eliminada",
+      "prob_pct": 93,
+      "prob": 0.932,
+      "codigo_catastral": "08073004000000000",
+      "nro_inmueble": 91722,
+      "manzana": "073",
+      "predio": "004",
+      "distrito": 10,
+      "comuna": "ADELA ZAMUDIO",
+      "subdistrito": "NORESTE",
+      "lon": -66.1562759,
+      "lat": -17.3922866,
+      "distancia_predio_m": 0.0,
+      "confianza_cruce": "alta",
+      "motivo_sin_predio": "ok",
+      "detalle_sin_predio": "Cruce con capa predios ArcGIS dentro del buffer.",
+      "cruce_predio": {
+        "metodo": "buffer_10m",
+        "distancia_m": 0.0,
+        "distancia_predio_m": 0.0,
+        "confianza": "alta",
+        "buffer_m": 10.0,
+        "motivo": "ok",
+        "detalle": "Cruce con capa predios ArcGIS dentro del buffer."
+      },
+      "asientos_resumen": "1 inscripción(es) en catastro · asiento vigente A - 2",
+      "n_asientos_registro": 1,
+      "n_construcciones_catastro": 0,
+      "rc_vigente_asiento": "A - 2",
+      "rc_vigente_nro_inscripcion": 1293919,
+      "rc_vigente_nro_registro": 1324120,
+      "rc_vigente_resolucion": "114006/2025",
+      "rc_vigente_fecha_emision": "2025-11-26 08:50:38",
+      "rc_vigente_aclaracion": null,
+      "asientos_catastro": {
+        "codigo_catastral": "08073004000000000",
+        "es_ph": false,
+        "disponible": true,
+        "motivo": "ok",
+        "detalle": null,
+        "registros": [
+          {
+            "idRegistroCatastral": 532592,
+            "codigoCatastral": "08073004000000000",
+            "nroInscripcion": 1293919,
+            "nroRegistro": 1324120,
+            "nroFormulario": 0,
+            "estado": "AC",
+            "estadoActual": "IN",
+            "estadoInscripcion": "PT",
+            "estadoEmision": "EM",
+            "fechaIngresoCatastro": "2025-11-07 09:18:16",
+            "fechaEmision": "2025-11-26 08:50:38",
+            "fechaTransferencia": null,
+            "resolucionMunicipal": 114006,
+            "gestionResolucionMunicipal": 2025,
+            "aclaracionRegistro": null,
+            "aclaracionTransferencia": null,
+            "observacionRegistro": null,
+            "idTramite": 456116,
+            "asiento": "A - 2",
+            "vigente": 0
+          }
+        ],
+        "construcciones": [],
+        "vigente": {
+          "idRegistroCatastral": 532592,
+          "codigoCatastral": "08073004000000000",
+          "nroInscripcion": 1293919,
+          "nroRegistro": 1324120,
+          "nroFormulario": 0,
+          "estado": "AC",
+          "estadoActual": "IN",
+          "estadoInscripcion": "PT",
+          "estadoEmision": "EM",
+          "fechaIngresoCatastro": "2025-11-07 09:18:16",
+          "fechaEmision": "2025-11-26 08:50:38",
+          "fechaTransferencia": null,
+          "resolucionMunicipal": 114006,
+          "gestionResolucionMunicipal": 2025,
+          "aclaracionRegistro": null,
+          "aclaracionTransferencia": null,
+          "observacionRegistro": null,
+          "idTramite": 456116,
+          "asiento": "A - 2",
+          "vigente": 0
+        },
+        "resumen": "1 inscripción(es) en catastro · asiento vigente A - 2",
+        "n_registros": 1,
+        "n_construcciones": 0
+      },
+      "estado": "confirmado",
+      "detalle_estado": "Alineación buena; candidato confiable.",
+      "confiable": true,
+      "diff_score": 49.58317565917969,
+      "sam2_score": 0.8298713564872742,
+      "bbox_px": [
+        353,
+        229,
+        482,
+        284
+      ]
+    }
+  ],
+  "predios": {
+    "predios_source": "/arcgis/rest/services/catastro/predios_cba/FeatureServer/0",
+    "predios_count": 38,
+    "buffer_m": 10.0,
+    "matched": 3,
+    "matched_alta": 3,
+    "matched_media": 0,
+    "matched_baja": 0,
+    "unmatched": 0,
+    "error": null,
+    "features_geo": [
+      {
+        "codigo_catastral": "08067001000000000",
+        "rings": [
+          [
+            [
+              -66.1566301,
+              -17.3920737
+            ],
+            [
+              -66.1566494,
+              -17.3920769
+            ],
+            [
+              -66.1566632,
+              -17.3920766
+            ],
+            [
+              -66.1566766,
+              -17.3920735
+            ],
+            [
+              -66.1566873,
+              -17.3920639
+            ],
+            [
+              -66.156693,
+              -17.3920512
+            ],
+            [
+              -66.1566965,
+              -17.3920323
+            ],
+            [
+              -66.1566991,
+              -17.3920184
+            ],
+            [
+              -66.1567027,
+              -17.3919988
+            ],
+            [
+              -66.1567133,
+              -17.3919415
+            ],
+            [
+              -66.1567141,
+              -17.3919369
+            ],
+            [
+              -66.1566265,
+              -17.3919262
+            ],
+            [
+              -66.1566129,
+              -17.3919927
+            ],
+            [
+              -66.1565976,
+              -17.3920682
+            ],
+            [
+              -66.1566107,
+              -17.3920705
+            ],
+            [
+              -66.1566301,
+              -17.3920737
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08067014000000000",
+        "rings": [
+          [
+            [
+              -66.1560322,
+              -17.3919652
+            ],
+            [
+              -66.1560475,
+              -17.3919681
+            ],
+            [
+              -66.1560557,
+              -17.3919195
+            ],
+            [
+              -66.1560562,
+              -17.3919161
+            ],
+            [
+              -66.1560632,
+              -17.3918743
+            ],
+            [
+              -66.1560686,
+              -17.3918426
+            ],
+            [
+              -66.1560712,
+              -17.3918267
+            ],
+            [
+              -66.1560735,
+              -17.391813
+            ],
+            [
+              -66.1560781,
+              -17.3917855
+            ],
+            [
+              -66.1560065,
+              -17.3917719
+            ],
+            [
+              -66.1559209,
+              -17.3917557
+            ],
+            [
+              -66.1558666,
+              -17.3917455
+            ],
+            [
+              -66.1558405,
+              -17.3917405
+            ],
+            [
+              -66.1558176,
+              -17.3917362
+            ],
+            [
+              -66.1557592,
+              -17.3917251
+            ],
+            [
+              -66.155727,
+              -17.391908
+            ],
+            [
+              -66.1557675,
+              -17.3919156
+            ],
+            [
+              -66.1558148,
+              -17.3919244
+            ],
+            [
+              -66.1560322,
+              -17.3919652
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08067015000000000",
+        "rings": [
+          [
+            [
+              -66.1561214,
+              -17.391989
+            ],
+            [
+              -66.1562448,
+              -17.3920096
+            ],
+            [
+              -66.1562722,
+              -17.3918623
+            ],
+            [
+              -66.1562805,
+              -17.391818
+            ],
+            [
+              -66.1563118,
+              -17.3916498
+            ],
+            [
+              -66.1563125,
+              -17.391646
+            ],
+            [
+              -66.1563322,
+              -17.3915404
+            ],
+            [
+              -66.1563357,
+              -17.3915217
+            ],
+            [
+              -66.1563486,
+              -17.3914524
+            ],
+            [
+              -66.1562236,
+              -17.3914295
+            ],
+            [
+              -66.1562387,
+              -17.391352
+            ],
+            [
+              -66.1562415,
+              -17.3913372
+            ],
+            [
+              -66.1562425,
+              -17.3913325
+            ],
+            [
+              -66.1562035,
+              -17.3913253
+            ],
+            [
+              -66.1561568,
+              -17.3913168
+            ],
+            [
+              -66.1561537,
+              -17.3913352
+            ],
+            [
+              -66.1561501,
+              -17.3913563
+            ],
+            [
+              -66.1561309,
+              -17.3914711
+            ],
+            [
+              -66.1561298,
+              -17.3914775
+            ],
+            [
+              -66.1561047,
+              -17.3916274
+            ],
+            [
+              -66.1560938,
+              -17.391692
+            ],
+            [
+              -66.1560781,
+              -17.3917855
+            ],
+            [
+              -66.1560735,
+              -17.391813
+            ],
+            [
+              -66.1560712,
+              -17.3918267
+            ],
+            [
+              -66.1560686,
+              -17.3918426
+            ],
+            [
+              -66.1560632,
+              -17.3918743
+            ],
+            [
+              -66.1560562,
+              -17.3919161
+            ],
+            [
+              -66.1560557,
+              -17.3919195
+            ],
+            [
+              -66.1560475,
+              -17.3919681
+            ],
+            [
+              -66.1560461,
+              -17.3919765
+            ],
+            [
+              -66.1560683,
+              -17.3919802
+            ],
+            [
+              -66.1560963,
+              -17.3919849
+            ],
+            [
+              -66.1561214,
+              -17.391989
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08067016000000000",
+        "rings": [
+          [
+            [
+              -66.1563118,
+              -17.3916498
+            ],
+            [
+              -66.1562805,
+              -17.391818
+            ],
+            [
+              -66.1562722,
+              -17.3918623
+            ],
+            [
+              -66.1562448,
+              -17.3920096
+            ],
+            [
+              -66.1564092,
+              -17.3920369
+            ],
+            [
+              -66.1564344,
+              -17.3919028
+            ],
+            [
+              -66.156437,
+              -17.3918896
+            ],
+            [
+              -66.1564441,
+              -17.3918513
+            ],
+            [
+              -66.1564514,
+              -17.3918126
+            ],
+            [
+              -66.1564585,
+              -17.3917746
+            ],
+            [
+              -66.1564689,
+              -17.3917758
+            ],
+            [
+              -66.1564733,
+              -17.3917515
+            ],
+            [
+              -66.1564865,
+              -17.3916798
+            ],
+            [
+              -66.1564776,
+              -17.391678
+            ],
+            [
+              -66.1564334,
+              -17.3916695
+            ],
+            [
+              -66.1564233,
+              -17.3916675
+            ],
+            [
+              -66.1563913,
+              -17.3916613
+            ],
+            [
+              -66.1563624,
+              -17.3916557
+            ],
+            [
+              -66.1563125,
+              -17.391646
+            ],
+            [
+              -66.1563118,
+              -17.3916498
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08067017000000000",
+        "rings": [
+          [
+            [
+              -66.1564943,
+              -17.392051
+            ],
+            [
+              -66.156522,
+              -17.3920557
+            ],
+            [
+              -66.1565345,
+              -17.3920013
+            ],
+            [
+              -66.1565392,
+              -17.3919811
+            ],
+            [
+              -66.1565539,
+              -17.3919173
+            ],
+            [
+              -66.1565055,
+              -17.3919115
+            ],
+            [
+              -66.1565028,
+              -17.3919112
+            ],
+            [
+              -66.1565187,
+              -17.3918257
+            ],
+            [
+              -66.1565117,
+              -17.3918245
+            ],
+            [
+              -66.1565144,
+              -17.3918008
+            ],
+            [
+              -66.1565164,
+              -17.3917834
+            ],
+            [
+              -66.1565018,
+              -17.3917811
+            ],
+            [
+              -66.1564689,
+              -17.3917758
+            ],
+            [
+              -66.1564585,
+              -17.3917746
+            ],
+            [
+              -66.1564514,
+              -17.3918126
+            ],
+            [
+              -66.1564441,
+              -17.3918513
+            ],
+            [
+              -66.156437,
+              -17.3918896
+            ],
+            [
+              -66.1564344,
+              -17.3919028
+            ],
+            [
+              -66.1564092,
+              -17.3920369
+            ],
+            [
+              -66.1564371,
+              -17.3920415
+            ],
+            [
+              -66.1564943,
+              -17.392051
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08067018000000000",
+        "rings": [
+          [
+            [
+              -66.156522,
+              -17.3920557
+            ],
+            [
+              -66.1565976,
+              -17.3920682
+            ],
+            [
+              -66.1566129,
+              -17.3919927
+            ],
+            [
+              -66.1566265,
+              -17.3919262
+            ],
+            [
+              -66.1565539,
+              -17.3919173
+            ],
+            [
+              -66.1565392,
+              -17.3919811
+            ],
+            [
+              -66.1565345,
+              -17.3920013
+            ],
+            [
+              -66.156522,
+              -17.3920557
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08073002100000000",
+        "rings": [
+          [
+            [
+              -66.1565229,
+              -17.3922937
+            ],
+            [
+              -66.1565131,
+              -17.392345
+            ],
+            [
+              -66.156445,
+              -17.3923316
+            ],
+            [
+              -66.1564277,
+              -17.3924269
+            ],
+            [
+              -66.15633,
+              -17.3924088
+            ],
+            [
+              -66.1561765,
+              -17.3923805
+            ],
+            [
+              -66.1561464,
+              -17.3925419
+            ],
+            [
+              -66.1563314,
+              -17.3925717
+            ],
+            [
+              -66.156402,
+              -17.3925831
+            ],
+            [
+              -66.1565784,
+              -17.3926116
+            ],
+            [
+              -66.1566027,
+              -17.392474
+            ],
+            [
+              -66.1566035,
+              -17.3924696
+            ],
+            [
+              -66.1566172,
+              -17.3923919
+            ],
+            [
+              -66.1566248,
+              -17.3923486
+            ],
+            [
+              -66.1566151,
+              -17.3923352
+            ],
+            [
+              -66.156595,
+              -17.3923073
+            ],
+            [
+              -66.1565387,
+              -17.3922965
+            ],
+            [
+              -66.1565279,
+              -17.3922946
+            ],
+            [
+              -66.1565229,
+              -17.3922937
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08073003000000000",
+        "rings": [
+          [
+            [
+              -66.1563562,
+              -17.3922623
+            ],
+            [
+              -66.15633,
+              -17.3924088
+            ],
+            [
+              -66.1564277,
+              -17.3924269
+            ],
+            [
+              -66.156445,
+              -17.3923316
+            ],
+            [
+              -66.1565131,
+              -17.392345
+            ],
+            [
+              -66.1565229,
+              -17.3922937
+            ],
+            [
+              -66.1563644,
+              -17.3922638
+            ],
+            [
+              -66.1563562,
+              -17.3922623
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08073004000000000",
+        "rings": [
+          [
+            [
+              -66.1562143,
+              -17.3922611
+            ],
+            [
+              -66.1561945,
+              -17.3923587
+            ],
+            [
+              -66.1561809,
+              -17.3923564
+            ],
+            [
+              -66.1561765,
+              -17.3923805
+            ],
+            [
+              -66.15633,
+              -17.3924088
+            ],
+            [
+              -66.1563562,
+              -17.3922623
+            ],
+            [
+              -66.1562192,
+              -17.3922365
+            ],
+            [
+              -66.1562181,
+              -17.3922418
+            ],
+            [
+              -66.1562143,
+              -17.3922611
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08074001000000000",
+        "rings": [
+          [
+            [
+              -66.1564451,
+              -17.3931295
+            ],
+            [
+              -66.1564574,
+              -17.3931316
+            ],
+            [
+              -66.15648,
+              -17.3931164
+            ],
+            [
+              -66.1564909,
+              -17.393109
+            ],
+            [
+              -66.1564936,
+              -17.3930937
+            ],
+            [
+              -66.1564967,
+              -17.3930759
+            ],
+            [
+              -66.1565015,
+              -17.3930489
+            ],
+            [
+              -66.1565046,
+              -17.3930311
+            ],
+            [
+              -66.1565093,
+              -17.3930043
+            ],
+            [
+              -66.1565125,
+              -17.3929863
+            ],
+            [
+              -66.1565172,
+              -17.3929595
+            ],
+            [
+              -66.1565204,
+              -17.3929416
+            ],
+            [
+              -66.1565251,
+              -17.3929147
+            ],
+            [
+              -66.1565283,
+              -17.3928968
+            ],
+            [
+              -66.156533,
+              -17.39287
+            ],
+            [
+              -66.1565362,
+              -17.3928521
+            ],
+            [
+              -66.1565409,
+              -17.3928253
+            ],
+            [
+              -66.156544,
+              -17.3928074
+            ],
+            [
+              -66.1565484,
+              -17.3927825
+            ],
+            [
+              -66.1562881,
+              -17.3927419
+            ],
+            [
+              -66.1562601,
+              -17.3929071
+            ],
+            [
+              -66.1562554,
+              -17.3929351
+            ],
+            [
+              -66.1562484,
+              -17.3929765
+            ],
+            [
+              -66.1562288,
+              -17.3930925
+            ],
+            [
+              -66.1562473,
+              -17.3930956
+            ],
+            [
+              -66.1562751,
+              -17.3931004
+            ],
+            [
+              -66.1562937,
+              -17.3931036
+            ],
+            [
+              -66.1563214,
+              -17.3931083
+            ],
+            [
+              -66.1563399,
+              -17.3931115
+            ],
+            [
+              -66.1563678,
+              -17.3931162
+            ],
+            [
+              -66.1563862,
+              -17.3931194
+            ],
+            [
+              -66.156414,
+              -17.3931242
+            ],
+            [
+              -66.1564451,
+              -17.3931295
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08074003000000000",
+        "rings": [
+          [
+            [
+              -66.1555962,
+              -17.3924225
+            ],
+            [
+              -66.1555861,
+              -17.392475
+            ],
+            [
+              -66.1556861,
+              -17.392491
+            ],
+            [
+              -66.1557465,
+              -17.3925007
+            ],
+            [
+              -66.1557548,
+              -17.392502
+            ],
+            [
+              -66.1558401,
+              -17.3925156
+            ],
+            [
+              -66.1558451,
+              -17.3925164
+            ],
+            [
+              -66.1558975,
+              -17.3925248
+            ],
+            [
+              -66.1560742,
+              -17.392553
+            ],
+            [
+              -66.156093,
+              -17.3924756
+            ],
+            [
+              -66.1559769,
+              -17.3924575
+            ],
+            [
+              -66.1559395,
+              -17.3924516
+            ],
+            [
+              -66.1559198,
+              -17.3924486
+            ],
+            [
+              -66.1559221,
+              -17.3924379
+            ],
+            [
+              -66.1559233,
+              -17.3924324
+            ],
+            [
+              -66.1559015,
+              -17.3924285
+            ],
+            [
+              -66.1559068,
+              -17.3924091
+            ],
+            [
+              -66.1558562,
+              -17.3924025
+            ],
+            [
+              -66.1558439,
+              -17.3924009
+            ],
+            [
+              -66.1558436,
+              -17.392403
+            ],
+            [
+              -66.1558405,
+              -17.3924217
+            ],
+            [
+              -66.1558388,
+              -17.3924324
+            ],
+            [
+              -66.155796,
+              -17.3924239
+            ],
+            [
+              -66.1557569,
+              -17.3924161
+            ],
+            [
+              -66.1557668,
+              -17.3923705
+            ],
+            [
+              -66.1557485,
+              -17.3923667
+            ],
+            [
+              -66.1557003,
+              -17.3923567
+            ],
+            [
+              -66.1556124,
+              -17.3923383
+            ],
+            [
+              -66.155601,
+              -17.3923973
+            ],
+            [
+              -66.1555962,
+              -17.3924225
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08074004100000000",
+        "rings": [
+          [
+            [
+              -66.1560563,
+              -17.3922452
+            ],
+            [
+              -66.1560521,
+              -17.3922662
+            ],
+            [
+              -66.1560268,
+              -17.3922614
+            ],
+            [
+              -66.1560183,
+              -17.3923019
+            ],
+            [
+              -66.1561292,
+              -17.3923261
+            ],
+            [
+              -66.156147,
+              -17.3922523
+            ],
+            [
+              -66.1561538,
+              -17.3922242
+            ],
+            [
+              -66.1560737,
+              -17.3922091
+            ],
+            [
+              -66.1560638,
+              -17.3922073
+            ],
+            [
+              -66.1560563,
+              -17.3922452
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08074005000000000",
+        "rings": [
+          [
+            [
+              -66.1560268,
+              -17.3922614
+            ],
+            [
+              -66.1560521,
+              -17.3922662
+            ],
+            [
+              -66.1560563,
+              -17.3922452
+            ],
+            [
+              -66.1560638,
+              -17.3922073
+            ],
+            [
+              -66.1560366,
+              -17.3922021
+            ],
+            [
+              -66.1560274,
+              -17.3922004
+            ],
+            [
+              -66.1559869,
+              -17.3921928
+            ],
+            [
+              -66.1559287,
+              -17.3921818
+            ],
+            [
+              -66.1558936,
+              -17.3921752
+            ],
+            [
+              -66.1558811,
+              -17.3922334
+            ],
+            [
+              -66.1559509,
+              -17.3922468
+            ],
+            [
+              -66.1560154,
+              -17.3922591
+            ],
+            [
+              -66.1560268,
+              -17.3922614
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08074006000000000",
+        "rings": [
+          [
+            [
+              -66.1558335,
+              -17.3922345
+            ],
+            [
+              -66.155879,
+              -17.3922431
+            ],
+            [
+              -66.1558811,
+              -17.3922334
+            ],
+            [
+              -66.1558936,
+              -17.3921752
+            ],
+            [
+              -66.1558417,
+              -17.3921654
+            ],
+            [
+              -66.155682,
+              -17.3921354
+            ],
+            [
+              -66.1556286,
+              -17.3921265
+            ],
+            [
+              -66.1556211,
+              -17.3921601
+            ],
+            [
+              -66.155666,
+              -17.3921686
+            ],
+            [
+              -66.1556601,
+              -17.3922016
+            ],
+            [
+              -66.1558335,
+              -17.3922345
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08074015000000000",
+        "rings": [
+          [
+            [
+              -66.1556152,
+              -17.3921966
+            ],
+            [
+              -66.1555995,
+              -17.3922801
+            ],
+            [
+              -66.1555962,
+              -17.3922978
+            ],
+            [
+              -66.1555945,
+              -17.3923068
+            ],
+            [
+              -66.1555911,
+              -17.3923246
+            ],
+            [
+              -66.1555895,
+              -17.3923335
+            ],
+            [
+              -66.1555975,
+              -17.3923351
+            ],
+            [
+              -66.1556124,
+              -17.3923383
+            ],
+            [
+              -66.1557003,
+              -17.3923567
+            ],
+            [
+              -66.1557485,
+              -17.3923667
+            ],
+            [
+              -66.1557668,
+              -17.3923705
+            ],
+            [
+              -66.1557569,
+              -17.3924161
+            ],
+            [
+              -66.155796,
+              -17.3924239
+            ],
+            [
+              -66.1558388,
+              -17.3924324
+            ],
+            [
+              -66.1558405,
+              -17.3924217
+            ],
+            [
+              -66.1558436,
+              -17.392403
+            ],
+            [
+              -66.1558439,
+              -17.3924009
+            ],
+            [
+              -66.1558562,
+              -17.3924025
+            ],
+            [
+              -66.1559068,
+              -17.3924091
+            ],
+            [
+              -66.1559015,
+              -17.3924285
+            ],
+            [
+              -66.1559233,
+              -17.3924324
+            ],
+            [
+              -66.1559316,
+              -17.3923765
+            ],
+            [
+              -66.1559406,
+              -17.3923163
+            ],
+            [
+              -66.155942,
+              -17.3923072
+            ],
+            [
+              -66.1559509,
+              -17.3922468
+            ],
+            [
+              -66.1558811,
+              -17.3922334
+            ],
+            [
+              -66.155879,
+              -17.3922431
+            ],
+            [
+              -66.1558335,
+              -17.3922345
+            ],
+            [
+              -66.1556601,
+              -17.3922016
+            ],
+            [
+              -66.1556646,
+              -17.3921788
+            ],
+            [
+              -66.155666,
+              -17.3921686
+            ],
+            [
+              -66.1556211,
+              -17.3921601
+            ],
+            [
+              -66.1556202,
+              -17.39217
+            ],
+            [
+              -66.1556199,
+              -17.3921716
+            ],
+            [
+              -66.1556186,
+              -17.3921789
+            ],
+            [
+              -66.1556152,
+              -17.3921966
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08074009000000000",
+        "rings": [
+          [
+            [
+              -66.1555044,
+              -17.3927862
+            ],
+            [
+              -66.1556414,
+              -17.392813
+            ],
+            [
+              -66.1556462,
+              -17.3927894
+            ],
+            [
+              -66.155672,
+              -17.3926639
+            ],
+            [
+              -66.1556566,
+              -17.3926611
+            ],
+            [
+              -66.1555323,
+              -17.3926382
+            ],
+            [
+              -66.1555256,
+              -17.3926737
+            ],
+            [
+              -66.1555223,
+              -17.3926915
+            ],
+            [
+              -66.1555184,
+              -17.3927117
+            ],
+            [
+              -66.1555151,
+              -17.3927295
+            ],
+            [
+              -66.1555101,
+              -17.3927561
+            ],
+            [
+              -66.1555084,
+              -17.392765
+            ],
+            [
+              -66.1555078,
+              -17.3927682
+            ],
+            [
+              -66.1555044,
+              -17.3927862
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08074010000000000",
+        "rings": [
+          [
+            [
+              -66.1555044,
+              -17.3927862
+            ],
+            [
+              -66.1554774,
+              -17.3929305
+            ],
+            [
+              -66.1554822,
+              -17.3929487
+            ],
+            [
+              -66.155486,
+              -17.3929572
+            ],
+            [
+              -66.1554941,
+              -17.3929653
+            ],
+            [
+              -66.1555854,
+              -17.3929823
+            ],
+            [
+              -66.1555972,
+              -17.3929274
+            ],
+            [
+              -66.1556076,
+              -17.3929294
+            ],
+            [
+              -66.1556112,
+              -17.3929126
+            ],
+            [
+              -66.1556206,
+              -17.3929144
+            ],
+            [
+              -66.1556414,
+              -17.392813
+            ],
+            [
+              -66.1555044,
+              -17.3927862
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08074012000000000",
+        "rings": [
+          [
+            [
+              -66.1559831,
+              -17.3930504
+            ],
+            [
+              -66.1559853,
+              -17.3930508
+            ],
+            [
+              -66.1560084,
+              -17.3929187
+            ],
+            [
+              -66.1560126,
+              -17.3928947
+            ],
+            [
+              -66.1560429,
+              -17.3927209
+            ],
+            [
+              -66.156067,
+              -17.3925831
+            ],
+            [
+              -66.1560742,
+              -17.392553
+            ],
+            [
+              -66.1558975,
+              -17.3925248
+            ],
+            [
+              -66.1558451,
+              -17.3925164
+            ],
+            [
+              -66.1558401,
+              -17.3925156
+            ],
+            [
+              -66.1558236,
+              -17.3926234
+            ],
+            [
+              -66.1558108,
+              -17.3927067
+            ],
+            [
+              -66.1557638,
+              -17.3930129
+            ],
+            [
+              -66.1557649,
+              -17.3930131
+            ],
+            [
+              -66.1557927,
+              -17.3930178
+            ],
+            [
+              -66.1558112,
+              -17.393021
+            ],
+            [
+              -66.155839,
+              -17.3930258
+            ],
+            [
+              -66.1558652,
+              -17.3930302
+            ],
+            [
+              -66.1558929,
+              -17.393035
+            ],
+            [
+              -66.155909,
+              -17.3930377
+            ],
+            [
+              -66.1559368,
+              -17.3930425
+            ],
+            [
+              -66.1559552,
+              -17.3930457
+            ],
+            [
+              -66.1559831,
+              -17.3930504
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08074013000000000",
+        "rings": [
+          [
+            [
+              -66.156212,
+              -17.3930896
+            ],
+            [
+              -66.1562288,
+              -17.3930925
+            ],
+            [
+              -66.1562484,
+              -17.3929765
+            ],
+            [
+              -66.1562554,
+              -17.3929351
+            ],
+            [
+              -66.1562601,
+              -17.3929071
+            ],
+            [
+              -66.1562881,
+              -17.3927419
+            ],
+            [
+              -66.1563003,
+              -17.3926703
+            ],
+            [
+              -66.1561666,
+              -17.3926467
+            ],
+            [
+              -66.156175,
+              -17.3926033
+            ],
+            [
+              -66.156067,
+              -17.3925831
+            ],
+            [
+              -66.1560429,
+              -17.3927209
+            ],
+            [
+              -66.1560126,
+              -17.3928947
+            ],
+            [
+              -66.1560084,
+              -17.3929187
+            ],
+            [
+              -66.1559853,
+              -17.3930508
+            ],
+            [
+              -66.1559939,
+              -17.3930523
+            ],
+            [
+              -66.1560216,
+              -17.393057
+            ],
+            [
+              -66.1560401,
+              -17.3930602
+            ],
+            [
+              -66.1560679,
+              -17.3930649
+            ],
+            [
+              -66.1560941,
+              -17.3930694
+            ],
+            [
+              -66.1561219,
+              -17.3930742
+            ],
+            [
+              -66.1561379,
+              -17.3930769
+            ],
+            [
+              -66.1561656,
+              -17.3930816
+            ],
+            [
+              -66.1561842,
+              -17.3930848
+            ],
+            [
+              -66.156212,
+              -17.3930896
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08074017000000000",
+        "rings": [
+          [
+            [
+              -66.155544,
+              -17.3925759
+            ],
+            [
+              -66.1555356,
+              -17.3926204
+            ],
+            [
+              -66.1555323,
+              -17.3926382
+            ],
+            [
+              -66.1556566,
+              -17.3926611
+            ],
+            [
+              -66.155672,
+              -17.3926639
+            ],
+            [
+              -66.1556722,
+              -17.3926627
+            ],
+            [
+              -66.155682,
+              -17.3926148
+            ],
+            [
+              -66.1557253,
+              -17.3926208
+            ],
+            [
+              -66.1557277,
+              -17.3926069
+            ],
+            [
+              -66.1557465,
+              -17.3925007
+            ],
+            [
+              -66.1556861,
+              -17.392491
+            ],
+            [
+              -66.1555861,
+              -17.392475
+            ],
+            [
+              -66.155571,
+              -17.3924727
+            ],
+            [
+              -66.1555636,
+              -17.3924715
+            ],
+            [
+              -66.155544,
+              -17.3925759
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08074018000000000",
+        "rings": [
+          [
+            [
+              -66.1557277,
+              -17.3926069
+            ],
+            [
+              -66.1557253,
+              -17.3926208
+            ],
+            [
+              -66.155682,
+              -17.3926148
+            ],
+            [
+              -66.1556722,
+              -17.3926627
+            ],
+            [
+              -66.155672,
+              -17.3926639
+            ],
+            [
+              -66.1556462,
+              -17.3927894
+            ],
+            [
+              -66.1556414,
+              -17.392813
+            ],
+            [
+              -66.1556206,
+              -17.3929144
+            ],
+            [
+              -66.1556112,
+              -17.3929126
+            ],
+            [
+              -66.1556076,
+              -17.3929294
+            ],
+            [
+              -66.1555972,
+              -17.3929274
+            ],
+            [
+              -66.1555854,
+              -17.3929823
+            ],
+            [
+              -66.1557638,
+              -17.3930129
+            ],
+            [
+              -66.1558108,
+              -17.3927067
+            ],
+            [
+              -66.1558236,
+              -17.3926234
+            ],
+            [
+              -66.1558401,
+              -17.3925156
+            ],
+            [
+              -66.1557548,
+              -17.392502
+            ],
+            [
+              -66.1557465,
+              -17.3925007
+            ],
+            [
+              -66.1557277,
+              -17.3926069
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08074016000000000",
+        "rings": [
+          [
+            [
+              -66.1559769,
+              -17.3924575
+            ],
+            [
+              -66.156093,
+              -17.3924756
+            ],
+            [
+              -66.1561048,
+              -17.3924267
+            ],
+            [
+              -66.1561124,
+              -17.3923952
+            ],
+            [
+              -66.156126,
+              -17.3923392
+            ],
+            [
+              -66.1561292,
+              -17.3923261
+            ],
+            [
+              -66.1560183,
+              -17.3923019
+            ],
+            [
+              -66.1560268,
+              -17.3922614
+            ],
+            [
+              -66.1560154,
+              -17.3922591
+            ],
+            [
+              -66.1559509,
+              -17.3922468
+            ],
+            [
+              -66.155942,
+              -17.3923072
+            ],
+            [
+              -66.1559406,
+              -17.3923163
+            ],
+            [
+              -66.1559316,
+              -17.3923765
+            ],
+            [
+              -66.1559233,
+              -17.3924324
+            ],
+            [
+              -66.1559221,
+              -17.3924379
+            ],
+            [
+              -66.1559198,
+              -17.3924486
+            ],
+            [
+              -66.1559395,
+              -17.3924516
+            ],
+            [
+              -66.1559769,
+              -17.3924575
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08075001000000000",
+        "rings": [
+          [
+            [
+              -66.1547778,
+              -17.3920334
+            ],
+            [
+              -66.1547635,
+              -17.3921012
+            ],
+            [
+              -66.1547526,
+              -17.3921523
+            ],
+            [
+              -66.1547288,
+              -17.3922651
+            ],
+            [
+              -66.1547184,
+              -17.3923145
+            ],
+            [
+              -66.1547183,
+              -17.3923149
+            ],
+            [
+              -66.1546869,
+              -17.3924573
+            ],
+            [
+              -66.1546858,
+              -17.3924616
+            ],
+            [
+              -66.1546636,
+              -17.3924574
+            ],
+            [
+              -66.1546556,
+              -17.3924981
+            ],
+            [
+              -66.1546369,
+              -17.3925913
+            ],
+            [
+              -66.1546858,
+              -17.3925995
+            ],
+            [
+              -66.1546865,
+              -17.3925996
+            ],
+            [
+              -66.154758,
+              -17.3926115
+            ],
+            [
+              -66.154816,
+              -17.3926213
+            ],
+            [
+              -66.1547975,
+              -17.3927103
+            ],
+            [
+              -66.1547712,
+              -17.392836
+            ],
+            [
+              -66.1547791,
+              -17.3928374
+            ],
+            [
+              -66.1551643,
+              -17.3929087
+            ],
+            [
+              -66.1551827,
+              -17.3929122
+            ],
+            [
+              -66.1553355,
+              -17.3929405
+            ],
+            [
+              -66.1553569,
+              -17.3928128
+            ],
+            [
+              -66.1553754,
+              -17.3927022
+            ],
+            [
+              -66.1553909,
+              -17.3927044
+            ],
+            [
+              -66.1553929,
+              -17.3926905
+            ],
+            [
+              -66.1554007,
+              -17.3926394
+            ],
+            [
+              -66.1554323,
+              -17.3926442
+            ],
+            [
+              -66.1555165,
+              -17.3922069
+            ],
+            [
+              -66.155467,
+              -17.3921988
+            ],
+            [
+              -66.1553141,
+              -17.3921739
+            ],
+            [
+              -66.1553306,
+              -17.3920782
+            ],
+            [
+              -66.1551716,
+              -17.3920489
+            ],
+            [
+              -66.1551696,
+              -17.3920485
+            ],
+            [
+              -66.1551629,
+              -17.3920772
+            ],
+            [
+              -66.1551562,
+              -17.3921055
+            ],
+            [
+              -66.1550103,
+              -17.3920783
+            ],
+            [
+              -66.1550085,
+              -17.3920779
+            ],
+            [
+              -66.1547778,
+              -17.3920334
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08075002000000000",
+        "rings": [
+          [
+            [
+              -66.155467,
+              -17.3921988
+            ],
+            [
+              -66.1555165,
+              -17.3922069
+            ],
+            [
+              -66.1555334,
+              -17.3921339
+            ],
+            [
+              -66.1555337,
+              -17.3921293
+            ],
+            [
+              -66.1555328,
+              -17.3921251
+            ],
+            [
+              -66.1555306,
+              -17.3921204
+            ],
+            [
+              -66.1555277,
+              -17.3921167
+            ],
+            [
+              -66.1555227,
+              -17.3921134
+            ],
+            [
+              -66.1555175,
+              -17.3921116
+            ],
+            [
+              -66.1555104,
+              -17.3921107
+            ],
+            [
+              -66.1554917,
+              -17.392108
+            ],
+            [
+              -66.1554845,
+              -17.3921067
+            ],
+            [
+              -66.1553973,
+              -17.3920906
+            ],
+            [
+              -66.1553386,
+              -17.3920797
+            ],
+            [
+              -66.1553306,
+              -17.3920782
+            ],
+            [
+              -66.1553141,
+              -17.3921739
+            ],
+            [
+              -66.155467,
+              -17.3921988
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08081005000000000",
+        "rings": [
+          [
+            [
+              -66.1564657,
+              -17.3933948
+            ],
+            [
+              -66.1564841,
+              -17.3933021
+            ],
+            [
+              -66.1564849,
+              -17.3932942
+            ],
+            [
+              -66.1564843,
+              -17.3932864
+            ],
+            [
+              -66.1564823,
+              -17.3932788
+            ],
+            [
+              -66.156479,
+              -17.3932716
+            ],
+            [
+              -66.1564744,
+              -17.3932651
+            ],
+            [
+              -66.1564687,
+              -17.3932595
+            ],
+            [
+              -66.1564621,
+              -17.3932549
+            ],
+            [
+              -66.1564547,
+              -17.3932514
+            ],
+            [
+              -66.1564469,
+              -17.3932493
+            ],
+            [
+              -66.1562081,
+              -17.3932045
+            ],
+            [
+              -66.1561957,
+              -17.3932667
+            ],
+            [
+              -66.1561901,
+              -17.3932946
+            ],
+            [
+              -66.1561765,
+              -17.3933631
+            ],
+            [
+              -66.1562988,
+              -17.3933857
+            ],
+            [
+              -66.1563211,
+              -17.3933898
+            ],
+            [
+              -66.1563852,
+              -17.3934017
+            ],
+            [
+              -66.1563891,
+              -17.3933813
+            ],
+            [
+              -66.1564407,
+              -17.3933904
+            ],
+            [
+              -66.1564657,
+              -17.3933948
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08081006000000000",
+        "rings": [
+          [
+            [
+              -66.1562081,
+              -17.3932045
+            ],
+            [
+              -66.1561042,
+              -17.393185
+            ],
+            [
+              -66.1560727,
+              -17.3931791
+            ],
+            [
+              -66.1560689,
+              -17.3931981
+            ],
+            [
+              -66.1560484,
+              -17.3933036
+            ],
+            [
+              -66.1560452,
+              -17.3933196
+            ],
+            [
+              -66.1560261,
+              -17.3934177
+            ],
+            [
+              -66.1560146,
+              -17.3934767
+            ],
+            [
+              -66.1560044,
+              -17.393529
+            ],
+            [
+              -66.1559978,
+              -17.3935625
+            ],
+            [
+              -66.155993,
+              -17.3935872
+            ],
+            [
+              -66.1559754,
+              -17.3936773
+            ],
+            [
+              -66.1560015,
+              -17.393682
+            ],
+            [
+              -66.1560881,
+              -17.3936975
+            ],
+            [
+              -66.1561089,
+              -17.3937013
+            ],
+            [
+              -66.1561226,
+              -17.393633
+            ],
+            [
+              -66.1561228,
+              -17.3936318
+            ],
+            [
+              -66.156129,
+              -17.3936006
+            ],
+            [
+              -66.1561361,
+              -17.3935652
+            ],
+            [
+              -66.1561385,
+              -17.3935532
+            ],
+            [
+              -66.1561426,
+              -17.3935329
+            ],
+            [
+              -66.1561765,
+              -17.3933631
+            ],
+            [
+              -66.1561901,
+              -17.3932946
+            ],
+            [
+              -66.1561957,
+              -17.3932667
+            ],
+            [
+              -66.1562081,
+              -17.3932045
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08081007000000000",
+        "rings": [
+          [
+            [
+              -66.1560727,
+              -17.3931791
+            ],
+            [
+              -66.1559533,
+              -17.3931567
+            ],
+            [
+              -66.1558817,
+              -17.3935071
+            ],
+            [
+              -66.1558516,
+              -17.3936552
+            ],
+            [
+              -66.1558798,
+              -17.3936602
+            ],
+            [
+              -66.1559076,
+              -17.3936653
+            ],
+            [
+              -66.1559754,
+              -17.3936773
+            ],
+            [
+              -66.155993,
+              -17.3935872
+            ],
+            [
+              -66.1559978,
+              -17.3935625
+            ],
+            [
+              -66.1560044,
+              -17.393529
+            ],
+            [
+              -66.1560146,
+              -17.3934767
+            ],
+            [
+              -66.1560261,
+              -17.3934177
+            ],
+            [
+              -66.1560452,
+              -17.3933196
+            ],
+            [
+              -66.1560484,
+              -17.3933036
+            ],
+            [
+              -66.1560689,
+              -17.3931981
+            ],
+            [
+              -66.1560727,
+              -17.3931791
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08081008000000000",
+        "rings": [
+          [
+            [
+              -66.1559533,
+              -17.3931567
+            ],
+            [
+              -66.15569,
+              -17.3931073
+            ],
+            [
+              -66.1556414,
+              -17.3933572
+            ],
+            [
+              -66.1556324,
+              -17.3934027
+            ],
+            [
+              -66.1556183,
+              -17.3934751
+            ],
+            [
+              -66.1556152,
+              -17.3934913
+            ],
+            [
+              -66.1556535,
+              -17.393499
+            ],
+            [
+              -66.1556291,
+              -17.3936094
+            ],
+            [
+              -66.1557811,
+              -17.3936406
+            ],
+            [
+              -66.1558516,
+              -17.3936552
+            ],
+            [
+              -66.1558817,
+              -17.3935071
+            ],
+            [
+              -66.1559533,
+              -17.3931567
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08081010000000000",
+        "rings": [
+          [
+            [
+              -66.1554563,
+              -17.3931975
+            ],
+            [
+              -66.1555548,
+              -17.3932132
+            ],
+            [
+              -66.1555814,
+              -17.393087
+            ],
+            [
+              -66.1555876,
+              -17.3930565
+            ],
+            [
+              -66.1554869,
+              -17.3930402
+            ],
+            [
+              -66.1554783,
+              -17.3930402
+            ],
+            [
+              -66.1554663,
+              -17.3930455
+            ],
+            [
+              -66.1554583,
+              -17.3930524
+            ],
+            [
+              -66.1554542,
+              -17.3930588
+            ],
+            [
+              -66.1554284,
+              -17.393193
+            ],
+            [
+              -66.1554563,
+              -17.3931975
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08081022000000000",
+        "rings": [
+          [
+            [
+              -66.155587,
+              -17.3936006
+            ],
+            [
+              -66.1556291,
+              -17.3936094
+            ],
+            [
+              -66.1556535,
+              -17.393499
+            ],
+            [
+              -66.1556152,
+              -17.3934913
+            ],
+            [
+              -66.1556183,
+              -17.3934751
+            ],
+            [
+              -66.1556324,
+              -17.3934027
+            ],
+            [
+              -66.1555372,
+              -17.3933828
+            ],
+            [
+              -66.1555327,
+              -17.3933819
+            ],
+            [
+              -66.155533,
+              -17.39338
+            ],
+            [
+              -66.1555391,
+              -17.3933459
+            ],
+            [
+              -66.1555455,
+              -17.3933101
+            ],
+            [
+              -66.155535,
+              -17.3933075
+            ],
+            [
+              -66.1555548,
+              -17.3932132
+            ],
+            [
+              -66.1554563,
+              -17.3931975
+            ],
+            [
+              -66.1554474,
+              -17.3932433
+            ],
+            [
+              -66.1554224,
+              -17.3933735
+            ],
+            [
+              -66.1554406,
+              -17.3933764
+            ],
+            [
+              -66.1554376,
+              -17.3933909
+            ],
+            [
+              -66.1554711,
+              -17.3933974
+            ],
+            [
+              -66.1554681,
+              -17.3934046
+            ],
+            [
+              -66.1554865,
+              -17.3934089
+            ],
+            [
+              -66.1554817,
+              -17.3934268
+            ],
+            [
+              -66.1554869,
+              -17.3934277
+            ],
+            [
+              -66.1554929,
+              -17.3934289
+            ],
+            [
+              -66.155488,
+              -17.3934497
+            ],
+            [
+              -66.155523,
+              -17.3934563
+            ],
+            [
+              -66.155524,
+              -17.3934565
+            ],
+            [
+              -66.1555236,
+              -17.3934583
+            ],
+            [
+              -66.1555135,
+              -17.3935215
+            ],
+            [
+              -66.1555995,
+              -17.3935382
+            ],
+            [
+              -66.155587,
+              -17.3936006
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08082004000000000",
+        "rings": [
+          [
+            [
+              -66.1552817,
+              -17.3932697
+            ],
+            [
+              -66.1553101,
+              -17.3932763
+            ],
+            [
+              -66.1553117,
+              -17.3932685
+            ],
+            [
+              -66.1553536,
+              -17.3930617
+            ],
+            [
+              -66.1553409,
+              -17.393042
+            ],
+            [
+              -66.1553345,
+              -17.393032
+            ],
+            [
+              -66.1553137,
+              -17.3930285
+            ],
+            [
+              -66.1551955,
+              -17.3930081
+            ],
+            [
+              -66.155183,
+              -17.3930059
+            ],
+            [
+              -66.1551747,
+              -17.3930045
+            ],
+            [
+              -66.1551295,
+              -17.3932314
+            ],
+            [
+              -66.1552829,
+              -17.3932645
+            ],
+            [
+              -66.1552817,
+              -17.3932697
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "07069018000000000",
+        "rings": [
+          [
+            [
+              -66.156795,
+              -17.3919269
+            ],
+            [
+              -66.1567691,
+              -17.3920667
+            ],
+            [
+              -66.1567683,
+              -17.3920841
+            ],
+            [
+              -66.1567739,
+              -17.3920978
+            ],
+            [
+              -66.1567883,
+              -17.3921076
+            ],
+            [
+              -66.1569219,
+              -17.3921311
+            ],
+            [
+              -66.1569396,
+              -17.3920485
+            ],
+            [
+              -66.1569696,
+              -17.3920529
+            ],
+            [
+              -66.1569866,
+              -17.391952
+            ],
+            [
+              -66.1569847,
+              -17.3919517
+            ],
+            [
+              -66.1567964,
+              -17.3919192
+            ],
+            [
+              -66.156795,
+              -17.3919269
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "07081006000000000",
+        "rings": [
+          [
+            [
+              -66.1570686,
+              -17.3925702
+            ],
+            [
+              -66.1570412,
+              -17.3927019
+            ],
+            [
+              -66.1569832,
+              -17.3926902
+            ],
+            [
+              -66.1569657,
+              -17.392789
+            ],
+            [
+              -66.1569605,
+              -17.3928188
+            ],
+            [
+              -66.1569533,
+              -17.3928594
+            ],
+            [
+              -66.1569004,
+              -17.3928496
+            ],
+            [
+              -66.1568937,
+              -17.392883
+            ],
+            [
+              -66.1568814,
+              -17.3929445
+            ],
+            [
+              -66.1568804,
+              -17.3929496
+            ],
+            [
+              -66.1568375,
+              -17.3929417
+            ],
+            [
+              -66.1568292,
+              -17.3929815
+            ],
+            [
+              -66.1568247,
+              -17.3930028
+            ],
+            [
+              -66.1568152,
+              -17.3930483
+            ],
+            [
+              -66.1567968,
+              -17.3931367
+            ],
+            [
+              -66.1567852,
+              -17.3931919
+            ],
+            [
+              -66.1567792,
+              -17.3932206
+            ],
+            [
+              -66.1569809,
+              -17.3932551
+            ],
+            [
+              -66.1569867,
+              -17.3932264
+            ],
+            [
+              -66.1570056,
+              -17.3931331
+            ],
+            [
+              -66.1570273,
+              -17.3930256
+            ],
+            [
+              -66.1570369,
+              -17.3929784
+            ],
+            [
+              -66.1570572,
+              -17.392878
+            ],
+            [
+              -66.1570792,
+              -17.3927695
+            ],
+            [
+              -66.1570904,
+              -17.392714
+            ],
+            [
+              -66.1570909,
+              -17.3927119
+            ],
+            [
+              -66.1570947,
+              -17.3927126
+            ],
+            [
+              -66.1571127,
+              -17.3927161
+            ],
+            [
+              -66.157198,
+              -17.392733
+            ],
+            [
+              -66.1573485,
+              -17.3927628
+            ],
+            [
+              -66.1573647,
+              -17.3926768
+            ],
+            [
+              -66.1573997,
+              -17.3926832
+            ],
+            [
+              -66.1574423,
+              -17.3926911
+            ],
+            [
+              -66.1574883,
+              -17.3926996
+            ],
+            [
+              -66.1575427,
+              -17.3927098
+            ],
+            [
+              -66.1575459,
+              -17.3927104
+            ],
+            [
+              -66.15755,
+              -17.3926872
+            ],
+            [
+              -66.1575518,
+              -17.3926769
+            ],
+            [
+              -66.1575766,
+              -17.3925375
+            ],
+            [
+              -66.1575873,
+              -17.392477
+            ],
+            [
+              -66.1575859,
+              -17.3924767
+            ],
+            [
+              -66.1575853,
+              -17.3924766
+            ],
+            [
+              -66.1571059,
+              -17.3923919
+            ],
+            [
+              -66.1570904,
+              -17.3924657
+            ],
+            [
+              -66.1570773,
+              -17.3925284
+            ],
+            [
+              -66.1570686,
+              -17.3925702
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "07081008000000000",
+        "rings": [
+          [
+            [
+              -66.1567136,
+              -17.392352
+            ],
+            [
+              -66.1568767,
+              -17.3923816
+            ],
+            [
+              -66.1568814,
+              -17.3923523
+            ],
+            [
+              -66.1567465,
+              -17.3923285
+            ],
+            [
+              -66.156734,
+              -17.3923305
+            ],
+            [
+              -66.1567189,
+              -17.39234
+            ],
+            [
+              -66.1567136,
+              -17.392352
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "07081009000000000",
+        "rings": [
+          [
+            [
+              -66.1567095,
+              -17.3923608
+            ],
+            [
+              -66.1566843,
+              -17.3924954
+            ],
+            [
+              -66.1567778,
+              -17.3925096
+            ],
+            [
+              -66.1567906,
+              -17.3924896
+            ],
+            [
+              -66.1567989,
+              -17.3924801
+            ],
+            [
+              -66.1568084,
+              -17.3924759
+            ],
+            [
+              -66.1568162,
+              -17.3924741
+            ],
+            [
+              -66.1568242,
+              -17.3924747
+            ],
+            [
+              -66.1568313,
+              -17.3924782
+            ],
+            [
+              -66.1568383,
+              -17.3924832
+            ],
+            [
+              -66.1568453,
+              -17.3924921
+            ],
+            [
+              -66.1568464,
+              -17.3924942
+            ],
+            [
+              -66.1568509,
+              -17.3925091
+            ],
+            [
+              -66.1568525,
+              -17.3925168
+            ],
+            [
+              -66.1568537,
+              -17.3925235
+            ],
+            [
+              -66.1568548,
+              -17.3925172
+            ],
+            [
+              -66.1568569,
+              -17.3925044
+            ],
+            [
+              -66.1568764,
+              -17.3923835
+            ],
+            [
+              -66.1568767,
+              -17.3923816
+            ],
+            [
+              -66.1567136,
+              -17.392352
+            ],
+            [
+              -66.1567095,
+              -17.3923608
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "07081020000000000",
+        "rings": [
+          [
+            [
+              -66.1568548,
+              -17.3925172
+            ],
+            [
+              -66.1568537,
+              -17.3925235
+            ],
+            [
+              -66.1568525,
+              -17.3925168
+            ],
+            [
+              -66.1568509,
+              -17.3925091
+            ],
+            [
+              -66.1568464,
+              -17.3924942
+            ],
+            [
+              -66.1568453,
+              -17.3924921
+            ],
+            [
+              -66.1568383,
+              -17.3924832
+            ],
+            [
+              -66.1568313,
+              -17.3924782
+            ],
+            [
+              -66.1568242,
+              -17.3924747
+            ],
+            [
+              -66.1568162,
+              -17.3924741
+            ],
+            [
+              -66.1568084,
+              -17.3924759
+            ],
+            [
+              -66.1567989,
+              -17.3924801
+            ],
+            [
+              -66.1567906,
+              -17.3924896
+            ],
+            [
+              -66.1567778,
+              -17.3925096
+            ],
+            [
+              -66.1566843,
+              -17.3924954
+            ],
+            [
+              -66.1566832,
+              -17.3925014
+            ],
+            [
+              -66.1566825,
+              -17.392505
+            ],
+            [
+              -66.156662,
+              -17.392615
+            ],
+            [
+              -66.1566608,
+              -17.3926213
+            ],
+            [
+              -66.1566455,
+              -17.3927029
+            ],
+            [
+              -66.1565617,
+              -17.3931512
+            ],
+            [
+              -66.1565612,
+              -17.3931537
+            ],
+            [
+              -66.1565812,
+              -17.3931867
+            ],
+            [
+              -66.1567163,
+              -17.3932098
+            ],
+            [
+              -66.1567792,
+              -17.3932206
+            ],
+            [
+              -66.1567852,
+              -17.3931919
+            ],
+            [
+              -66.1567968,
+              -17.3931367
+            ],
+            [
+              -66.1568152,
+              -17.3930483
+            ],
+            [
+              -66.1568247,
+              -17.3930028
+            ],
+            [
+              -66.1568292,
+              -17.3929815
+            ],
+            [
+              -66.1568375,
+              -17.3929417
+            ],
+            [
+              -66.1568804,
+              -17.3929496
+            ],
+            [
+              -66.1568814,
+              -17.3929445
+            ],
+            [
+              -66.1568937,
+              -17.392883
+            ],
+            [
+              -66.1569004,
+              -17.3928496
+            ],
+            [
+              -66.1569533,
+              -17.3928594
+            ],
+            [
+              -66.1569605,
+              -17.3928188
+            ],
+            [
+              -66.1569657,
+              -17.392789
+            ],
+            [
+              -66.1569832,
+              -17.3926902
+            ],
+            [
+              -66.1569542,
+              -17.3926844
+            ],
+            [
+              -66.1569342,
+              -17.3926803
+            ],
+            [
+              -66.1569305,
+              -17.3926796
+            ],
+            [
+              -66.1569398,
+              -17.3926349
+            ],
+            [
+              -66.1569417,
+              -17.3926287
+            ],
+            [
+              -66.1569608,
+              -17.3926122
+            ],
+            [
+              -66.1569673,
+              -17.3925992
+            ],
+            [
+              -66.1569701,
+              -17.3925936
+            ],
+            [
+              -66.1569702,
+              -17.3925924
+            ],
+            [
+              -66.15697,
+              -17.3925893
+            ],
+            [
+              -66.1569698,
+              -17.3925748
+            ],
+            [
+              -66.1569671,
+              -17.3925708
+            ],
+            [
+              -66.1569602,
+              -17.3925602
+            ],
+            [
+              -66.1569548,
+              -17.3925571
+            ],
+            [
+              -66.1569468,
+              -17.3925526
+            ],
+            [
+              -66.1569131,
+              -17.3925335
+            ],
+            [
+              -66.1569116,
+              -17.3925327
+            ],
+            [
+              -66.1569253,
+              -17.3924606
+            ],
+            [
+              -66.15693,
+              -17.3924354
+            ],
+            [
+              -66.1568979,
+              -17.3924294
+            ],
+            [
+              -66.1569048,
+              -17.3923918
+            ],
+            [
+              -66.1569111,
+              -17.3923575
+            ],
+            [
+              -66.1568814,
+              -17.3923523
+            ],
+            [
+              -66.1568767,
+              -17.3923816
+            ],
+            [
+              -66.1568764,
+              -17.3923835
+            ],
+            [
+              -66.1568569,
+              -17.3925044
+            ],
+            [
+              -66.1568548,
+              -17.3925172
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08074002100000000",
+        "rings": [
+          [
+            [
+              -66.1562881,
+              -17.3927419
+            ],
+            [
+              -66.1565484,
+              -17.3927825
+            ],
+            [
+              -66.156567,
+              -17.3926767
+            ],
+            [
+              -66.1563074,
+              -17.3926281
+            ],
+            [
+              -66.156175,
+              -17.3926033
+            ],
+            [
+              -66.1561666,
+              -17.3926467
+            ],
+            [
+              -66.1563003,
+              -17.3926703
+            ],
+            [
+              -66.1562881,
+              -17.3927419
+            ]
+          ]
+        ]
+      },
+      {
+        "codigo_catastral": "08081021000000000",
+        "rings": [
+          [
+            [
+              -66.15569,
+              -17.3931073
+            ],
+            [
+              -66.1556198,
+              -17.3930942
+            ],
+            [
+              -66.1555814,
+              -17.393087
+            ],
+            [
+              -66.1555548,
+              -17.3932132
+            ],
+            [
+              -66.155535,
+              -17.3933075
+            ],
+            [
+              -66.1555455,
+              -17.3933101
+            ],
+            [
+              -66.1555391,
+              -17.3933459
+            ],
+            [
+              -66.155533,
+              -17.39338
+            ],
+            [
+              -66.1555327,
+              -17.3933819
+            ],
+            [
+              -66.1555372,
+              -17.3933828
+            ],
+            [
+              -66.1556324,
+              -17.3934027
+            ],
+            [
+              -66.1556414,
+              -17.3933572
+            ],
+            [
+              -66.15569,
+              -17.3931073
+            ]
+          ]
+        ]
+      }
+    ],
+    "exceeded_transfer_limit": false,
+    "arcgis_host": "https://gs.catastrocbba.com"
+  },
+  "asientos": {
+    "enabled": true,
+    "consultados": 3,
+    "con_asientos": 3,
+    "sin_codigo": 0,
+    "errores": 0,
+    "error": null,
+    "db_host": "172.16.67.16"
+  },
+  "img_bbox": [
+    -66.15668535232545,
+    -17.39319740758678,
+    -66.15543007850648,
+    -17.39205839662585
+  ],
+  "img_width": 1280,
+  "img_height": 1280,
+  "predios_geo": [
+    {
+      "codigo_catastral": "08067001000000000",
+      "rings": [
+        [
+          [
+            -66.1566301,
+            -17.3920737
+          ],
+          [
+            -66.1566494,
+            -17.3920769
+          ],
+          [
+            -66.1566632,
+            -17.3920766
+          ],
+          [
+            -66.1566766,
+            -17.3920735
+          ],
+          [
+            -66.1566873,
+            -17.3920639
+          ],
+          [
+            -66.156693,
+            -17.3920512
+          ],
+          [
+            -66.1566965,
+            -17.3920323
+          ],
+          [
+            -66.1566991,
+            -17.3920184
+          ],
+          [
+            -66.1567027,
+            -17.3919988
+          ],
+          [
+            -66.1567133,
+            -17.3919415
+          ],
+          [
+            -66.1567141,
+            -17.3919369
+          ],
+          [
+            -66.1566265,
+            -17.3919262
+          ],
+          [
+            -66.1566129,
+            -17.3919927
+          ],
+          [
+            -66.1565976,
+            -17.3920682
+          ],
+          [
+            -66.1566107,
+            -17.3920705
+          ],
+          [
+            -66.1566301,
+            -17.3920737
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08067014000000000",
+      "rings": [
+        [
+          [
+            -66.1560322,
+            -17.3919652
+          ],
+          [
+            -66.1560475,
+            -17.3919681
+          ],
+          [
+            -66.1560557,
+            -17.3919195
+          ],
+          [
+            -66.1560562,
+            -17.3919161
+          ],
+          [
+            -66.1560632,
+            -17.3918743
+          ],
+          [
+            -66.1560686,
+            -17.3918426
+          ],
+          [
+            -66.1560712,
+            -17.3918267
+          ],
+          [
+            -66.1560735,
+            -17.391813
+          ],
+          [
+            -66.1560781,
+            -17.3917855
+          ],
+          [
+            -66.1560065,
+            -17.3917719
+          ],
+          [
+            -66.1559209,
+            -17.3917557
+          ],
+          [
+            -66.1558666,
+            -17.3917455
+          ],
+          [
+            -66.1558405,
+            -17.3917405
+          ],
+          [
+            -66.1558176,
+            -17.3917362
+          ],
+          [
+            -66.1557592,
+            -17.3917251
+          ],
+          [
+            -66.155727,
+            -17.391908
+          ],
+          [
+            -66.1557675,
+            -17.3919156
+          ],
+          [
+            -66.1558148,
+            -17.3919244
+          ],
+          [
+            -66.1560322,
+            -17.3919652
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08067015000000000",
+      "rings": [
+        [
+          [
+            -66.1561214,
+            -17.391989
+          ],
+          [
+            -66.1562448,
+            -17.3920096
+          ],
+          [
+            -66.1562722,
+            -17.3918623
+          ],
+          [
+            -66.1562805,
+            -17.391818
+          ],
+          [
+            -66.1563118,
+            -17.3916498
+          ],
+          [
+            -66.1563125,
+            -17.391646
+          ],
+          [
+            -66.1563322,
+            -17.3915404
+          ],
+          [
+            -66.1563357,
+            -17.3915217
+          ],
+          [
+            -66.1563486,
+            -17.3914524
+          ],
+          [
+            -66.1562236,
+            -17.3914295
+          ],
+          [
+            -66.1562387,
+            -17.391352
+          ],
+          [
+            -66.1562415,
+            -17.3913372
+          ],
+          [
+            -66.1562425,
+            -17.3913325
+          ],
+          [
+            -66.1562035,
+            -17.3913253
+          ],
+          [
+            -66.1561568,
+            -17.3913168
+          ],
+          [
+            -66.1561537,
+            -17.3913352
+          ],
+          [
+            -66.1561501,
+            -17.3913563
+          ],
+          [
+            -66.1561309,
+            -17.3914711
+          ],
+          [
+            -66.1561298,
+            -17.3914775
+          ],
+          [
+            -66.1561047,
+            -17.3916274
+          ],
+          [
+            -66.1560938,
+            -17.391692
+          ],
+          [
+            -66.1560781,
+            -17.3917855
+          ],
+          [
+            -66.1560735,
+            -17.391813
+          ],
+          [
+            -66.1560712,
+            -17.3918267
+          ],
+          [
+            -66.1560686,
+            -17.3918426
+          ],
+          [
+            -66.1560632,
+            -17.3918743
+          ],
+          [
+            -66.1560562,
+            -17.3919161
+          ],
+          [
+            -66.1560557,
+            -17.3919195
+          ],
+          [
+            -66.1560475,
+            -17.3919681
+          ],
+          [
+            -66.1560461,
+            -17.3919765
+          ],
+          [
+            -66.1560683,
+            -17.3919802
+          ],
+          [
+            -66.1560963,
+            -17.3919849
+          ],
+          [
+            -66.1561214,
+            -17.391989
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08067016000000000",
+      "rings": [
+        [
+          [
+            -66.1563118,
+            -17.3916498
+          ],
+          [
+            -66.1562805,
+            -17.391818
+          ],
+          [
+            -66.1562722,
+            -17.3918623
+          ],
+          [
+            -66.1562448,
+            -17.3920096
+          ],
+          [
+            -66.1564092,
+            -17.3920369
+          ],
+          [
+            -66.1564344,
+            -17.3919028
+          ],
+          [
+            -66.156437,
+            -17.3918896
+          ],
+          [
+            -66.1564441,
+            -17.3918513
+          ],
+          [
+            -66.1564514,
+            -17.3918126
+          ],
+          [
+            -66.1564585,
+            -17.3917746
+          ],
+          [
+            -66.1564689,
+            -17.3917758
+          ],
+          [
+            -66.1564733,
+            -17.3917515
+          ],
+          [
+            -66.1564865,
+            -17.3916798
+          ],
+          [
+            -66.1564776,
+            -17.391678
+          ],
+          [
+            -66.1564334,
+            -17.3916695
+          ],
+          [
+            -66.1564233,
+            -17.3916675
+          ],
+          [
+            -66.1563913,
+            -17.3916613
+          ],
+          [
+            -66.1563624,
+            -17.3916557
+          ],
+          [
+            -66.1563125,
+            -17.391646
+          ],
+          [
+            -66.1563118,
+            -17.3916498
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08067017000000000",
+      "rings": [
+        [
+          [
+            -66.1564943,
+            -17.392051
+          ],
+          [
+            -66.156522,
+            -17.3920557
+          ],
+          [
+            -66.1565345,
+            -17.3920013
+          ],
+          [
+            -66.1565392,
+            -17.3919811
+          ],
+          [
+            -66.1565539,
+            -17.3919173
+          ],
+          [
+            -66.1565055,
+            -17.3919115
+          ],
+          [
+            -66.1565028,
+            -17.3919112
+          ],
+          [
+            -66.1565187,
+            -17.3918257
+          ],
+          [
+            -66.1565117,
+            -17.3918245
+          ],
+          [
+            -66.1565144,
+            -17.3918008
+          ],
+          [
+            -66.1565164,
+            -17.3917834
+          ],
+          [
+            -66.1565018,
+            -17.3917811
+          ],
+          [
+            -66.1564689,
+            -17.3917758
+          ],
+          [
+            -66.1564585,
+            -17.3917746
+          ],
+          [
+            -66.1564514,
+            -17.3918126
+          ],
+          [
+            -66.1564441,
+            -17.3918513
+          ],
+          [
+            -66.156437,
+            -17.3918896
+          ],
+          [
+            -66.1564344,
+            -17.3919028
+          ],
+          [
+            -66.1564092,
+            -17.3920369
+          ],
+          [
+            -66.1564371,
+            -17.3920415
+          ],
+          [
+            -66.1564943,
+            -17.392051
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08067018000000000",
+      "rings": [
+        [
+          [
+            -66.156522,
+            -17.3920557
+          ],
+          [
+            -66.1565976,
+            -17.3920682
+          ],
+          [
+            -66.1566129,
+            -17.3919927
+          ],
+          [
+            -66.1566265,
+            -17.3919262
+          ],
+          [
+            -66.1565539,
+            -17.3919173
+          ],
+          [
+            -66.1565392,
+            -17.3919811
+          ],
+          [
+            -66.1565345,
+            -17.3920013
+          ],
+          [
+            -66.156522,
+            -17.3920557
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08073002100000000",
+      "rings": [
+        [
+          [
+            -66.1565229,
+            -17.3922937
+          ],
+          [
+            -66.1565131,
+            -17.392345
+          ],
+          [
+            -66.156445,
+            -17.3923316
+          ],
+          [
+            -66.1564277,
+            -17.3924269
+          ],
+          [
+            -66.15633,
+            -17.3924088
+          ],
+          [
+            -66.1561765,
+            -17.3923805
+          ],
+          [
+            -66.1561464,
+            -17.3925419
+          ],
+          [
+            -66.1563314,
+            -17.3925717
+          ],
+          [
+            -66.156402,
+            -17.3925831
+          ],
+          [
+            -66.1565784,
+            -17.3926116
+          ],
+          [
+            -66.1566027,
+            -17.392474
+          ],
+          [
+            -66.1566035,
+            -17.3924696
+          ],
+          [
+            -66.1566172,
+            -17.3923919
+          ],
+          [
+            -66.1566248,
+            -17.3923486
+          ],
+          [
+            -66.1566151,
+            -17.3923352
+          ],
+          [
+            -66.156595,
+            -17.3923073
+          ],
+          [
+            -66.1565387,
+            -17.3922965
+          ],
+          [
+            -66.1565279,
+            -17.3922946
+          ],
+          [
+            -66.1565229,
+            -17.3922937
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08073003000000000",
+      "rings": [
+        [
+          [
+            -66.1563562,
+            -17.3922623
+          ],
+          [
+            -66.15633,
+            -17.3924088
+          ],
+          [
+            -66.1564277,
+            -17.3924269
+          ],
+          [
+            -66.156445,
+            -17.3923316
+          ],
+          [
+            -66.1565131,
+            -17.392345
+          ],
+          [
+            -66.1565229,
+            -17.3922937
+          ],
+          [
+            -66.1563644,
+            -17.3922638
+          ],
+          [
+            -66.1563562,
+            -17.3922623
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08073004000000000",
+      "rings": [
+        [
+          [
+            -66.1562143,
+            -17.3922611
+          ],
+          [
+            -66.1561945,
+            -17.3923587
+          ],
+          [
+            -66.1561809,
+            -17.3923564
+          ],
+          [
+            -66.1561765,
+            -17.3923805
+          ],
+          [
+            -66.15633,
+            -17.3924088
+          ],
+          [
+            -66.1563562,
+            -17.3922623
+          ],
+          [
+            -66.1562192,
+            -17.3922365
+          ],
+          [
+            -66.1562181,
+            -17.3922418
+          ],
+          [
+            -66.1562143,
+            -17.3922611
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08074001000000000",
+      "rings": [
+        [
+          [
+            -66.1564451,
+            -17.3931295
+          ],
+          [
+            -66.1564574,
+            -17.3931316
+          ],
+          [
+            -66.15648,
+            -17.3931164
+          ],
+          [
+            -66.1564909,
+            -17.393109
+          ],
+          [
+            -66.1564936,
+            -17.3930937
+          ],
+          [
+            -66.1564967,
+            -17.3930759
+          ],
+          [
+            -66.1565015,
+            -17.3930489
+          ],
+          [
+            -66.1565046,
+            -17.3930311
+          ],
+          [
+            -66.1565093,
+            -17.3930043
+          ],
+          [
+            -66.1565125,
+            -17.3929863
+          ],
+          [
+            -66.1565172,
+            -17.3929595
+          ],
+          [
+            -66.1565204,
+            -17.3929416
+          ],
+          [
+            -66.1565251,
+            -17.3929147
+          ],
+          [
+            -66.1565283,
+            -17.3928968
+          ],
+          [
+            -66.156533,
+            -17.39287
+          ],
+          [
+            -66.1565362,
+            -17.3928521
+          ],
+          [
+            -66.1565409,
+            -17.3928253
+          ],
+          [
+            -66.156544,
+            -17.3928074
+          ],
+          [
+            -66.1565484,
+            -17.3927825
+          ],
+          [
+            -66.1562881,
+            -17.3927419
+          ],
+          [
+            -66.1562601,
+            -17.3929071
+          ],
+          [
+            -66.1562554,
+            -17.3929351
+          ],
+          [
+            -66.1562484,
+            -17.3929765
+          ],
+          [
+            -66.1562288,
+            -17.3930925
+          ],
+          [
+            -66.1562473,
+            -17.3930956
+          ],
+          [
+            -66.1562751,
+            -17.3931004
+          ],
+          [
+            -66.1562937,
+            -17.3931036
+          ],
+          [
+            -66.1563214,
+            -17.3931083
+          ],
+          [
+            -66.1563399,
+            -17.3931115
+          ],
+          [
+            -66.1563678,
+            -17.3931162
+          ],
+          [
+            -66.1563862,
+            -17.3931194
+          ],
+          [
+            -66.156414,
+            -17.3931242
+          ],
+          [
+            -66.1564451,
+            -17.3931295
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08074003000000000",
+      "rings": [
+        [
+          [
+            -66.1555962,
+            -17.3924225
+          ],
+          [
+            -66.1555861,
+            -17.392475
+          ],
+          [
+            -66.1556861,
+            -17.392491
+          ],
+          [
+            -66.1557465,
+            -17.3925007
+          ],
+          [
+            -66.1557548,
+            -17.392502
+          ],
+          [
+            -66.1558401,
+            -17.3925156
+          ],
+          [
+            -66.1558451,
+            -17.3925164
+          ],
+          [
+            -66.1558975,
+            -17.3925248
+          ],
+          [
+            -66.1560742,
+            -17.392553
+          ],
+          [
+            -66.156093,
+            -17.3924756
+          ],
+          [
+            -66.1559769,
+            -17.3924575
+          ],
+          [
+            -66.1559395,
+            -17.3924516
+          ],
+          [
+            -66.1559198,
+            -17.3924486
+          ],
+          [
+            -66.1559221,
+            -17.3924379
+          ],
+          [
+            -66.1559233,
+            -17.3924324
+          ],
+          [
+            -66.1559015,
+            -17.3924285
+          ],
+          [
+            -66.1559068,
+            -17.3924091
+          ],
+          [
+            -66.1558562,
+            -17.3924025
+          ],
+          [
+            -66.1558439,
+            -17.3924009
+          ],
+          [
+            -66.1558436,
+            -17.392403
+          ],
+          [
+            -66.1558405,
+            -17.3924217
+          ],
+          [
+            -66.1558388,
+            -17.3924324
+          ],
+          [
+            -66.155796,
+            -17.3924239
+          ],
+          [
+            -66.1557569,
+            -17.3924161
+          ],
+          [
+            -66.1557668,
+            -17.3923705
+          ],
+          [
+            -66.1557485,
+            -17.3923667
+          ],
+          [
+            -66.1557003,
+            -17.3923567
+          ],
+          [
+            -66.1556124,
+            -17.3923383
+          ],
+          [
+            -66.155601,
+            -17.3923973
+          ],
+          [
+            -66.1555962,
+            -17.3924225
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08074004100000000",
+      "rings": [
+        [
+          [
+            -66.1560563,
+            -17.3922452
+          ],
+          [
+            -66.1560521,
+            -17.3922662
+          ],
+          [
+            -66.1560268,
+            -17.3922614
+          ],
+          [
+            -66.1560183,
+            -17.3923019
+          ],
+          [
+            -66.1561292,
+            -17.3923261
+          ],
+          [
+            -66.156147,
+            -17.3922523
+          ],
+          [
+            -66.1561538,
+            -17.3922242
+          ],
+          [
+            -66.1560737,
+            -17.3922091
+          ],
+          [
+            -66.1560638,
+            -17.3922073
+          ],
+          [
+            -66.1560563,
+            -17.3922452
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08074005000000000",
+      "rings": [
+        [
+          [
+            -66.1560268,
+            -17.3922614
+          ],
+          [
+            -66.1560521,
+            -17.3922662
+          ],
+          [
+            -66.1560563,
+            -17.3922452
+          ],
+          [
+            -66.1560638,
+            -17.3922073
+          ],
+          [
+            -66.1560366,
+            -17.3922021
+          ],
+          [
+            -66.1560274,
+            -17.3922004
+          ],
+          [
+            -66.1559869,
+            -17.3921928
+          ],
+          [
+            -66.1559287,
+            -17.3921818
+          ],
+          [
+            -66.1558936,
+            -17.3921752
+          ],
+          [
+            -66.1558811,
+            -17.3922334
+          ],
+          [
+            -66.1559509,
+            -17.3922468
+          ],
+          [
+            -66.1560154,
+            -17.3922591
+          ],
+          [
+            -66.1560268,
+            -17.3922614
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08074006000000000",
+      "rings": [
+        [
+          [
+            -66.1558335,
+            -17.3922345
+          ],
+          [
+            -66.155879,
+            -17.3922431
+          ],
+          [
+            -66.1558811,
+            -17.3922334
+          ],
+          [
+            -66.1558936,
+            -17.3921752
+          ],
+          [
+            -66.1558417,
+            -17.3921654
+          ],
+          [
+            -66.155682,
+            -17.3921354
+          ],
+          [
+            -66.1556286,
+            -17.3921265
+          ],
+          [
+            -66.1556211,
+            -17.3921601
+          ],
+          [
+            -66.155666,
+            -17.3921686
+          ],
+          [
+            -66.1556601,
+            -17.3922016
+          ],
+          [
+            -66.1558335,
+            -17.3922345
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08074015000000000",
+      "rings": [
+        [
+          [
+            -66.1556152,
+            -17.3921966
+          ],
+          [
+            -66.1555995,
+            -17.3922801
+          ],
+          [
+            -66.1555962,
+            -17.3922978
+          ],
+          [
+            -66.1555945,
+            -17.3923068
+          ],
+          [
+            -66.1555911,
+            -17.3923246
+          ],
+          [
+            -66.1555895,
+            -17.3923335
+          ],
+          [
+            -66.1555975,
+            -17.3923351
+          ],
+          [
+            -66.1556124,
+            -17.3923383
+          ],
+          [
+            -66.1557003,
+            -17.3923567
+          ],
+          [
+            -66.1557485,
+            -17.3923667
+          ],
+          [
+            -66.1557668,
+            -17.3923705
+          ],
+          [
+            -66.1557569,
+            -17.3924161
+          ],
+          [
+            -66.155796,
+            -17.3924239
+          ],
+          [
+            -66.1558388,
+            -17.3924324
+          ],
+          [
+            -66.1558405,
+            -17.3924217
+          ],
+          [
+            -66.1558436,
+            -17.392403
+          ],
+          [
+            -66.1558439,
+            -17.3924009
+          ],
+          [
+            -66.1558562,
+            -17.3924025
+          ],
+          [
+            -66.1559068,
+            -17.3924091
+          ],
+          [
+            -66.1559015,
+            -17.3924285
+          ],
+          [
+            -66.1559233,
+            -17.3924324
+          ],
+          [
+            -66.1559316,
+            -17.3923765
+          ],
+          [
+            -66.1559406,
+            -17.3923163
+          ],
+          [
+            -66.155942,
+            -17.3923072
+          ],
+          [
+            -66.1559509,
+            -17.3922468
+          ],
+          [
+            -66.1558811,
+            -17.3922334
+          ],
+          [
+            -66.155879,
+            -17.3922431
+          ],
+          [
+            -66.1558335,
+            -17.3922345
+          ],
+          [
+            -66.1556601,
+            -17.3922016
+          ],
+          [
+            -66.1556646,
+            -17.3921788
+          ],
+          [
+            -66.155666,
+            -17.3921686
+          ],
+          [
+            -66.1556211,
+            -17.3921601
+          ],
+          [
+            -66.1556202,
+            -17.39217
+          ],
+          [
+            -66.1556199,
+            -17.3921716
+          ],
+          [
+            -66.1556186,
+            -17.3921789
+          ],
+          [
+            -66.1556152,
+            -17.3921966
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08074009000000000",
+      "rings": [
+        [
+          [
+            -66.1555044,
+            -17.3927862
+          ],
+          [
+            -66.1556414,
+            -17.392813
+          ],
+          [
+            -66.1556462,
+            -17.3927894
+          ],
+          [
+            -66.155672,
+            -17.3926639
+          ],
+          [
+            -66.1556566,
+            -17.3926611
+          ],
+          [
+            -66.1555323,
+            -17.3926382
+          ],
+          [
+            -66.1555256,
+            -17.3926737
+          ],
+          [
+            -66.1555223,
+            -17.3926915
+          ],
+          [
+            -66.1555184,
+            -17.3927117
+          ],
+          [
+            -66.1555151,
+            -17.3927295
+          ],
+          [
+            -66.1555101,
+            -17.3927561
+          ],
+          [
+            -66.1555084,
+            -17.392765
+          ],
+          [
+            -66.1555078,
+            -17.3927682
+          ],
+          [
+            -66.1555044,
+            -17.3927862
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08074010000000000",
+      "rings": [
+        [
+          [
+            -66.1555044,
+            -17.3927862
+          ],
+          [
+            -66.1554774,
+            -17.3929305
+          ],
+          [
+            -66.1554822,
+            -17.3929487
+          ],
+          [
+            -66.155486,
+            -17.3929572
+          ],
+          [
+            -66.1554941,
+            -17.3929653
+          ],
+          [
+            -66.1555854,
+            -17.3929823
+          ],
+          [
+            -66.1555972,
+            -17.3929274
+          ],
+          [
+            -66.1556076,
+            -17.3929294
+          ],
+          [
+            -66.1556112,
+            -17.3929126
+          ],
+          [
+            -66.1556206,
+            -17.3929144
+          ],
+          [
+            -66.1556414,
+            -17.392813
+          ],
+          [
+            -66.1555044,
+            -17.3927862
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08074012000000000",
+      "rings": [
+        [
+          [
+            -66.1559831,
+            -17.3930504
+          ],
+          [
+            -66.1559853,
+            -17.3930508
+          ],
+          [
+            -66.1560084,
+            -17.3929187
+          ],
+          [
+            -66.1560126,
+            -17.3928947
+          ],
+          [
+            -66.1560429,
+            -17.3927209
+          ],
+          [
+            -66.156067,
+            -17.3925831
+          ],
+          [
+            -66.1560742,
+            -17.392553
+          ],
+          [
+            -66.1558975,
+            -17.3925248
+          ],
+          [
+            -66.1558451,
+            -17.3925164
+          ],
+          [
+            -66.1558401,
+            -17.3925156
+          ],
+          [
+            -66.1558236,
+            -17.3926234
+          ],
+          [
+            -66.1558108,
+            -17.3927067
+          ],
+          [
+            -66.1557638,
+            -17.3930129
+          ],
+          [
+            -66.1557649,
+            -17.3930131
+          ],
+          [
+            -66.1557927,
+            -17.3930178
+          ],
+          [
+            -66.1558112,
+            -17.393021
+          ],
+          [
+            -66.155839,
+            -17.3930258
+          ],
+          [
+            -66.1558652,
+            -17.3930302
+          ],
+          [
+            -66.1558929,
+            -17.393035
+          ],
+          [
+            -66.155909,
+            -17.3930377
+          ],
+          [
+            -66.1559368,
+            -17.3930425
+          ],
+          [
+            -66.1559552,
+            -17.3930457
+          ],
+          [
+            -66.1559831,
+            -17.3930504
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08074013000000000",
+      "rings": [
+        [
+          [
+            -66.156212,
+            -17.3930896
+          ],
+          [
+            -66.1562288,
+            -17.3930925
+          ],
+          [
+            -66.1562484,
+            -17.3929765
+          ],
+          [
+            -66.1562554,
+            -17.3929351
+          ],
+          [
+            -66.1562601,
+            -17.3929071
+          ],
+          [
+            -66.1562881,
+            -17.3927419
+          ],
+          [
+            -66.1563003,
+            -17.3926703
+          ],
+          [
+            -66.1561666,
+            -17.3926467
+          ],
+          [
+            -66.156175,
+            -17.3926033
+          ],
+          [
+            -66.156067,
+            -17.3925831
+          ],
+          [
+            -66.1560429,
+            -17.3927209
+          ],
+          [
+            -66.1560126,
+            -17.3928947
+          ],
+          [
+            -66.1560084,
+            -17.3929187
+          ],
+          [
+            -66.1559853,
+            -17.3930508
+          ],
+          [
+            -66.1559939,
+            -17.3930523
+          ],
+          [
+            -66.1560216,
+            -17.393057
+          ],
+          [
+            -66.1560401,
+            -17.3930602
+          ],
+          [
+            -66.1560679,
+            -17.3930649
+          ],
+          [
+            -66.1560941,
+            -17.3930694
+          ],
+          [
+            -66.1561219,
+            -17.3930742
+          ],
+          [
+            -66.1561379,
+            -17.3930769
+          ],
+          [
+            -66.1561656,
+            -17.3930816
+          ],
+          [
+            -66.1561842,
+            -17.3930848
+          ],
+          [
+            -66.156212,
+            -17.3930896
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08074017000000000",
+      "rings": [
+        [
+          [
+            -66.155544,
+            -17.3925759
+          ],
+          [
+            -66.1555356,
+            -17.3926204
+          ],
+          [
+            -66.1555323,
+            -17.3926382
+          ],
+          [
+            -66.1556566,
+            -17.3926611
+          ],
+          [
+            -66.155672,
+            -17.3926639
+          ],
+          [
+            -66.1556722,
+            -17.3926627
+          ],
+          [
+            -66.155682,
+            -17.3926148
+          ],
+          [
+            -66.1557253,
+            -17.3926208
+          ],
+          [
+            -66.1557277,
+            -17.3926069
+          ],
+          [
+            -66.1557465,
+            -17.3925007
+          ],
+          [
+            -66.1556861,
+            -17.392491
+          ],
+          [
+            -66.1555861,
+            -17.392475
+          ],
+          [
+            -66.155571,
+            -17.3924727
+          ],
+          [
+            -66.1555636,
+            -17.3924715
+          ],
+          [
+            -66.155544,
+            -17.3925759
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08074018000000000",
+      "rings": [
+        [
+          [
+            -66.1557277,
+            -17.3926069
+          ],
+          [
+            -66.1557253,
+            -17.3926208
+          ],
+          [
+            -66.155682,
+            -17.3926148
+          ],
+          [
+            -66.1556722,
+            -17.3926627
+          ],
+          [
+            -66.155672,
+            -17.3926639
+          ],
+          [
+            -66.1556462,
+            -17.3927894
+          ],
+          [
+            -66.1556414,
+            -17.392813
+          ],
+          [
+            -66.1556206,
+            -17.3929144
+          ],
+          [
+            -66.1556112,
+            -17.3929126
+          ],
+          [
+            -66.1556076,
+            -17.3929294
+          ],
+          [
+            -66.1555972,
+            -17.3929274
+          ],
+          [
+            -66.1555854,
+            -17.3929823
+          ],
+          [
+            -66.1557638,
+            -17.3930129
+          ],
+          [
+            -66.1558108,
+            -17.3927067
+          ],
+          [
+            -66.1558236,
+            -17.3926234
+          ],
+          [
+            -66.1558401,
+            -17.3925156
+          ],
+          [
+            -66.1557548,
+            -17.392502
+          ],
+          [
+            -66.1557465,
+            -17.3925007
+          ],
+          [
+            -66.1557277,
+            -17.3926069
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08074016000000000",
+      "rings": [
+        [
+          [
+            -66.1559769,
+            -17.3924575
+          ],
+          [
+            -66.156093,
+            -17.3924756
+          ],
+          [
+            -66.1561048,
+            -17.3924267
+          ],
+          [
+            -66.1561124,
+            -17.3923952
+          ],
+          [
+            -66.156126,
+            -17.3923392
+          ],
+          [
+            -66.1561292,
+            -17.3923261
+          ],
+          [
+            -66.1560183,
+            -17.3923019
+          ],
+          [
+            -66.1560268,
+            -17.3922614
+          ],
+          [
+            -66.1560154,
+            -17.3922591
+          ],
+          [
+            -66.1559509,
+            -17.3922468
+          ],
+          [
+            -66.155942,
+            -17.3923072
+          ],
+          [
+            -66.1559406,
+            -17.3923163
+          ],
+          [
+            -66.1559316,
+            -17.3923765
+          ],
+          [
+            -66.1559233,
+            -17.3924324
+          ],
+          [
+            -66.1559221,
+            -17.3924379
+          ],
+          [
+            -66.1559198,
+            -17.3924486
+          ],
+          [
+            -66.1559395,
+            -17.3924516
+          ],
+          [
+            -66.1559769,
+            -17.3924575
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08075001000000000",
+      "rings": [
+        [
+          [
+            -66.1547778,
+            -17.3920334
+          ],
+          [
+            -66.1547635,
+            -17.3921012
+          ],
+          [
+            -66.1547526,
+            -17.3921523
+          ],
+          [
+            -66.1547288,
+            -17.3922651
+          ],
+          [
+            -66.1547184,
+            -17.3923145
+          ],
+          [
+            -66.1547183,
+            -17.3923149
+          ],
+          [
+            -66.1546869,
+            -17.3924573
+          ],
+          [
+            -66.1546858,
+            -17.3924616
+          ],
+          [
+            -66.1546636,
+            -17.3924574
+          ],
+          [
+            -66.1546556,
+            -17.3924981
+          ],
+          [
+            -66.1546369,
+            -17.3925913
+          ],
+          [
+            -66.1546858,
+            -17.3925995
+          ],
+          [
+            -66.1546865,
+            -17.3925996
+          ],
+          [
+            -66.154758,
+            -17.3926115
+          ],
+          [
+            -66.154816,
+            -17.3926213
+          ],
+          [
+            -66.1547975,
+            -17.3927103
+          ],
+          [
+            -66.1547712,
+            -17.392836
+          ],
+          [
+            -66.1547791,
+            -17.3928374
+          ],
+          [
+            -66.1551643,
+            -17.3929087
+          ],
+          [
+            -66.1551827,
+            -17.3929122
+          ],
+          [
+            -66.1553355,
+            -17.3929405
+          ],
+          [
+            -66.1553569,
+            -17.3928128
+          ],
+          [
+            -66.1553754,
+            -17.3927022
+          ],
+          [
+            -66.1553909,
+            -17.3927044
+          ],
+          [
+            -66.1553929,
+            -17.3926905
+          ],
+          [
+            -66.1554007,
+            -17.3926394
+          ],
+          [
+            -66.1554323,
+            -17.3926442
+          ],
+          [
+            -66.1555165,
+            -17.3922069
+          ],
+          [
+            -66.155467,
+            -17.3921988
+          ],
+          [
+            -66.1553141,
+            -17.3921739
+          ],
+          [
+            -66.1553306,
+            -17.3920782
+          ],
+          [
+            -66.1551716,
+            -17.3920489
+          ],
+          [
+            -66.1551696,
+            -17.3920485
+          ],
+          [
+            -66.1551629,
+            -17.3920772
+          ],
+          [
+            -66.1551562,
+            -17.3921055
+          ],
+          [
+            -66.1550103,
+            -17.3920783
+          ],
+          [
+            -66.1550085,
+            -17.3920779
+          ],
+          [
+            -66.1547778,
+            -17.3920334
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08075002000000000",
+      "rings": [
+        [
+          [
+            -66.155467,
+            -17.3921988
+          ],
+          [
+            -66.1555165,
+            -17.3922069
+          ],
+          [
+            -66.1555334,
+            -17.3921339
+          ],
+          [
+            -66.1555337,
+            -17.3921293
+          ],
+          [
+            -66.1555328,
+            -17.3921251
+          ],
+          [
+            -66.1555306,
+            -17.3921204
+          ],
+          [
+            -66.1555277,
+            -17.3921167
+          ],
+          [
+            -66.1555227,
+            -17.3921134
+          ],
+          [
+            -66.1555175,
+            -17.3921116
+          ],
+          [
+            -66.1555104,
+            -17.3921107
+          ],
+          [
+            -66.1554917,
+            -17.392108
+          ],
+          [
+            -66.1554845,
+            -17.3921067
+          ],
+          [
+            -66.1553973,
+            -17.3920906
+          ],
+          [
+            -66.1553386,
+            -17.3920797
+          ],
+          [
+            -66.1553306,
+            -17.3920782
+          ],
+          [
+            -66.1553141,
+            -17.3921739
+          ],
+          [
+            -66.155467,
+            -17.3921988
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08081005000000000",
+      "rings": [
+        [
+          [
+            -66.1564657,
+            -17.3933948
+          ],
+          [
+            -66.1564841,
+            -17.3933021
+          ],
+          [
+            -66.1564849,
+            -17.3932942
+          ],
+          [
+            -66.1564843,
+            -17.3932864
+          ],
+          [
+            -66.1564823,
+            -17.3932788
+          ],
+          [
+            -66.156479,
+            -17.3932716
+          ],
+          [
+            -66.1564744,
+            -17.3932651
+          ],
+          [
+            -66.1564687,
+            -17.3932595
+          ],
+          [
+            -66.1564621,
+            -17.3932549
+          ],
+          [
+            -66.1564547,
+            -17.3932514
+          ],
+          [
+            -66.1564469,
+            -17.3932493
+          ],
+          [
+            -66.1562081,
+            -17.3932045
+          ],
+          [
+            -66.1561957,
+            -17.3932667
+          ],
+          [
+            -66.1561901,
+            -17.3932946
+          ],
+          [
+            -66.1561765,
+            -17.3933631
+          ],
+          [
+            -66.1562988,
+            -17.3933857
+          ],
+          [
+            -66.1563211,
+            -17.3933898
+          ],
+          [
+            -66.1563852,
+            -17.3934017
+          ],
+          [
+            -66.1563891,
+            -17.3933813
+          ],
+          [
+            -66.1564407,
+            -17.3933904
+          ],
+          [
+            -66.1564657,
+            -17.3933948
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08081006000000000",
+      "rings": [
+        [
+          [
+            -66.1562081,
+            -17.3932045
+          ],
+          [
+            -66.1561042,
+            -17.393185
+          ],
+          [
+            -66.1560727,
+            -17.3931791
+          ],
+          [
+            -66.1560689,
+            -17.3931981
+          ],
+          [
+            -66.1560484,
+            -17.3933036
+          ],
+          [
+            -66.1560452,
+            -17.3933196
+          ],
+          [
+            -66.1560261,
+            -17.3934177
+          ],
+          [
+            -66.1560146,
+            -17.3934767
+          ],
+          [
+            -66.1560044,
+            -17.393529
+          ],
+          [
+            -66.1559978,
+            -17.3935625
+          ],
+          [
+            -66.155993,
+            -17.3935872
+          ],
+          [
+            -66.1559754,
+            -17.3936773
+          ],
+          [
+            -66.1560015,
+            -17.393682
+          ],
+          [
+            -66.1560881,
+            -17.3936975
+          ],
+          [
+            -66.1561089,
+            -17.3937013
+          ],
+          [
+            -66.1561226,
+            -17.393633
+          ],
+          [
+            -66.1561228,
+            -17.3936318
+          ],
+          [
+            -66.156129,
+            -17.3936006
+          ],
+          [
+            -66.1561361,
+            -17.3935652
+          ],
+          [
+            -66.1561385,
+            -17.3935532
+          ],
+          [
+            -66.1561426,
+            -17.3935329
+          ],
+          [
+            -66.1561765,
+            -17.3933631
+          ],
+          [
+            -66.1561901,
+            -17.3932946
+          ],
+          [
+            -66.1561957,
+            -17.3932667
+          ],
+          [
+            -66.1562081,
+            -17.3932045
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08081007000000000",
+      "rings": [
+        [
+          [
+            -66.1560727,
+            -17.3931791
+          ],
+          [
+            -66.1559533,
+            -17.3931567
+          ],
+          [
+            -66.1558817,
+            -17.3935071
+          ],
+          [
+            -66.1558516,
+            -17.3936552
+          ],
+          [
+            -66.1558798,
+            -17.3936602
+          ],
+          [
+            -66.1559076,
+            -17.3936653
+          ],
+          [
+            -66.1559754,
+            -17.3936773
+          ],
+          [
+            -66.155993,
+            -17.3935872
+          ],
+          [
+            -66.1559978,
+            -17.3935625
+          ],
+          [
+            -66.1560044,
+            -17.393529
+          ],
+          [
+            -66.1560146,
+            -17.3934767
+          ],
+          [
+            -66.1560261,
+            -17.3934177
+          ],
+          [
+            -66.1560452,
+            -17.3933196
+          ],
+          [
+            -66.1560484,
+            -17.3933036
+          ],
+          [
+            -66.1560689,
+            -17.3931981
+          ],
+          [
+            -66.1560727,
+            -17.3931791
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08081008000000000",
+      "rings": [
+        [
+          [
+            -66.1559533,
+            -17.3931567
+          ],
+          [
+            -66.15569,
+            -17.3931073
+          ],
+          [
+            -66.1556414,
+            -17.3933572
+          ],
+          [
+            -66.1556324,
+            -17.3934027
+          ],
+          [
+            -66.1556183,
+            -17.3934751
+          ],
+          [
+            -66.1556152,
+            -17.3934913
+          ],
+          [
+            -66.1556535,
+            -17.393499
+          ],
+          [
+            -66.1556291,
+            -17.3936094
+          ],
+          [
+            -66.1557811,
+            -17.3936406
+          ],
+          [
+            -66.1558516,
+            -17.3936552
+          ],
+          [
+            -66.1558817,
+            -17.3935071
+          ],
+          [
+            -66.1559533,
+            -17.3931567
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08081010000000000",
+      "rings": [
+        [
+          [
+            -66.1554563,
+            -17.3931975
+          ],
+          [
+            -66.1555548,
+            -17.3932132
+          ],
+          [
+            -66.1555814,
+            -17.393087
+          ],
+          [
+            -66.1555876,
+            -17.3930565
+          ],
+          [
+            -66.1554869,
+            -17.3930402
+          ],
+          [
+            -66.1554783,
+            -17.3930402
+          ],
+          [
+            -66.1554663,
+            -17.3930455
+          ],
+          [
+            -66.1554583,
+            -17.3930524
+          ],
+          [
+            -66.1554542,
+            -17.3930588
+          ],
+          [
+            -66.1554284,
+            -17.393193
+          ],
+          [
+            -66.1554563,
+            -17.3931975
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08081022000000000",
+      "rings": [
+        [
+          [
+            -66.155587,
+            -17.3936006
+          ],
+          [
+            -66.1556291,
+            -17.3936094
+          ],
+          [
+            -66.1556535,
+            -17.393499
+          ],
+          [
+            -66.1556152,
+            -17.3934913
+          ],
+          [
+            -66.1556183,
+            -17.3934751
+          ],
+          [
+            -66.1556324,
+            -17.3934027
+          ],
+          [
+            -66.1555372,
+            -17.3933828
+          ],
+          [
+            -66.1555327,
+            -17.3933819
+          ],
+          [
+            -66.155533,
+            -17.39338
+          ],
+          [
+            -66.1555391,
+            -17.3933459
+          ],
+          [
+            -66.1555455,
+            -17.3933101
+          ],
+          [
+            -66.155535,
+            -17.3933075
+          ],
+          [
+            -66.1555548,
+            -17.3932132
+          ],
+          [
+            -66.1554563,
+            -17.3931975
+          ],
+          [
+            -66.1554474,
+            -17.3932433
+          ],
+          [
+            -66.1554224,
+            -17.3933735
+          ],
+          [
+            -66.1554406,
+            -17.3933764
+          ],
+          [
+            -66.1554376,
+            -17.3933909
+          ],
+          [
+            -66.1554711,
+            -17.3933974
+          ],
+          [
+            -66.1554681,
+            -17.3934046
+          ],
+          [
+            -66.1554865,
+            -17.3934089
+          ],
+          [
+            -66.1554817,
+            -17.3934268
+          ],
+          [
+            -66.1554869,
+            -17.3934277
+          ],
+          [
+            -66.1554929,
+            -17.3934289
+          ],
+          [
+            -66.155488,
+            -17.3934497
+          ],
+          [
+            -66.155523,
+            -17.3934563
+          ],
+          [
+            -66.155524,
+            -17.3934565
+          ],
+          [
+            -66.1555236,
+            -17.3934583
+          ],
+          [
+            -66.1555135,
+            -17.3935215
+          ],
+          [
+            -66.1555995,
+            -17.3935382
+          ],
+          [
+            -66.155587,
+            -17.3936006
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08082004000000000",
+      "rings": [
+        [
+          [
+            -66.1552817,
+            -17.3932697
+          ],
+          [
+            -66.1553101,
+            -17.3932763
+          ],
+          [
+            -66.1553117,
+            -17.3932685
+          ],
+          [
+            -66.1553536,
+            -17.3930617
+          ],
+          [
+            -66.1553409,
+            -17.393042
+          ],
+          [
+            -66.1553345,
+            -17.393032
+          ],
+          [
+            -66.1553137,
+            -17.3930285
+          ],
+          [
+            -66.1551955,
+            -17.3930081
+          ],
+          [
+            -66.155183,
+            -17.3930059
+          ],
+          [
+            -66.1551747,
+            -17.3930045
+          ],
+          [
+            -66.1551295,
+            -17.3932314
+          ],
+          [
+            -66.1552829,
+            -17.3932645
+          ],
+          [
+            -66.1552817,
+            -17.3932697
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "07069018000000000",
+      "rings": [
+        [
+          [
+            -66.156795,
+            -17.3919269
+          ],
+          [
+            -66.1567691,
+            -17.3920667
+          ],
+          [
+            -66.1567683,
+            -17.3920841
+          ],
+          [
+            -66.1567739,
+            -17.3920978
+          ],
+          [
+            -66.1567883,
+            -17.3921076
+          ],
+          [
+            -66.1569219,
+            -17.3921311
+          ],
+          [
+            -66.1569396,
+            -17.3920485
+          ],
+          [
+            -66.1569696,
+            -17.3920529
+          ],
+          [
+            -66.1569866,
+            -17.391952
+          ],
+          [
+            -66.1569847,
+            -17.3919517
+          ],
+          [
+            -66.1567964,
+            -17.3919192
+          ],
+          [
+            -66.156795,
+            -17.3919269
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "07081006000000000",
+      "rings": [
+        [
+          [
+            -66.1570686,
+            -17.3925702
+          ],
+          [
+            -66.1570412,
+            -17.3927019
+          ],
+          [
+            -66.1569832,
+            -17.3926902
+          ],
+          [
+            -66.1569657,
+            -17.392789
+          ],
+          [
+            -66.1569605,
+            -17.3928188
+          ],
+          [
+            -66.1569533,
+            -17.3928594
+          ],
+          [
+            -66.1569004,
+            -17.3928496
+          ],
+          [
+            -66.1568937,
+            -17.392883
+          ],
+          [
+            -66.1568814,
+            -17.3929445
+          ],
+          [
+            -66.1568804,
+            -17.3929496
+          ],
+          [
+            -66.1568375,
+            -17.3929417
+          ],
+          [
+            -66.1568292,
+            -17.3929815
+          ],
+          [
+            -66.1568247,
+            -17.3930028
+          ],
+          [
+            -66.1568152,
+            -17.3930483
+          ],
+          [
+            -66.1567968,
+            -17.3931367
+          ],
+          [
+            -66.1567852,
+            -17.3931919
+          ],
+          [
+            -66.1567792,
+            -17.3932206
+          ],
+          [
+            -66.1569809,
+            -17.3932551
+          ],
+          [
+            -66.1569867,
+            -17.3932264
+          ],
+          [
+            -66.1570056,
+            -17.3931331
+          ],
+          [
+            -66.1570273,
+            -17.3930256
+          ],
+          [
+            -66.1570369,
+            -17.3929784
+          ],
+          [
+            -66.1570572,
+            -17.392878
+          ],
+          [
+            -66.1570792,
+            -17.3927695
+          ],
+          [
+            -66.1570904,
+            -17.392714
+          ],
+          [
+            -66.1570909,
+            -17.3927119
+          ],
+          [
+            -66.1570947,
+            -17.3927126
+          ],
+          [
+            -66.1571127,
+            -17.3927161
+          ],
+          [
+            -66.157198,
+            -17.392733
+          ],
+          [
+            -66.1573485,
+            -17.3927628
+          ],
+          [
+            -66.1573647,
+            -17.3926768
+          ],
+          [
+            -66.1573997,
+            -17.3926832
+          ],
+          [
+            -66.1574423,
+            -17.3926911
+          ],
+          [
+            -66.1574883,
+            -17.3926996
+          ],
+          [
+            -66.1575427,
+            -17.3927098
+          ],
+          [
+            -66.1575459,
+            -17.3927104
+          ],
+          [
+            -66.15755,
+            -17.3926872
+          ],
+          [
+            -66.1575518,
+            -17.3926769
+          ],
+          [
+            -66.1575766,
+            -17.3925375
+          ],
+          [
+            -66.1575873,
+            -17.392477
+          ],
+          [
+            -66.1575859,
+            -17.3924767
+          ],
+          [
+            -66.1575853,
+            -17.3924766
+          ],
+          [
+            -66.1571059,
+            -17.3923919
+          ],
+          [
+            -66.1570904,
+            -17.3924657
+          ],
+          [
+            -66.1570773,
+            -17.3925284
+          ],
+          [
+            -66.1570686,
+            -17.3925702
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "07081008000000000",
+      "rings": [
+        [
+          [
+            -66.1567136,
+            -17.392352
+          ],
+          [
+            -66.1568767,
+            -17.3923816
+          ],
+          [
+            -66.1568814,
+            -17.3923523
+          ],
+          [
+            -66.1567465,
+            -17.3923285
+          ],
+          [
+            -66.156734,
+            -17.3923305
+          ],
+          [
+            -66.1567189,
+            -17.39234
+          ],
+          [
+            -66.1567136,
+            -17.392352
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "07081009000000000",
+      "rings": [
+        [
+          [
+            -66.1567095,
+            -17.3923608
+          ],
+          [
+            -66.1566843,
+            -17.3924954
+          ],
+          [
+            -66.1567778,
+            -17.3925096
+          ],
+          [
+            -66.1567906,
+            -17.3924896
+          ],
+          [
+            -66.1567989,
+            -17.3924801
+          ],
+          [
+            -66.1568084,
+            -17.3924759
+          ],
+          [
+            -66.1568162,
+            -17.3924741
+          ],
+          [
+            -66.1568242,
+            -17.3924747
+          ],
+          [
+            -66.1568313,
+            -17.3924782
+          ],
+          [
+            -66.1568383,
+            -17.3924832
+          ],
+          [
+            -66.1568453,
+            -17.3924921
+          ],
+          [
+            -66.1568464,
+            -17.3924942
+          ],
+          [
+            -66.1568509,
+            -17.3925091
+          ],
+          [
+            -66.1568525,
+            -17.3925168
+          ],
+          [
+            -66.1568537,
+            -17.3925235
+          ],
+          [
+            -66.1568548,
+            -17.3925172
+          ],
+          [
+            -66.1568569,
+            -17.3925044
+          ],
+          [
+            -66.1568764,
+            -17.3923835
+          ],
+          [
+            -66.1568767,
+            -17.3923816
+          ],
+          [
+            -66.1567136,
+            -17.392352
+          ],
+          [
+            -66.1567095,
+            -17.3923608
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "07081020000000000",
+      "rings": [
+        [
+          [
+            -66.1568548,
+            -17.3925172
+          ],
+          [
+            -66.1568537,
+            -17.3925235
+          ],
+          [
+            -66.1568525,
+            -17.3925168
+          ],
+          [
+            -66.1568509,
+            -17.3925091
+          ],
+          [
+            -66.1568464,
+            -17.3924942
+          ],
+          [
+            -66.1568453,
+            -17.3924921
+          ],
+          [
+            -66.1568383,
+            -17.3924832
+          ],
+          [
+            -66.1568313,
+            -17.3924782
+          ],
+          [
+            -66.1568242,
+            -17.3924747
+          ],
+          [
+            -66.1568162,
+            -17.3924741
+          ],
+          [
+            -66.1568084,
+            -17.3924759
+          ],
+          [
+            -66.1567989,
+            -17.3924801
+          ],
+          [
+            -66.1567906,
+            -17.3924896
+          ],
+          [
+            -66.1567778,
+            -17.3925096
+          ],
+          [
+            -66.1566843,
+            -17.3924954
+          ],
+          [
+            -66.1566832,
+            -17.3925014
+          ],
+          [
+            -66.1566825,
+            -17.392505
+          ],
+          [
+            -66.156662,
+            -17.392615
+          ],
+          [
+            -66.1566608,
+            -17.3926213
+          ],
+          [
+            -66.1566455,
+            -17.3927029
+          ],
+          [
+            -66.1565617,
+            -17.3931512
+          ],
+          [
+            -66.1565612,
+            -17.3931537
+          ],
+          [
+            -66.1565812,
+            -17.3931867
+          ],
+          [
+            -66.1567163,
+            -17.3932098
+          ],
+          [
+            -66.1567792,
+            -17.3932206
+          ],
+          [
+            -66.1567852,
+            -17.3931919
+          ],
+          [
+            -66.1567968,
+            -17.3931367
+          ],
+          [
+            -66.1568152,
+            -17.3930483
+          ],
+          [
+            -66.1568247,
+            -17.3930028
+          ],
+          [
+            -66.1568292,
+            -17.3929815
+          ],
+          [
+            -66.1568375,
+            -17.3929417
+          ],
+          [
+            -66.1568804,
+            -17.3929496
+          ],
+          [
+            -66.1568814,
+            -17.3929445
+          ],
+          [
+            -66.1568937,
+            -17.392883
+          ],
+          [
+            -66.1569004,
+            -17.3928496
+          ],
+          [
+            -66.1569533,
+            -17.3928594
+          ],
+          [
+            -66.1569605,
+            -17.3928188
+          ],
+          [
+            -66.1569657,
+            -17.392789
+          ],
+          [
+            -66.1569832,
+            -17.3926902
+          ],
+          [
+            -66.1569542,
+            -17.3926844
+          ],
+          [
+            -66.1569342,
+            -17.3926803
+          ],
+          [
+            -66.1569305,
+            -17.3926796
+          ],
+          [
+            -66.1569398,
+            -17.3926349
+          ],
+          [
+            -66.1569417,
+            -17.3926287
+          ],
+          [
+            -66.1569608,
+            -17.3926122
+          ],
+          [
+            -66.1569673,
+            -17.3925992
+          ],
+          [
+            -66.1569701,
+            -17.3925936
+          ],
+          [
+            -66.1569702,
+            -17.3925924
+          ],
+          [
+            -66.15697,
+            -17.3925893
+          ],
+          [
+            -66.1569698,
+            -17.3925748
+          ],
+          [
+            -66.1569671,
+            -17.3925708
+          ],
+          [
+            -66.1569602,
+            -17.3925602
+          ],
+          [
+            -66.1569548,
+            -17.3925571
+          ],
+          [
+            -66.1569468,
+            -17.3925526
+          ],
+          [
+            -66.1569131,
+            -17.3925335
+          ],
+          [
+            -66.1569116,
+            -17.3925327
+          ],
+          [
+            -66.1569253,
+            -17.3924606
+          ],
+          [
+            -66.15693,
+            -17.3924354
+          ],
+          [
+            -66.1568979,
+            -17.3924294
+          ],
+          [
+            -66.1569048,
+            -17.3923918
+          ],
+          [
+            -66.1569111,
+            -17.3923575
+          ],
+          [
+            -66.1568814,
+            -17.3923523
+          ],
+          [
+            -66.1568767,
+            -17.3923816
+          ],
+          [
+            -66.1568764,
+            -17.3923835
+          ],
+          [
+            -66.1568569,
+            -17.3925044
+          ],
+          [
+            -66.1568548,
+            -17.3925172
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08074002100000000",
+      "rings": [
+        [
+          [
+            -66.1562881,
+            -17.3927419
+          ],
+          [
+            -66.1565484,
+            -17.3927825
+          ],
+          [
+            -66.156567,
+            -17.3926767
+          ],
+          [
+            -66.1563074,
+            -17.3926281
+          ],
+          [
+            -66.156175,
+            -17.3926033
+          ],
+          [
+            -66.1561666,
+            -17.3926467
+          ],
+          [
+            -66.1563003,
+            -17.3926703
+          ],
+          [
+            -66.1562881,
+            -17.3927419
+          ]
+        ]
+      ]
+    },
+    {
+      "codigo_catastral": "08081021000000000",
+      "rings": [
+        [
+          [
+            -66.15569,
+            -17.3931073
+          ],
+          [
+            -66.1556198,
+            -17.3930942
+          ],
+          [
+            -66.1555814,
+            -17.393087
+          ],
+          [
+            -66.1555548,
+            -17.3932132
+          ],
+          [
+            -66.155535,
+            -17.3933075
+          ],
+          [
+            -66.1555455,
+            -17.3933101
+          ],
+          [
+            -66.1555391,
+            -17.3933459
+          ],
+          [
+            -66.155533,
+            -17.39338
+          ],
+          [
+            -66.1555327,
+            -17.3933819
+          ],
+          [
+            -66.1555372,
+            -17.3933828
+          ],
+          [
+            -66.1556324,
+            -17.3934027
+          ],
+          [
+            -66.1556414,
+            -17.3933572
+          ],
+          [
+            -66.15569,
+            -17.3931073
+          ]
+        ]
+      ]
+    }
+  ],
+  "leyenda": {
+    "verde": "NUEVA: construcción que aparece en el año B y no estaba en A",
+    "rojo": "ELIMINADA: construcción que estaba en A y ya no aparece en B",
+    "amarillo": "CAMBIO: existe en ambos años pero cambió huella/área",
+    "prob": "score operativo 0–100 (BTC + diferencia radiométrica)",
+    "como_leer": "Compare panel 1 (A) vs 2 (B). El panel 3 pinta solo candidatos. El % es score operativo, no certeza legal. Validar en zoom A|B.",
+    "paneles": {
+      "1": "Periodo A alineado (referencia / antes)",
+      "2": "Periodo B alineado sobre A (después)",
+      "3": "Resultado: recuadros coloreados = cambios detectados",
+      "align_check": "Tablero A|B: cuadros alternos de ambos años; si no coinciden calles/techos, alineación débil"
+    }
+  },
+  "nota_prob": "Overlay y conteos solo incluyen alertas con prob_pct ≥ 70.0. prob combina confianza BTC y diff_score.",
+  "selection_polygon": [
+    [
+      -66.15668535232545,
+      -17.39227596106527
+    ],
+    [
+      -66.15560710430147,
+      -17.39205839662585
+    ],
+    [
+      -66.15543007850648,
+      -17.39299776123437
+    ],
+    [
+      -66.15651100873949,
+      -17.39319740758678
+    ],
+    [
+      -66.15668535232545,
+      -17.39227596106527
+    ]
+  ],
+  "selection_filter": {
+    "vertices": 4,
+    "excluded_outside": 0,
+    "kept": 3,
+    "excluded_items": []
+  },
+  "rechazos": [],
+  "resumen_confiabilidad": {
+    "align_level": "good",
+    "ecc_cc": 0.823,
+    "residual_m": 0.233,
+    "residual_px": 2.24,
+    "gsd_m": 0.1042,
+    "min_prob_pct": 70.0,
+    "deteccion_automatica_fiable": true,
+    "n_confirmadas": 3,
+    "n_revisar_manual": 0,
+    "n_rechazadas_prob": 0,
+    "n_rechazadas_poligono": 0,
+    "n_rechazadas_total": 0,
+    "mensaje_usuario": "Alineación buena (residual≈0.23 m, cc=0.823). Detecciones fiables con revisión habitual."
+  },
+  "n_confirmadas": 3,
+  "n_revisar_manual": 0,
+  "needs_manual_align": false,
+  "view_geometry": {
+    "level": "warn",
+    "warned": true,
+    "score_a": 0.4427,
+    "score_b": 0.3473,
+    "mismatch": false,
+    "message": "Advertencia: posibles indicios de oblicuidad en A. Valide visualmente techos vs fachadas en el chequeo A|B.",
+    "thresholds": {
+      "warn": 0.36,
+      "high": 0.48,
+      "mismatch_delta": 0.18
+    },
+    "detail_a": {
+      "score": 0.4427,
+      "vertical_edge_ratio": 0.5085,
+      "vertical_line_ratio": 0.4729,
+      "edge_density": 0.0975
+    },
+    "detail_b": {
+      "score": 0.3473,
+      "vertical_edge_ratio": 0.4689,
+      "vertical_line_ratio": 0.4217,
+      "edge_density": 0.0702
+    }
+  },
+  "view_geometry_warned": true,
+  "wms": {
+    "ref": {
+      "year": 2022,
+      "service": "imagen2022",
+      "host": "https://gs.catastrocbba.com",
+      "url": "https://gs.catastrocbba.com/arcgis/services/imagenes/imagen2022/MapServer/WMSServer?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=0&STYLES=&CRS=CRS%3A84&BBOX=-66.15668535232545%2C-17.39319740758678%2C-66.15543007850648%2C-17.39205839662585&WIDTH=1280&HEIGHT=1280&FORMAT=image%2Fpng&TRANSPARENT=false",
+      "bbox": [
+        -66.15668535232545,
+        -17.39319740758678,
+        -66.15543007850648,
+        -17.39205839662585
+      ],
+      "width": 1280,
+      "height": 1280,
+      "crs": "CRS:84",
+      "bytes": 1752542,
+      "path": "/usr/src/catastro_deteccion_construcciones/outputs/api/changes_wms_20260916_231304_e0a1b875/ref.png",
+      "source": "arcgis_wms"
+    },
+    "mov": {
+      "year": 2023,
+      "service": "imagen2023_500",
+      "host": "https://gs.catastrocbba.com",
+      "url": "https://gs.catastrocbba.com/arcgis/services/imagenes/imagen2023_500/MapServer/WMSServer?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=0&STYLES=&CRS=CRS%3A84&BBOX=-66.15668535232545%2C-17.39319740758678%2C-66.15543007850648%2C-17.39205839662585&WIDTH=1280&HEIGHT=1280&FORMAT=image%2Fpng&TRANSPARENT=false",
+      "bbox": [
+        -66.15668535232545,
+        -17.39319740758678,
+        -66.15543007850648,
+        -17.39205839662585
+      ],
+      "width": 1280,
+      "height": 1280,
+      "crs": "CRS:84",
+      "bytes": 1483541,
+      "path": "/usr/src/catastro_deteccion_construcciones/outputs/api/changes_wms_20260916_231304_e0a1b875/mov.png",
+      "source": "arcgis_wms"
+    }
+  },
+  "resolution": {
+    "mode": "single",
+    "target_gsd_m": 0.3,
+    "width_m": 133.3,
+    "height_m": 126.8,
+    "width": 1280,
+    "height": 1280,
+    "effective_gsd_m": 0.104,
+    "n_tiles": 1,
+    "tiles": [
+      {
+        "index": 0,
+        "row": 0,
+        "col": 0,
+        "bbox": [
+          -66.15668535232545,
+          -17.39319740758678,
+          -66.15543007850648,
+          -17.39205839662585
+        ],
+        "width": 1280,
+        "height": 1280,
+        "gsd_m": 0.10417822977675509
+      }
+    ],
+    "min_area_px": 1382,
+    "max_cent_dist_px": 240.0,
+    "note": "Area 133x127 m (1.69 ha) -> 1280x1280 px (GSD efectivo 0.10 m/px; objetivo 0.30). Dentro del tope de alineacion (~260 m / 6.71 ha).",
+    "area_m2": 16907.8,
+    "max_align_span_m": 260.0,
+    "max_align_area_m2": 67106.0,
+    "tiled_for_alignment": false
+  },
+  "resolution_policy": {
+    "map_zoom_ignored": true,
+    "same_size_both_years": true,
+    "forced_auto_resolution": true,
+    "target_gsd_m": 0.3,
+    "max_align_span_m": 260.0,
+    "max_align_area_m2": 67106.0,
+    "tiled_for_alignment": false,
+    "n_tiles": 1,
+    "message": "Deteccion a maxima nitidez en A y B; el zoom del mapa solo define el bbox. Areas >~260 m / ~6.71 ha se parten en tiles para alineacion confiable."
+  }
+}

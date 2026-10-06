@@ -10,9 +10,19 @@ from pathlib import Path
 
 from app.domains.folios.domain.entities.ocr_block import OcrBlock
 from app.domains.folios.domain.services.header_parser import _parse_surface, parse_header
-from app.domains.folios.domain.services.layout import detect_rotation, plan_regions, transform_blocks
+from app.domains.folios.domain.services.layout import (
+    detect_rotation,
+    find_page_number,
+    plan_regions,
+    transform_blocks,
+)
 from app.domains.folios.domain.services.text import strip_filler
-from app.domains.folios.domain.services.titularidad_parser import ColumnLine, current_owners, parse_titularidad
+from app.domains.folios.domain.services.titularidad_parser import (
+    ColumnLine,
+    _asiento_number,
+    current_owners,
+    parse_titularidad,
+)
 
 FIXTURE = Path(__file__).parent / "fixtures" / "folio_2_paginas_ocr.json"
 
@@ -32,8 +42,7 @@ class TestOrientation(unittest.TestCase):
         self.assertLess(abs(detect_rotation(_blocks(page["blocks_page"]))), 2)
 
     def test_page_scanned_sideways_is_detected(self):
-        # Turn the upright boxes 90° clockwise (what the sample scan looked like):
-        # (x, y) -> (H - y, x). Undoing it needs +90° counter-clockwise.
+        # Turn the upright boxes 90° clockwise (what the sample scan looked like): (x, y) -> (H - y, x).
         page = load_pages()[1]
         height = page["size"][1]
         cw = ((0.0, -1.0, float(height)), (1.0, 0.0, 0.0))
@@ -123,6 +132,63 @@ class TestHeaderParser(unittest.TestCase):
         self.assertEqual(self.result.observations, [])
         self.assertTrue(all(v is not None for v in self.result.confidence.values()))
 
+
+class TestHeaderParserOcrNoise(unittest.TestCase):
+    """Boxes taken from a real Cochabamba folio whose OCR came back noisier than
+    the fixture's: one parenthesis eaten and the sideways left margin read as a
+    block of its own."""
+
+    WIDTH = 1212
+
+    def setUp(self):
+        self.blocks = _blocks(
+            [
+                {"text": "CERCADO,PRIMERA,CIUDADCBBA", "confidence": 0.95, "box": [223, 209, 446, 227]},
+                {"text": "CATASTRO:", "confidence": 0.98, "box": [616, 212, 684, 226]},
+                {"text": "MATRiCULAN", "confidence": 0.96, "box": [101, 220, 208, 239]},
+                {"text": "3.01.1.99.0022305", "confidence": 0.94, "box": [226, 238, 407, 255]},
+                {"text": "VIGENTE", "confidence": 0.99, "box": [424, 238, 519, 255]},
+                {"text": "(Lote de Terreno", "confidence": 0.95, "box": [255, 282, 391, 294]},
+                {"text": "UBICACION:", "confidence": 0.99, "box": [140, 285, 202, 299]},
+                {"text": "ZONA LACUADRAS,AVENIDA9DE ABRIL", "confidence": 0.96, "box": [223, 301, 508, 313]},
+                {"text": "PROPIEDAD:", "confidence": 0.98, "box": [905, 324, 981, 336]},
+                {"text": "INDEFINIDA", "confidence": 0.97, "box": [966, 334, 1054, 349]},
+                # The vertical "Dirección Administrativa y Financiera" of the margin.
+                {"text": "strativa y", "confidence": 0.97, "box": [54, 404, 67, 478]},
+                {"text": "LINDEROS:", "confidence": 0.99, "box": [139, 407, 199, 420]},
+                {"text": "S.:AVENIDA9 DE ABRIL", "confidence": 0.94, "box": [757, 410, 934, 429]},
+                {"text": "N.:LOTE N106", "confidence": 0.88, "box": [192, 414, 302, 430]},
+                {"text": "E.:LOTE N107", "confidence": 0.89, "box": [191, 430, 301, 448]},
+                {"text": "O.:MARIAANTONIETASILES", "confidence": 0.96, "box": [759, 430, 951, 446]},
+            ]
+        )
+        self.data = parse_header(self.blocks, self.WIDTH).data
+
+    def test_property_kind_with_one_parenthesis_eaten(self):
+        self.assertEqual(self.data["tipo_inmueble"], "Lote de Terreno")
+
+    def test_property_kind_does_not_leak_into_ubicacion(self):
+        self.assertEqual(self.data["ubicacion"], "ZONA LACUADRAS,AVENIDA9DE ABRIL")
+
+    def test_sideways_margin_is_not_taken_as_a_lindero_continuation(self):
+        self.assertEqual(self.data["linderos"]["norte"], "LOTE N106")
+
+
+class TestPageNumber(unittest.TestCase):
+    def test_reads_the_footer_however_the_ocr_mangles_it(self):
+        for text, expected in (
+            ("Pag 1 de 2", (1, 2)),
+            ("Pag.1 de 4", (1, 4)),
+            ("Paq1Je4", (1, 4)),  # small footer type, real capture
+            ("PAGINA 2 DE 3", (2, 3)),
+        ):
+            with self.subTest(text=text):
+                block = OcrBlock(text, 0.9, 0, 0, 100, 12)
+                self.assertEqual(find_page_number([block]), expected)
+
+    def test_unrelated_text_is_not_a_page_number(self):
+        self.assertEqual(find_page_number([OcrBlock("FOLIO REAL", 0.9, 0, 0, 100, 12)]), (None, None))
+
     def test_surface_number_formats(self):
         self.assertEqual(_parse_surface("****280.00 Metros 2"), (280.0, "m2"))
         self.assertEqual(_parse_surface("1.250,50 Metros 2"), (1250.5, "m2"))
@@ -183,9 +249,6 @@ class TestTitularidadParser(unittest.TestCase):
         self.assertNotIn("numero_inferido", r["asientos"][1])
 
     def test_low_resolution_ocr_variants(self):
-        # What the OCR returned for a ~1000 px wide photo of the sample folio
-        # (names anonymized): digits of 'Asiento Numero' lost, glued words,
-        # 'Vendedor(es):' without colon, the 'CI' of the CI line lost.
         r = parse_titularidad(self._lines(
             "Asiento-Numeco:",
             "Vendedorles",
@@ -208,6 +271,43 @@ class TestTitularidadParser(unittest.TestCase):
         self.assertEqual(a1["acto"], "CompraVente")
         self.assertEqual(a1["documento"]["fecha"], "12/10/1992")
         self.assertEqual(a1["presentacion"], {"numero": "89304", "fecha": "27/10/2014", "hora": "11:24:56"})
+
+    def test_asiento_header_clipped_by_the_crop(self):
+        """Real capture: the crop ate the leading 'A' and the OCR read 'N' as 'M'."""
+        r = parse_titularidad(self._lines("sientoMumero:0", "ANZE GUZMAN VILMA LUZ", "SANCHEZ TERRAZAS JUAN RAUL"))
+        self.assertEqual([a["numero"] for a in r["asientos"]], [0])
+        self.assertEqual(
+            [p["nombre"] for p in r["asientos"][0]["personas"]],
+            ["ANZE GUZMAN VILMA LUZ", "SANCHEZ TERRAZAS JUAN RAUL"],
+        )
+        self.assertEqual(r["lineas_sin_asiento"], [])
+
+    def test_asiento_header_variants(self):
+        for text, expected in (
+            ("Asiento Numero: 2------", 2),
+            ("ASIENTONUNERO0", 0),          # one letter misread
+            ("sientoMumero:0", 0),          # leading letter clipped by the crop
+            ("Asiento Numero:", None),      # digit lost: inferred later, not read here
+            ("Ultimo Asiento Nro. 1", None),
+            ("SANCHEZ TERRAZAS JUAN RAUL", None),
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(_asiento_number(text), expected)
+
+    def test_married_name_particle_is_part_of_the_name(self):
+        """'APELLIDO NOMBRE de' is how the form prints a married woman: the only
+        lower-case tail a typed name has."""
+        r = parse_titularidad(self._lines(
+            "Asiento Numero: 5",
+            "RONDAL BORDA MARGARITA de-------",
+            "VASQUEZ CALLE VARGAS GIOVANA PATRICIA de",
+            "Boliviano(a)-----",
+            "Sub-Inscripcion de Titularidad de Dominio---",
+        ))
+        self.assertEqual(
+            [p["nombre"] for p in r["asientos"][0]["personas"]],
+            ["RONDAL BORDA MARGARITA de", "VASQUEZ CALLE VARGAS GIOVANA PATRICIA de"],
+        )
 
     def test_numbers_counted_back_from_last_declared(self):
         r = parse_titularidad(self._lines(

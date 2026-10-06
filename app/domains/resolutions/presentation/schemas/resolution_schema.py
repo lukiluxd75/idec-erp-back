@@ -14,10 +14,23 @@ class PageOut(BaseModel):
 
 class PlanPageOut(BaseModel):
     """Metadata for one floor-plan page (see .../plan-pages). The image is
-    fetched separately as a blob, same as PageOut."""
+    fetched separately as a blob, same as PageOut.
+
+    `plantas`: todas las plantas de la hoja (varias en un plano tipo);
+    `planta`: la primera ("" mientras no tenga), para clientes viejos.
+    `planta_status`: manual | detectando | detectada | sin_titulo | error."""
     order_index: int
     planta: str
+    plantas: List[str] = Field(default_factory=list)
+    planta_status: str = "manual"
+    planta_title: Optional[str] = None
+    planta_detection: Optional[Dict[str, Any]] = None
     source: str
+
+
+class SetPlanPagePlantasRequest(BaseModel):
+    """Body of PUT .../plan-pages/{order_index}/plantas: corrección a mano desde la web."""
+    plantas: List[str]
 
 
 class ResolutionListItem(BaseModel):

@@ -3,7 +3,10 @@ from typing import List
 
 from fastapi import APIRouter, Depends, File, Response, UploadFile, WebSocket, WebSocketDisconnect, status
 
+from app.core.database.connection import get_db
 from app.core.errors.exceptions import DomainException
+from app.core.presence import CHANNEL_GEOEXTRACTION, SqlPresenceStore
+from app.core.presence.socket import SocketPresence
 from app.domains.geoextraction.application.use_cases import (
     CreateCaptureUseCase,
     DiscardCaptureUseCase,
@@ -23,6 +26,7 @@ from app.domains.geoextraction.presentation.deps import (
     get_capture_image_use_case,
 )
 from app.domains.geoextraction.presentation.schemas.capture_schema import CaptureListItem
+from sqlalchemy.orm import Session
 from app.domains.security.contracts import UserProfile, get_current_user, verify_token
 
 logger = logging.getLogger("uvicorn.error")
@@ -87,15 +91,24 @@ async def discard_capture(
 
 @router.get("/presence")
 def get_presence(
-    manager: CapturesConnectionManager = Depends(get_connection_manager),
+    db: Session = Depends(get_db),
     user: UserProfile = Depends(get_current_user),
 ):
     """Polled every few seconds by useCapturasUpdates.js to keep
-    PhoneConnectedBadge accurate without touching the long-lived WS: the push
-    on /ws only reaches sockets already registered on the SAME worker, so a
-    REST call (naturally load-balanced across workers per request) is the
-    reliable way to catch up when the phone's socket landed elsewhere."""
-    return {"mobile_connected": manager.is_mobile_connected(user.sub)}
+    PhoneConnectedBadge accurate.
+
+    Se enciende tanto si la app movil tiene sesion abierta (CHANNEL_SESSION,
+    que dura toda la sesion) como si hay un socket vivo de este modulo -- ver
+    SqlPresenceStore.is_phone_connected.
+
+    Answered from the shared presence store (app/core/presence), not from this
+    worker's socket registry. That was the bug: the phone's socket lives on ONE
+    of the four workers while this endpoint is load-balanced per request, so
+    three polls out of four used to answer "not connected" and the badge
+    alternated every 3 seconds forever. Postgres is shared by the four
+    processes, so now every one of them answers the same.
+    """
+    return {"mobile_connected": SqlPresenceStore(db).is_phone_connected(user.sub, CHANNEL_GEOEXTRACTION)}
 
 
 @router.websocket("/ws")
@@ -124,12 +137,16 @@ async def captures_ws(
         return
 
     is_mobile = is_digid_app_user_agent(websocket.headers.get("user-agent", ""))
+
+    presence = SocketPresence(user.sub, CHANNEL_GEOEXTRACTION, is_mobile)
+    await presence.start()
     await manager.connect(websocket, user.sub, is_mobile)
     try:
         while True:
-            # Client sends nothing on this socket: only used for server -> browser
-            # notify. receive_text() detects disconnect (WebSocketDisconnect)
-            # without busy-waiting.
+            # Client sends nothing on this socket: only used for server -> browser notify.
             await websocket.receive_text()
     except WebSocketDisconnect:
+        pass
+    finally:
+        await presence.stop()
         await manager.disconnect(websocket)

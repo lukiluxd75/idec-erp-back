@@ -10,8 +10,6 @@ DIGITIZATION = "digitization"
 @dataclass(frozen=True)
 class StoppedWork:
     host: str
-    # Which domain was using the PC: "digitization" for a job from this queue,
-    # otherwise the one that borrowed it ("folios", "chatbot"...).
     used_by: str
     job_id: Optional[str] = None
 

@@ -1,70 +1,11 @@
-"""
-Single place that knows every ERP domain and assembles them into the application
-(see CLAUDE.md §3). To add a domain: register its router here — do not touch other
-domains. If a domain fails to import, it is skipped with a warning instead of
-crashing the whole app.
-"""
+import importlib.util
 import logging
-from fastapi import APIRouter
+import pkgutil
+import app.domains as domains_pkg
 
-logger = logging.getLogger("uvicorn.error")
+logger = logging.getLogger(__name__)
 
-api_router = APIRouter()
-
-try:
-    from app.domains.security.presentation.router import router as security_router
-    api_router.include_router(security_router)
-except Exception as exc:
-    logger.warning("Could not load domain 'security': %s", exc)
-
-try:
-    from app.domains.geoextraction.presentation.router import router as geoextraction_router
-    api_router.include_router(geoextraction_router, prefix="/geoextraction")
-except Exception as exc:
-    logger.warning("Could not load domain 'geoextraction': %s", exc)
-
-try:
-    from app.domains.detection.presentation.router import router as detection_router
-    api_router.include_router(detection_router, prefix="/detection")
-except Exception as exc:
-    logger.warning("Could not load domain 'detection': %s", exc)
-
-try:
-    from app.domains.resolutions.presentation.router import router as resolutions_router
-    api_router.include_router(resolutions_router)
-except Exception as exc:
-    logger.warning("Could not load domain 'resolutions': %s", exc)
-
-try:
-    from app.domains.chatbot.presentation.router import router as chatbot_router
-    api_router.include_router(chatbot_router)
-except Exception as exc:
-    logger.warning("Could not load domain 'chatbot': %s", exc)
-
-try:
-    from app.domains.folios.presentation.router import router as folios_router
-    api_router.include_router(folios_router)
-except Exception as exc:
-    logger.warning("Could not load domain 'folios': %s", exc)
-
-try:
-    from app.domains.appraisal_review.presentation.router import router as appraisal_review_router
-    api_router.include_router(appraisal_review_router, prefix="/appraisal-review")
-except Exception as exc:
-    logger.warning("Could not load domain 'appraisal_review': %s", exc)
-
-try:
-    from app.domains.templates.presentation.router import router as templates_router
-    api_router.include_router(templates_router)
-except Exception as exc:
-    logger.warning("Could not load domain 'templates': %s", exc)
-
-try:
-    from app.domains.digitization.presentation.router import router as digitization_router
-    api_router.include_router(digitization_router, prefix="/digitization")
-except Exception as exc:
-    logger.warning("Could not load domain 'digitization': %s", exc)
-
+# --- Registro de routers (ambos dominios integrados) ---
 try:
     from app.domains.folder_analysis.presentation.router import router as folder_analysis_router
     api_router.include_router(folder_analysis_router, prefix="/folder-analysis")
@@ -76,3 +17,21 @@ try:
     api_router.include_router(cite_router)
 except Exception as exc:
     logger.warning("Could not load domain 'cite': %s", exc)
+
+
+# --- Función de descubrimiento automático de dominios ---
+def discover_domains():
+    known = set(registered_domains())
+    found = []
+    for module in pkgutil.iter_modules(domains_pkg.__path__):
+        if not module.ispkg or module.name in known:
+            continue
+        router_path = f"app.domains.{module.name}.presentation.router"
+        try:
+            spec = importlib.util.find_spec(router_path)
+        except (ImportError, AttributeError, ValueError):
+            # find_spec imports parent packages, so a domain whose __init__ is broken raises here.
+            continue
+        if spec is not None:
+            found.append(module.name)
+    return tuple(found)

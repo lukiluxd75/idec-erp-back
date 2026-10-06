@@ -21,6 +21,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.engine import Engine
@@ -60,10 +61,14 @@ class DocumentModel(FolderAnalysisBase):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_sub = Column(String(64), nullable=False)
     doc_type = Column(String(20), nullable=False)
+    # Bajo qué tipo de carpeta se clasificó.
+    folder_type = Column(String(40))
     status = Column(String(20), nullable=False)
     extracted_data = deferred(Column(JSONB))
     reviewed_data = deferred(Column(JSONB))
     error = Column(Text)
+    # En qué anda la lectura ahora mismo (ReadingStage), mientras dura.
+    stage = Column(String(20))
     analyzed_at = Column(DateTime(timezone=True))
     reviewed_at = Column(DateTime(timezone=True))
     created_at, updated_at = _timestamps()
@@ -73,6 +78,15 @@ class DocumentModel(FolderAnalysisBase):
         back_populates="document",
         cascade="all, delete-orphan",
         order_by="DocumentPageModel.page_index",
+        lazy="selectin",
+    )
+
+    # Which carpeta holds it, read off the row that files it.
+    folder_item = relationship(
+        "RegisteredFolderItemModel",
+        back_populates="document",
+        uselist=False,
+        viewonly=True,
         lazy="selectin",
     )
 
@@ -97,7 +111,174 @@ class DocumentPageModel(FolderAnalysisBase):
     __table_args__ = (UniqueConstraint("document_id", "page_index"),)
 
 
+class ReviewedFolioModel(FolderAnalysisBase):
+    __tablename__ = "reviewed_folios"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id = Column(UUID(as_uuid=True), ForeignKey(f"{SCHEMA}.documents.id", ondelete="CASCADE"), nullable=False, unique=True)
+    user_sub = Column(String(64), nullable=False)
+    registration_number = Column(Text)
+    registration_status = Column(Text)
+    administrative_location = Column(Text)
+    cadastre = Column(Text)
+    property_type = Column(Text)
+    location = Column(Text)
+    designation = Column(Text)
+    surface = Column(Text)
+    measures = Column(Text)
+    boundaries = Column(JSONB, nullable=False, default=dict)
+    property_description = Column(Text)
+    prior_title = Column(Text)
+    document_date = Column(Text)
+    page_number = Column(Integer)
+    page_total = Column(Integer)
+    ownership_entries = Column(JSONB, nullable=False, default=list)
+    reviewed_data = Column(JSONB, nullable=False)
+    reviewed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at, updated_at = _timestamps()
+
+
+class ReviewedTaxReceiptModel(FolderAnalysisBase):
+    __tablename__ = "reviewed_tax_receipts"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id = Column(UUID(as_uuid=True), ForeignKey(f"{SCHEMA}.documents.id", ondelete="CASCADE"), nullable=False, unique=True)
+    user_sub = Column(String(64), nullable=False)
+    receipt_type = Column(Text)
+    receipt_number = Column(Text)
+    municipality = Column(Text)
+    paid_at = Column(Text)
+    collecting_entity = Column(Text)
+    correspondent = Column(Text)
+    branch = Column(Text)
+    agency = Column(Text)
+    cashier = Column(Text)
+    folio = Column(Text)
+    concept = Column(Text)
+    tax_year = Column(Integer)
+    taxpayer_type = Column(Text)
+    taxpayer_id_number = Column(Text)
+    taxpayer_name = Column(Text)
+    property_number = Column(Text)
+    cadastral_code = Column(Text)
+    property_class = Column(Text)
+    ownership_type = Column(Text)
+    location = Column(Text)
+    land_area = Column(Text)
+    built_area = Column(Text)
+    age_factor = Column(Text)
+    ufv = Column(Text)
+    taxable_base = Column(Text)
+    assessed_tax = Column(Text)
+    exemption = Column(Text)
+    discount_10 = Column(Text)
+    discount_app_5 = Column(Text)
+    amount_due = Column(Text)
+    amount_paid = Column(Text)
+    balance = Column(Text)
+    reviewed_data = Column(JSONB, nullable=False)
+    reviewed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at, updated_at = _timestamps()
+
+
+class ReviewedPlanModel(FolderAnalysisBase):
+    __tablename__ = "reviewed_plans"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id = Column(UUID(as_uuid=True), ForeignKey(f"{SCHEMA}.documents.id", ondelete="CASCADE"), nullable=False, unique=True)
+    user_sub = Column(String(64), nullable=False)
+    plan_name = Column(Text)
+    plan_type = Column(Text)
+    address = Column(Text)
+    cadastral_code = Column(Text)
+    scale = Column(Text)
+    plan_date = Column(Text)
+    extracted_data = Column(JSONB, nullable=False, default=dict)
+    reviewed_data = Column(JSONB, nullable=False)
+    reviewed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at, updated_at = _timestamps()
+
+
+class RegisteredFolderModel(FolderAnalysisBase):
+    """A project's folder. The unique index is on `lower(name)` so the list never
+    shows two carpetas the architect cannot tell apart."""
+
+    __tablename__ = "registered_folders"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_sub = Column(String(64), nullable=False)
+    name = Column(String(120), nullable=False)
+    notes = Column(Text)
+    # Which kind of carpeta this is (domain/folder_types.py): what documents it holds and what its own sheet asks for.
+    folder_type = Column(String(40), nullable=False, server_default=text("'general'"))
+    # The carpeta's own sheet, keyed by the field keys of its kind.
+    data = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    created_at, updated_at = _timestamps()
+
+    items = relationship(
+        "RegisteredFolderItemModel",
+        back_populates="folder",
+        cascade="all, delete-orphan",
+        order_by="RegisteredFolderItemModel.position",
+        lazy="selectin",
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_folder_analysis_registered_folders_user_name",
+            "user_sub",
+            text("lower(name)"),
+            unique=True,
+        ),
+        Index("ix_folder_analysis_registered_folders_user", "user_sub", "name"),
+    )
+
+
+class RegisteredFolderItemModel(FolderAnalysisBase):
+    """One reviewed document filed in a carpeta. `document_id` is unique across
+    the table, not only inside the carpeta: a document is filed once, the way the
+    paper it came from sits in a single folder. Deleting the document (which
+    returns its photos to the inbox) takes its row with it."""
+
+    __tablename__ = "registered_folder_items"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    folder_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.registered_folders.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    document_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.documents.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    position = Column(Integer, nullable=False)
+    created_at, updated_at = _timestamps()
+
+    folder = relationship("RegisteredFolderModel", back_populates="items")
+    document = relationship("DocumentModel", back_populates="folder_item", viewonly=True)
+
+    __table_args__ = (UniqueConstraint("folder_id", "position"),)
+
+
+# Columns added to tables that already existed in deployed databases.
+_ADDED_COLUMNS = {
+    "documents": ("folder_type VARCHAR(40)", "stage VARCHAR(20)"),
+    "registered_folders": (
+        "folder_type VARCHAR(40) NOT NULL DEFAULT 'general'",
+        "data JSONB NOT NULL DEFAULT '{}'::jsonb",
+    ),
+}
+
+
 def create_schema_and_tables(engine: Engine) -> None:
     with engine.begin() as conn:
         conn.execute(CreateSchema(SCHEMA, if_not_exists=True))
     FolderAnalysisBase.metadata.create_all(bind=engine)
+    with engine.begin() as conn:
+        conn.execute(text("SET LOCAL lock_timeout = '5s'"))
+        for table, columns in _ADDED_COLUMNS.items():
+            for column in columns:
+                conn.execute(text(f"ALTER TABLE {SCHEMA}.{table} ADD COLUMN IF NOT EXISTS {column}"))
