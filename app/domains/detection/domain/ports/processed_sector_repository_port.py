@@ -86,16 +86,22 @@ class ProcessedSectorRepositoryPort(ABC):
 
     @abstractmethod
     def list_report_rows(
-        self, campaign_id: Optional[int] = None, unassigned_only: bool = False
+        self,
+        campaign_id: Optional[int] = None,
+        unassigned_only: bool = False,
+        all_campaigns: bool = False,
     ) -> List[AffectedParcelReportRow]:
         """Confirmed/rejected affected_parcel rows (never pending) across every
         processed_sector of ONE campaign -- or of sectors with no campaign at
         all when unassigned_only and no campaign_id, mirroring
         ListProcessedSectorsUseCase's own scoping. Backs the "Exportar" report
-        button: always scoped to whatever campaign is active in the UI, never
-        a global export across campaigns (the engineer's call -- campaigns
-        exist precisely to keep a fixed year pair, so mixing them in one
-        report would mix year comparisons too)."""
+        button, whose modal defaults to whatever campaign is active in the
+        UI but lets the architect pick a different one -- or pass
+        `all_campaigns=True` (ignores campaign_id/unassigned_only) to list
+        every confirmed/rejected parcel regardless of campaign, so the report
+        shows which campaign each sector/detection belongs to. Each row keeps
+        its own campaign_code, so this is an audit listing, not a rollup that
+        would mix year_a/year_b comparisons across campaigns."""
 
     @abstractmethod
     def record_manual_alignment(
