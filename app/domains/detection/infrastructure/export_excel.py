@@ -69,7 +69,7 @@ def build_campaign_report_excel(rows: List[AffectedParcelReportRow], campaign_la
         sheet.set_column(i, i, w)
 
     last_col = len(HEADERS) - 1
-    sheet.merge_range(0, 0, 0, last_col, "Detección de construcciones — Reporte de predios", title)
+    sheet.merge_range(0, 0, 0, last_col, "Detección de construcciones - Reporte de predios", title)
     sheet.merge_range(1, 0, 1, last_col, campaign_label, subtitle)
 
     header_row = 3
@@ -87,7 +87,7 @@ def build_campaign_report_excel(rows: List[AffectedParcelReportRow], campaign_la
         sheet.write(excel_row, 4, change_detail_label(row), cell)
         sheet.write(excel_row, 5, VALIDATION_STATUS_LABEL.get(row.validation_status, row.validation_status), cell)
         sheet.write(excel_row, 6, row.rejection_comment or "", cell)
-        sheet.write(excel_row, 7, f"{row.year_a} → {row.year_b}", cell)
+        sheet.write(excel_row, 7, f"{row.year_a} - {row.year_b}", cell)
         sheet.write(excel_row, 8, row.campaign_code or "", cell)
         if row.probability_pct is not None:
             sheet.write_number(excel_row, 9, row.probability_pct, num)

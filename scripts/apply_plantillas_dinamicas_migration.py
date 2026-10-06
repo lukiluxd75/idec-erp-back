@@ -29,10 +29,10 @@ def main() -> None:
         existing = conn.execute(
             text(
                 "SELECT schema_name FROM information_schema.schemata "
-                "WHERE schema_name = 'plantillas_dinamicas'"
+                "WHERE schema_name = 'templates'"
             )
         ).fetchone()
-        print(f"Schema 'plantillas_dinamicas' exists before running migration: {bool(existing)}")
+        print(f"Schema 'templates' exists before running migration: {bool(existing)}")
 
     sql_path = ROOT / "database" / "plantillas_dinamicas_postgresql.sql"
     sql_text = sql_path.read_text(encoding="utf-8")
@@ -50,10 +50,10 @@ def main() -> None:
         tables = conn.execute(
             text(
                 "SELECT table_name FROM information_schema.tables "
-                "WHERE table_schema = 'plantillas_dinamicas' ORDER BY table_name"
+                "WHERE table_schema = 'templates' ORDER BY table_name"
             )
         ).fetchall()
-        print("Tables now in plantillas_dinamicas schema:")
+        print("Tables now in templates schema:")
         for (t,) in tables:
             print(" -", t)
 
