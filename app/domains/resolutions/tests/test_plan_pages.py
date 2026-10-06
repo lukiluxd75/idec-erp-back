@@ -414,5 +414,112 @@ class DeteccionPorMosaicosTest(unittest.TestCase):
         self.assertEqual(page.plantas, [])
 
 
+class TitulosDeLosFormatos2y3Test(unittest.TestCase):
+    """Lecturas reales del OCR sobre los planos del formato 2 (titulo al pie, en
+    letra de dibujante) y del formato 3 (titulo grande, terraza sin 'PLANTA')."""
+
+    def test_titulos_leidos_por_el_ocr_real(self):
+        casos = {
+            ".PLANTABAJA...": ["PLANTA BAJA"],
+            "...PLANTA1°PISO...": _pisos(1),
+            "...PLANTA2°PISO..": _pisos(2),
+            ".PLANTA3PISO.": _pisos(3),
+            "PLANTA4PISO": _pisos(4),
+            ".PLANTA5PISO..": _pisos(5),
+            "..PLANTA 6PISO": _pisos(6),
+            "PLANTA 6PIS": _pisos(6),  # el OCR corta la O final
+            "TERRAZA": ["PLANTA TERRAZA"],
+            "PLANTA TERRAZA": ["PLANTA TERRAZA"],
+            "PLANTA11 PISO": _pisos(11),
+            "PLANTA 7° PISO": _pisos(7),
+        }
+        for texto, plantas in casos.items():
+            with self.subTest(texto):
+                self.assertEqual(plantas_de_titulo(texto), plantas)
+
+    def test_cubierta_no_es_una_planta(self):
+        self.assertIsNone(plantas_de_titulo("PLANO DE CUBIERTA BLOQUE II"))
+        self.assertIsNone(plantas_de_titulo("CUBIERTA CALAMINA SOBRE ESTRUCTURA METALICA"))
+
+    def test_trozos_de_titulo_cortado(self):
+        from app.domains.resolutions.domain.plan_title import parece_trozo_de_titulo
+
+        for texto in ("PLANTA 6", "PLANTA3F", "6°PIS0", "PLANT"):
+            with self.subTest(texto):
+                self.assertTrue(parece_trozo_de_titulo(texto))
+        # Un titulo completo no es un trozo, ni lo es un rotulo cualquiera.
+        for texto in ("PLANTA BAJA", "PLANTA 6PISO", "COCINA", "ESC: 1:100"):
+            with self.subTest(texto):
+                self.assertFalse(parece_trozo_de_titulo(texto))
+
+    def test_terraza_es_una_planta_valida(self):
+        from app.domains.resolutions.domain.plantas import PLANTAS_RESUMEN
+
+        self.assertIn("PLANTA TERRAZA", PLANTAS_RESUMEN)
+
+
+class RecortesDeTituloTest(unittest.TestCase):
+    def _jpg(self, ancho, alto):
+        import cv2
+        import numpy as np
+
+        ok, jpg = cv2.imencode(".jpg", np.full((alto, ancho, 3), 255, np.uint8))
+        return jpg.tobytes()
+
+    def test_ventana_alrededor_del_trozo_con_su_posicion(self):
+        from app.domains.resolutions.domain.plan_tiles import recortes_de_titulo
+
+        recortes = recortes_de_titulo(self._jpg(3000, 3000), [(1000, 2500, 1200, 2540)])
+        self.assertEqual(len(recortes), 1)
+        _, x0, y0 = recortes[0]
+        self.assertLessEqual(x0, 1000)
+        self.assertLessEqual(y0, 2500)
+
+    def test_ventanas_que_se_pisan_se_funden(self):
+        from app.domains.resolutions.domain.plan_tiles import recortes_de_titulo
+
+        anclas = [(1000, 2500, 1200, 2540), (1300, 2505, 1500, 2545)]
+        self.assertEqual(len(recortes_de_titulo(self._jpg(3000, 3000), anclas)), 1)
+
+    def test_tope_de_recortes_e_imagen_ilegible(self):
+        from app.domains.resolutions.domain.plan_tiles import MAX_RECORTES, recortes_de_titulo
+
+        lejanas = [(100, 100 + 400 * i, 200, 140 + 400 * i) for i in range(MAX_RECORTES + 3)]
+        self.assertLessEqual(len(recortes_de_titulo(self._jpg(3000, 5000), lejanas)), MAX_RECORTES)
+        self.assertEqual(recortes_de_titulo(b"no es una imagen", [(0, 0, 10, 10)]), [])
+
+
+class OcrTituloPartidoEnMosaico(PlanOcrPort):
+    """OCR de mentira: la pagina y los mosaicos solo leen medio titulo ('PLANTA'
+    y '6PISO' por separado, lejos entre si); el recorte alrededor del trozo lo
+    lee entero."""
+
+    def __init__(self):
+        self.llamadas = []
+
+    def read(self, image_bytes, filename="plano.jpg"):
+        self.llamadas.append(filename)
+        if "_r" in filename:
+            return [TitleBlock("PLANTA 6PISO", 0, 0, 600, 80)]
+        if "_m" in filename and filename.endswith("_m1.jpg"):
+            return [TitleBlock("PLANTA 6", 10, 20, 300, 100)]
+        return []
+
+
+class ReleerTrozosDeTituloTest(unittest.TestCase):
+    def test_titulo_cortado_en_el_borde_se_relee_en_un_recorte(self):
+        import cv2
+        import numpy as np
+
+        repo = _new_repo()
+        ok, jpg = cv2.imencode(".jpg", np.full((3000, 900, 3), 255, np.uint8))
+        AddPlanPagesUseCase(repo).execute("res-1", [(jpg.tobytes(), "image/jpeg", [])], "app", USER)
+        ocr = OcrTituloPartidoEnMosaico()
+        page = DetectPlanPagePlantaUseCase(repo, ocr).execute("res-1", 1)
+        self.assertEqual(page.plantas, _pisos(6))
+        self.assertEqual(page.planta_status, PlantaStatus.DETECTADA)
+        self.assertTrue(any("_r" in f for f in ocr.llamadas))
+
+
 if __name__ == "__main__":
     unittest.main()

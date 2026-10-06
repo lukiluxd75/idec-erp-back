@@ -56,7 +56,7 @@ def _normalizar(texto: str) -> str:
 
 
 # El OCR confunde el 0 con la O ("PIS0") y la I con el 1 ("I00"): se corrigen solo dentro de las palabras del título.
-_PISO = r"PIS[O0]"
+_PISO = r"PIS[O0]?"  # el OCR a veces corta la O final ("PLANTA 6PIS")
 _ORDINAL = r"(?:ER|RO|DO|TO|VO|NO|MO)?"
 _NUM = r"(\d{1,2}|[IL])"
 
@@ -64,9 +64,21 @@ _NUM = r"(\d{1,2}|[IL])"
 # pegado (".PLANTABAJA..", "PLANTA1°PISO.") -- los puntos y marcas de ordinal
 # ya los saca _normalizar.
 _RE_ESPECIAL = re.compile(r"^PLANTA ?(SEMI ?SOTANO|SOTANO|[BS8]AJA)$")
+# La terraza se titula sola ("TERRAZA / Esc:1:100") o como "PLANTA TERRAZA".
+_RE_TERRAZA = re.compile(r"^(?:PLANTA ?)?TERRAZA$")
 _RE_PISOS = re.compile(
     rf"^PLANTA ?(?:TIPO ?)?{_NUM} ?{_ORDINAL}(?: ?(?:-|A|AL|Y) ?{_NUM} ?{_ORDINAL})? ?{_PISO}$"
 )
+
+
+_RE_TROZO = re.compile(r"^(?:PLANT|PLANTA ?(?:TIPO ?)?(?:\d{1,2}|[IL])?|[A-Z]?\d{1,2} ?PIS[O0]?)")
+
+
+def parece_trozo_de_titulo(texto: str) -> bool:
+    """¿Es el comienzo o el final de un título de planta, aunque esté cortado?
+    ("PLANTA 6", "PLANTA3F", "6°PIS0"). Sirve para saber DÓNDE releer."""
+    t = _normalizar(texto)
+    return len(t) >= 5 and bool(_RE_TROZO.match(t)) and plantas_de_titulo(texto) is None
 
 
 def _numero(s: str) -> int:
@@ -81,6 +93,8 @@ def plantas_de_titulo(texto: str) -> Optional[List[str]]:
     if m:
         nombre = "SEMISOTANO" if m.group(1).startswith("SEMI") else ("BAJA" if m.group(1).endswith("AJA") else m.group(1))
         return [f"PLANTA {nombre}"]
+    if _RE_TERRAZA.match(t):
+        return ["PLANTA TERRAZA"]
     m = _RE_PISOS.match(t)
     if not m:
         return None
