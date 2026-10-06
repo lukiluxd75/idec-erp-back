@@ -58,17 +58,8 @@ pipeline {
                 if (-not (Test-Path $targetDir)) {
                     New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
                 }
-
-                # /MIR es un espejo: borra del servidor todo lo que no venga del
-                # repositorio. Lo que vive SOLO en el servidor hay que excluirlo o
-                # desaparece en cada despliegue:
-                #   .env        las variables reales (nunca se versionan). Sin él la
-                #               app vuelve a sus valores por defecto: FRONTEND_ORIGIN
-                #               pasa a ser localhost y el navegador bloquea al front
-                #               por CORS, y además se queda sin base y sin Keycloak.
-                #   web.config  la configuración del sitio en IIS, que no está en el repo.
-                #   data        lo que la app genera trabajando (recortes, exportaciones).
-                $process = Start-Process robocopy -ArgumentList "`"$PWD`" `"$targetDir`" /MIR /XD .git .venv __pycache__ data /XF Jenkinsfile .env web.config /R:2 /W:1 /NJH /NJS" -Wait -NoNewWindow -PassThru
+                
+                $process = Start-Process robocopy -ArgumentList "`"$PWD`" `"$targetDir`" /MIR /XD .git .venv __pycache__ /XF Jenkinsfile .env /R:2 /W:1 /NJH /NJS" -Wait -NoNewWindow -PassThru
                 
                 if ($process.ExitCode -le 7) {
                     Write-Host "Despliegue a IIS completado con éxito."
@@ -81,6 +72,7 @@ pipeline {
             }
         }
     }
+    
     post {
         success {
             echo '¡El pipeline del Backend se ejecutó y desplegó con éxito!'
