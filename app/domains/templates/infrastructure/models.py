@@ -64,7 +64,7 @@ class VariableModel(Base):
     __table_args__ = {"schema": SCHEMA}
 
     id = Column(BigInteger, Identity(always=True), primary_key=True)
-    nombre = Column(String(150), nullable=False)
+    nombre = Column("name", String(150), nullable=False)
     clave = Column("key", String(100), nullable=False, unique=True)
     descripcion = Column("description", String(500))
     tipo_dato = Column("data_type", String(50), nullable=False)
@@ -80,15 +80,19 @@ class CiteConfiguracionModel(Base):
 
     __tablename__ = "cite_configurations"
     __table_args__ = (
-        UniqueConstraint("area_codigo", "tipo_documento_codigo", name="uq_cite_configuracion"),
-        CheckConstraint("longitud_numero BETWEEN 1 AND 12", name="ck_cite_configuracion_longitud"),
+        # Los nombres son los de la BASE, no los del atributo en Python: el
+        # atributo `area_codigo` vive en la columna `area_code` (ver abajo), y
+        # pedir la restricción sobre "area_codigo" rompe el import del dominio
+        # entero con "no column named 'area_codigo' is present".
+        UniqueConstraint("area_code", "document_type_code", name="uq_cite_configuracion"),
+        CheckConstraint("number_length BETWEEN 1 AND 12", name="ck_cite_configuracion_longitud"),
         {"schema": SCHEMA},
     )
 
     id = Column(BigInteger, Identity(always=True), primary_key=True)
     area_codigo = Column("area_code", String(20), nullable=False)
     tipo_documento_codigo = Column("document_type_code", String(20), nullable=False)
-    nombre = Column(String(150), nullable=False)
+    nombre = Column("name", String(150), nullable=False)
     formato = Column("format", String(150), nullable=False)
     longitud_numero = Column("number_length", SmallInteger, nullable=False, server_default=text("5"))
     reinicia_por_gestion = Column("resets_per_year", Boolean, nullable=False, server_default=text("true"))
@@ -102,8 +106,8 @@ class CiteCorrelativoModel(Base):
 
     __tablename__ = "cite_counters"
     __table_args__ = (
-        CheckConstraint("gestion BETWEEN 2000 AND 9999", name="ck_cite_correlativo_gestion"),
-        CheckConstraint("ultimo_numero >= 0", name="ck_cite_correlativo_numero"),
+        CheckConstraint("year BETWEEN 2000 AND 9999", name="ck_cite_correlativo_gestion"),
+        CheckConstraint("last_number >= 0", name="ck_cite_correlativo_numero"),
         {"schema": SCHEMA},
     )
 
@@ -118,11 +122,11 @@ class CiteGeneradoModel(Base):
     __tablename__ = "generated_cites"
     __table_args__ = (
         UniqueConstraint(
-            "cite_configuracion_id", "gestion", "numero_correlativo", name="uq_cite_numero_por_gestion"
+            "cite_configuration_id", "year", "correlative_number", name="uq_cite_numero_por_gestion"
         ),
-        CheckConstraint("gestion BETWEEN 2000 AND 9999", name="ck_cite_generado_gestion"),
-        CheckConstraint("numero_correlativo > 0", name="ck_cite_generado_numero"),
-        CheckConstraint("estado IN ('GENERADO', 'ANULADO')", name="ck_cite_estado"),
+        CheckConstraint("year BETWEEN 2000 AND 9999", name="ck_cite_generado_gestion"),
+        CheckConstraint("correlative_number > 0", name="ck_cite_generado_numero"),
+        CheckConstraint("status IN ('GENERADO', 'ANULADO')", name="ck_cite_estado"),
         {"schema": SCHEMA},
     )
 
