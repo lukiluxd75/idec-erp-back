@@ -28,6 +28,9 @@ from app.domains.detection.application.use_cases.export_campaign_report_use_case
 from app.domains.detection.application.use_cases.search_detection_entities_use_case import (
     SearchDetectionEntitiesUseCase,
 )
+from app.domains.detection.application.use_cases.get_detection_report_stats_use_case import (
+    GetDetectionReportStatsUseCase,
+)
 
 __all__ = [
     "StartDetectionJobUseCase",
@@ -40,4 +43,5 @@ __all__ = [
     "ResumeSectorValidationUseCase",
     "ExportCampaignReportUseCase",
     "SearchDetectionEntitiesUseCase",
+    "GetDetectionReportStatsUseCase",
 ]

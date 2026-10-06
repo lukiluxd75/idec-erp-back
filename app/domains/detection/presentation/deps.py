@@ -5,6 +5,7 @@ from app.core.database.connection import get_db
 from app.domains.detection.application.use_cases import (
     CreateCampaignUseCase,
     ExportCampaignReportUseCase,
+    GetDetectionReportStatsUseCase,
     GetProcessedSectorDetailUseCase,
     IngestDetectionResultUseCase,
     ListCampaignsUseCase,
@@ -103,6 +104,12 @@ def get_search_detection_entities_use_case(
     repository: SectorHistoryPort = Depends(get_sector_history_repository),
 ) -> SearchDetectionEntitiesUseCase:
     return SearchDetectionEntitiesUseCase(repository=repository)
+
+
+def get_detection_report_stats_use_case(
+    repository: SectorHistoryPort = Depends(get_sector_history_repository),
+) -> GetDetectionReportStatsUseCase:
+    return GetDetectionReportStatsUseCase(repository=repository)
 
 
 def get_resume_sector_validation_use_case(

@@ -2,6 +2,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
+from pydantic import BaseModel
 
 from app.domains.detection.application.use_cases import (
     ExportCampaignReportUseCase,
@@ -30,6 +31,15 @@ from app.domains.detection.presentation.schemas.sector_history_schema import (
 from app.domains.security.contracts import UserProfile, require_permission
 
 router = APIRouter(tags=["Detección de construcciones — historial"])
+
+
+class ChartImagePayload(BaseModel):
+    title: str
+    image_base64: str
+
+
+class ExportPdfChartsPayload(BaseModel):
+    charts: List[ChartImagePayload] = []
 
 
 @router.get("/sectors", response_model=List[ProcessedSectorMapItem])
@@ -136,6 +146,35 @@ def export_campaign_report_pdf(
     campaign_label = _campaign_label(campaign_id, campaign_repository, all_campaigns)
 
     content = build_campaign_report_pdf(rows, campaign_label)
+    filename = f"reporte-predios-{'todas-las-campanas' if all_campaigns else (campaign_id or 'sin-campania')}.pdf"
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/sectors/export/pdf")
+def export_campaign_report_pdf_with_charts(
+    payload: ExportPdfChartsPayload,
+    campaign_id: Optional[int] = Query(None),
+    unassigned_only: bool = Query(False),
+    all_campaigns: bool = Query(False),
+    use_case: ExportCampaignReportUseCase = Depends(get_export_campaign_report_use_case),
+    campaign_repository: CampaignRepositoryPort = Depends(get_campaign_repository),
+    _user: UserProfile = Depends(require_permission("detection.view")),
+):
+    """Same PDF as the GET version above, plus one page per chart image --
+    "Reportes" captures its own live charts as PNGs (html2canvas) and posts
+    them here since a GET query string can't carry that much data. Excel and
+    JSON exports never get charts (a spreadsheet/data response has nowhere
+    sensible to put an image), only PDF and Imprimir."""
+    rows = use_case.execute(campaign_id=campaign_id, unassigned_only=unassigned_only, all_campaigns=all_campaigns)
+    campaign_label = _campaign_label(campaign_id, campaign_repository, all_campaigns)
+
+    content = build_campaign_report_pdf(
+        rows, campaign_label, charts=[c.model_dump() for c in payload.charts]
+    )
     filename = f"reporte-predios-{'todas-las-campanas' if all_campaigns else (campaign_id or 'sin-campania')}.pdf"
     return Response(
         content=content,

@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from datetime import date
 from typing import List, Optional
 
 from app.domains.detection.domain.entities.processed_sector_detail import ProcessedSectorDetail
@@ -36,3 +37,21 @@ class SectorHistoryPort(ABC):
         per kind (never a single combined cap, so one kind's matches can't
         crowd out another's in the dropdown). Backs the map's search box and
         Historial's lookup (see SearchResult's own docstring)."""
+
+    @abstractmethod
+    def get_report_stats(
+        self,
+        campaign_id: Optional[int] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+    ) -> dict:
+        """Aggregated numbers for the "Reportes" tab's charts -- cambios por
+        campaña, por estado de validación, por tipo de cambio, evolución
+        diaria, sectores por estado, y por validador (confirmados/
+        rechazados). A plain dict bundle, same convention as
+        procedurereports' own report/panel endpoints (see
+        generate_report.py), not a typed entity -- this is a read-only
+        analytics projection, not a domain concept with its own identity.
+        `date_from`/`date_to` filter by when each row was created (the
+        parcel's own `created_at` for the parcel-grain numbers, the
+        sector's for `sectors_by_status`)."""

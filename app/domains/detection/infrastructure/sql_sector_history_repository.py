@@ -1,5 +1,6 @@
 """Postgres adapter for SectorHistoryPort -- read-only browsing of
 `detection_results` for the map overlay and Historial's detail view."""
+from datetime import date, timedelta
 from typing import Any, Dict, List, Optional
 
 from geoalchemy2.shape import to_shape
@@ -338,3 +339,118 @@ class SqlSectorHistoryRepository(SectorHistoryPort):
             )
 
         return results
+
+    def get_report_stats(
+        self,
+        campaign_id: Optional[int] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+    ) -> dict:
+        parcel_query = (
+            self._db.query(AffectedParcelModel, ProcessedSectorModel)
+            .join(ProcessedSectorModel, ProcessedSectorModel.id == AffectedParcelModel.processed_sector_id)
+            .filter(ProcessedSectorModel.deleted_at.is_(None))
+        )
+        if campaign_id:
+            parcel_query = parcel_query.filter(ProcessedSectorModel.campaign_id == campaign_id)
+        if date_from:
+            parcel_query = parcel_query.filter(AffectedParcelModel.created_at >= date_from)
+        if date_to:
+            parcel_query = parcel_query.filter(AffectedParcelModel.created_at < date_to + timedelta(days=1))
+        parcel_rows = parcel_query.all()
+
+        campaign_ids = {sector.campaign_id for _, sector in parcel_rows if sector.campaign_id}
+        campaigns_by_id = (
+            {c.id: c for c in self._db.query(CampaignModel).filter(CampaignModel.id.in_(campaign_ids)).all()}
+            if campaign_ids
+            else {}
+        )
+
+        by_campaign_counts: Dict[Optional[int], Dict[str, int]] = {}
+        status_counts: Dict[str, int] = {}
+        type_counts: Dict[str, int] = {}
+        # Per-day breakdown by validation_status too (not just a flat count)
+        # -- "count" is kept for the existing daily bar chart, the three
+        # extra keys back the new trend line comparing how confirmaciones/
+        # rechazos/pendientes moved day to day, not just raw volume.
+        daily: Dict[str, Dict[str, int]] = {}
+        validator_counts: Dict[str, Dict[str, int]] = {}
+        validator_ids = {ap.validated_by for ap, _ in parcel_rows if ap.validated_by}
+        usernames = resolve_usernames(self._db, validator_ids) if validator_ids else {}
+
+        for ap, sector in parcel_rows:
+            campaign_key = sector.campaign_id
+            bucket = by_campaign_counts.setdefault(
+                campaign_key,
+                {
+                    "total": 0,
+                    "new": 0,
+                    "removed": 0,
+                    "modified": 0,
+                    "unchanged": 0,
+                    "confirmed": 0,
+                    "rejected": 0,
+                    "pending": 0,
+                },
+            )
+            bucket["total"] += 1
+            if ap.change_type in bucket:
+                bucket[ap.change_type] += 1
+            if ap.validation_status in bucket:
+                bucket[ap.validation_status] += 1
+
+            status_counts[ap.validation_status] = status_counts.get(ap.validation_status, 0) + 1
+            type_counts[ap.change_type] = type_counts.get(ap.change_type, 0) + 1
+
+            day_key = ap.created_at.date().isoformat()
+            day_bucket = daily.setdefault(day_key, {"count": 0, "confirmed": 0, "rejected": 0, "pending": 0})
+            day_bucket["count"] += 1
+            if ap.validation_status in day_bucket:
+                day_bucket[ap.validation_status] += 1
+
+            if ap.validated_by and ap.validation_status in ("confirmed", "rejected"):
+                uname = usernames.get(str(ap.validated_by)) or str(ap.validated_by)
+                vbucket = validator_counts.setdefault(uname, {"confirmed": 0, "rejected": 0})
+                vbucket[ap.validation_status] += 1
+
+        by_campaign = [
+            {
+                "campaign_id": cid,
+                "campaign_code": campaigns_by_id[cid].code if cid in campaigns_by_id else None,
+                "campaign_name": campaigns_by_id[cid].name if cid in campaigns_by_id else None,
+                **counts,
+            }
+            for cid, counts in by_campaign_counts.items()
+        ]
+        by_validation_status = [{"status": k, "count": v} for k, v in status_counts.items()]
+        by_change_type = [{"change_type": k, "count": v} for k, v in type_counts.items()]
+        daily_counts = [{"date": k, **v} for k, v in sorted(daily.items())]
+        by_validator = sorted(
+            ({"username": k, **v} for k, v in validator_counts.items()),
+            key=lambda r: -(r["confirmed"] + r["rejected"]),
+        )
+
+        # Sector-level counts ("procesados vs pendientes") -- same
+        # campaign/date filters, but applied to processed_sector directly
+        # rather than derived from the parcel rows above (a sector can have
+        # zero parcels and should still be counted here).
+        sector_query = self._db.query(ProcessedSectorModel).filter(ProcessedSectorModel.deleted_at.is_(None))
+        if campaign_id:
+            sector_query = sector_query.filter(ProcessedSectorModel.campaign_id == campaign_id)
+        if date_from:
+            sector_query = sector_query.filter(ProcessedSectorModel.created_at >= date_from)
+        if date_to:
+            sector_query = sector_query.filter(ProcessedSectorModel.created_at < date_to + timedelta(days=1))
+        sector_status_counts: Dict[str, int] = {}
+        for s in sector_query.all():
+            sector_status_counts[s.status] = sector_status_counts.get(s.status, 0) + 1
+        sectors_by_status = [{"status": k, "count": v} for k, v in sector_status_counts.items()]
+
+        return {
+            "by_campaign": by_campaign,
+            "by_validation_status": by_validation_status,
+            "by_change_type": by_change_type,
+            "daily_counts": daily_counts,
+            "sectors_by_status": sectors_by_status,
+            "by_validator": by_validator,
+        }
