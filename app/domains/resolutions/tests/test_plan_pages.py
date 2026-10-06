@@ -71,6 +71,12 @@ class TituloDePlantaTest(unittest.TestCase):
             "PLANTA SEMI SOTANO": ["PLANTA SEMISOTANO"],
             "PLANTA SÓTANO": ["PLANTA SOTANO"],
             "PLANTA BAJA.": ["PLANTA BAJA"],
+            # El OCR de los planos de dibujante lo lee pegado y con puntos.
+            ".PLANTABAJA..": ["PLANTA BAJA"],
+            "...PLANTASAJA.": ["PLANTA BAJA"],
+            ".PLANTA1°PISO...": _pisos(1),
+            "PLANTA3PISO": _pisos(3),
+            "PLANTATIPO2-4PISO": _pisos(2, 3, 4),
         }
         for texto, plantas in casos.items():
             with self.subTest(texto):
@@ -266,3 +272,30 @@ class PaginasDelPlanoTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MosaicosTest(unittest.TestCase):
+    def test_cubre_la_imagen_con_solape_y_conserva_posicion(self):
+        import cv2
+        import numpy as np
+
+        from app.domains.resolutions.domain.plan_tiles import mosaicos
+
+        imagen = np.full((3000, 900, 3), 255, np.uint8)
+        ok, jpg = cv2.imencode(".jpg", imagen)
+        tiles = mosaicos(jpg.tobytes(), 700)
+        self.assertGreater(len(tiles), 4)
+        self.assertEqual(sorted({x0 for _, x0, _ in tiles}), [0, 560])
+        ultimo_y = max(y0 for _, _, y0 in tiles)
+        _, _, y0 = [t for t in tiles if t[2] == ultimo_y][0]
+        alto = cv2.imdecode(np.frombuffer([t for t in tiles if t[2] == ultimo_y][0][0], np.uint8), 1).shape[0]
+        self.assertEqual(ultimo_y + alto, 3000)
+
+    def test_imagen_chica_no_se_corta(self):
+        import cv2
+        import numpy as np
+
+        from app.domains.resolutions.domain.plan_tiles import mosaicos
+
+        ok, jpg = cv2.imencode(".jpg", np.full((500, 500, 3), 255, np.uint8))
+        self.assertEqual(mosaicos(jpg.tobytes(), 700), [])
