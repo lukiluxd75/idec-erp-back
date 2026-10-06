@@ -3,6 +3,7 @@ from typing import List, Optional
 
 from app.domains.detection.domain.entities.processed_sector_detail import ProcessedSectorDetail
 from app.domains.detection.domain.entities.processed_sector_map_item import ProcessedSectorMapItem
+from app.domains.detection.domain.entities.search_result import SearchResult
 
 
 class SectorHistoryPort(ABC):
@@ -27,3 +28,11 @@ class SectorHistoryPort(ABC):
         """Full history for one sector: every processing_run (auto + any
         manual realignments, oldest first), each with its alignment quality
         and the parcels it found, each with its full review/feedback trail."""
+
+    @abstractmethod
+    def search(self, query: str, limit: int = 8) -> List[SearchResult]:
+        """Matches `query` against a sector's id/name, a predio's
+        cadastral_code, and a campaign's code/name -- up to `limit` results
+        per kind (never a single combined cap, so one kind's matches can't
+        crowd out another's in the dropdown). Backs the map's search box and
+        Historial's lookup (see SearchResult's own docstring)."""

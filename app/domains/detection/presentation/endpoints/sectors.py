@@ -8,6 +8,7 @@ from app.domains.detection.application.use_cases import (
     GetProcessedSectorDetailUseCase,
     ListProcessedSectorsUseCase,
     ResumeSectorValidationUseCase,
+    SearchDetectionEntitiesUseCase,
 )
 from app.domains.detection.domain.ports.campaign_repository_port import CampaignRepositoryPort
 from app.domains.detection.infrastructure.export_excel import build_campaign_report_excel
@@ -19,10 +20,12 @@ from app.domains.detection.presentation.deps import (
     get_list_processed_sectors_use_case,
     get_processed_sector_detail_use_case,
     get_resume_sector_validation_use_case,
+    get_search_detection_entities_use_case,
 )
 from app.domains.detection.presentation.schemas.sector_history_schema import (
     ProcessedSectorDetail,
     ProcessedSectorMapItem,
+    SearchResultItem,
 )
 from app.domains.security.contracts import UserProfile, require_permission
 
@@ -41,6 +44,22 @@ def list_processed_sectors(
     `campaign_id` is set) backs "Mapa y detección"'s "Sin campaña" filter --
     sectors with no campaign at all, not "no filter"."""
     return use_case.execute(campaign_id=campaign_id, unassigned_only=unassigned_only)
+
+
+# Registered before /sectors/{processed_sector_id}: that route's int-typed
+# path param would otherwise swallow this literal path and 422 on "search"
+# not being a valid id (Starlette matches routes in registration order).
+@router.get("/sectors/search", response_model=List[SearchResultItem])
+def search_detection_entities(
+    q: str = Query(..., min_length=1, max_length=100),
+    limit: int = Query(8, ge=1, le=20),
+    use_case: SearchDetectionEntitiesUseCase = Depends(get_search_detection_entities_use_case),
+    _user: UserProfile = Depends(require_permission("detection.view")),
+):
+    """Backs the map's search box (sector id/name, predio por código
+    catastral, campaña por código/nombre) and Historial's lookup -- same
+    endpoint, same result shape, see SearchResult's docstring."""
+    return use_case.execute(query=q, limit=limit)
 
 
 def _campaign_label(

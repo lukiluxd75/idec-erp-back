@@ -13,6 +13,7 @@ from app.domains.detection.domain.entities.processed_sector_detail import (
     RunDetail,
 )
 from app.domains.detection.domain.entities.processed_sector_map_item import ProcessedSectorMapItem
+from app.domains.detection.domain.entities.search_result import SearchResult
 from app.domains.detection.domain.ports.sector_history_port import SectorHistoryPort
 from app.domains.detection.infrastructure.models import (
     AffectedParcelModel,
@@ -243,3 +244,71 @@ class SqlSectorHistoryRepository(SectorHistoryPort):
             processed_at=sector.processed_at,
             runs=run_details,
         )
+
+    def search(self, query: str, limit: int = 8) -> List[SearchResult]:
+        q = (query or "").strip()
+        if not q:
+            return []
+        like = f"%{q}%"
+        results: List[SearchResult] = []
+
+        sector_query = self._db.query(ProcessedSectorModel).filter(ProcessedSectorModel.deleted_at.is_(None))
+        # A bare number means "sector #id" -- an exact match, not a substring
+        # search over ids (searching "3" inside every id would be noise).
+        if q.isdigit():
+            sector_query = sector_query.filter(ProcessedSectorModel.id == int(q))
+        else:
+            sector_query = sector_query.filter(ProcessedSectorModel.name.ilike(like))
+        for s in sector_query.order_by(ProcessedSectorModel.id.desc()).limit(limit).all():
+            results.append(
+                SearchResult(
+                    kind="sector",
+                    label=s.name or f"Sector #{s.id}",
+                    sector_id=s.id,
+                    status=s.status,
+                    geom_geojson=_geom_to_geojson(s.geom),
+                )
+            )
+
+        parcel_rows = (
+            self._db.query(AffectedParcelModel, ProcessedSectorModel)
+            .join(ProcessedSectorModel, ProcessedSectorModel.id == AffectedParcelModel.processed_sector_id)
+            .filter(ProcessedSectorModel.deleted_at.is_(None))
+            .filter(AffectedParcelModel.cadastral_code.ilike(like))
+            .order_by(AffectedParcelModel.id.desc())
+            .limit(limit)
+            .all()
+        )
+        for parcel, sector in parcel_rows:
+            results.append(
+                SearchResult(
+                    kind="parcel",
+                    label=parcel.cadastral_code or f"Predio #{parcel.id}",
+                    sector_id=sector.id,
+                    cadastral_code=parcel.cadastral_code,
+                    validation_status=parcel.validation_status,
+                    geom_geojson=_geom_to_geojson(parcel.parcel_geom) if parcel.parcel_geom is not None else None,
+                )
+            )
+
+        campaign_rows = (
+            self._db.query(CampaignModel)
+            .filter((CampaignModel.code.ilike(like)) | (CampaignModel.name.ilike(like)))
+            .order_by(CampaignModel.id.desc())
+            .limit(limit)
+            .all()
+        )
+        for c in campaign_rows:
+            results.append(
+                SearchResult(
+                    kind="campaign",
+                    label=f"{c.code} · {c.name}",
+                    campaign_id=c.id,
+                    campaign_code=c.code,
+                    campaign_name=c.name,
+                    year_a=c.year_a,
+                    year_b=c.year_b,
+                )
+            )
+
+        return results

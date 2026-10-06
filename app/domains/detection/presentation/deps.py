@@ -11,6 +11,7 @@ from app.domains.detection.application.use_cases import (
     ListProcessedSectorsUseCase,
     ResumeSectorValidationUseCase,
     ReviewAffectedParcelUseCase,
+    SearchDetectionEntitiesUseCase,
     StartDetectionJobUseCase,
 )
 from app.domains.detection.domain.ports.affected_parcel_review_port import AffectedParcelReviewPort
@@ -96,6 +97,12 @@ def get_processed_sector_detail_use_case(
     repository: SectorHistoryPort = Depends(get_sector_history_repository),
 ) -> GetProcessedSectorDetailUseCase:
     return GetProcessedSectorDetailUseCase(repository=repository)
+
+
+def get_search_detection_entities_use_case(
+    repository: SectorHistoryPort = Depends(get_sector_history_repository),
+) -> SearchDetectionEntitiesUseCase:
+    return SearchDetectionEntitiesUseCase(repository=repository)
 
 
 def get_resume_sector_validation_use_case(
