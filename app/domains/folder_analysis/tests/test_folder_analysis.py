@@ -129,7 +129,7 @@ from app.domains.folder_analysis.infrastructure.ollama_fur_structurer import (
     OllamaFurStructurer,
     _json_object,
 )
-from app.domains.folder_analysis.infrastructure.opencv_seal_reader import OpenCvSealReader
+from app.domains.folder_analysis.infrastructure.opencv_seal_reader import OpenCvSealReader, seals_in
 from app.domains.folder_analysis.infrastructure.opencv_thumbnail import OpenCvThumbnail
 from app.domains.folder_analysis.infrastructure.pdfium_rasterizer import PdfiumRasterizer
 
@@ -334,6 +334,72 @@ def _sheet_with_seal(centre=(430, 620), radius=90):
     cv2.circle(sheet, centre, radius - 14, ink, 3)
     cv2.putText(sheet, "No.48", (centre[0] - 45, centre[1] + 8), cv2.FONT_HERSHEY_SIMPLEX, 0.8, ink, 2)
     return cv2.imencode(".png", sheet)[1].tobytes()
+
+
+def _sheet_with_rectangular_seal(corner=(260, 900)):
+    """La hoja de firmas: la misma notaría estampa acá un sello rectangular, con
+    su nombre y su número escritos en renglones derechos, y del tamaño que tiene
+    en el papel (como un cuarto del ancho de la hoja)."""
+    sheet = np.full((1600, 1200, 3), 255, np.uint8)
+    cv2.putText(sheet, "Leido que les fue el acta que antecede", (60, 140), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 2)
+    ink = (60, 60, 200)
+    x, y = corner
+    cv2.rectangle(sheet, (x, y), (x + 290, y + 180), ink, 3)
+    cv2.putText(sheet, "NOTARIA DE FE", (x + 16, y + 70), cv2.FONT_HERSHEY_SIMPLEX, 0.7, ink, 2)
+    cv2.putText(sheet, "PUBLICA No 50", (x + 16, y + 140), cv2.FONT_HERSHEY_SIMPLEX, 0.7, ink, 2)
+    return cv2.imencode(".png", sheet)[1].tobytes()
+
+
+def _photographed_over_a_yellow_folder(page: bytes):
+    """La misma hoja, fotografiada como llegan: sobre la carpeta amarilla del
+    trámite y con luz cálida, que tiñe de amarillo el papel entero."""
+    sheet = cv2.imdecode(np.frombuffer(page, np.uint8), cv2.IMREAD_COLOR)
+    photo = np.full((sheet.shape[0] + 120, sheet.shape[1] + 120, 3), (20, 215, 240), np.uint8)
+    warm = cv2.addWeighted(sheet, 0.88, np.full_like(sheet, (120, 225, 245)), 0.12, 0)
+    photo[60 : 60 + sheet.shape[0], 60 : 60 + sheet.shape[1]] = warm
+    return cv2.imencode(".png", photo)[1].tobytes()
+
+
+def _sheet_with_both_seals():
+    """El pie de la hoja como lo estampa una notaría: su sello redondo al lado
+    del rectangular, los dos con el mismo número."""
+    sheet = np.full((1600, 1200, 3), 255, np.uint8)
+    cv2.putText(sheet, "Publica, Doy Fe.", (60, 140), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 2)
+    ink = (40, 40, 40)
+    cv2.circle(sheet, (250, 800), 110, ink, 7)
+    cv2.circle(sheet, (250, 800), 92, ink, 4)
+    cv2.putText(sheet, "No.2", (205, 810), cv2.FONT_HERSHEY_SIMPLEX, 1.0, ink, 3)
+    cv2.rectangle(sheet, (600, 710), (890, 890), ink, 3)
+    cv2.putText(sheet, "NOTARIA DE FE", (616, 780), cv2.FONT_HERSHEY_SIMPLEX, 0.7, ink, 2)
+    cv2.putText(sheet, "PUBLICA No 2", (616, 850), cv2.FONT_HERSHEY_SIMPLEX, 0.7, ink, 2)
+    return cv2.imencode(".png", sheet)[1].tobytes()
+
+
+def _sheet_of_text(seal_at=None):
+    """Una hoja escrita de arriba abajo, y si se pide, el sello estampado encima
+    de la redacción, que es donde cae cuando no hay lugar libre."""
+    sheet = np.full((1600, 1200, 3), 255, np.uint8)
+    for line in range(14):
+        cv2.putText(
+            sheet, "declaran que son poseedores del bien inmueble ubicado en",
+            (60, 180 + line * 95), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2,
+        )
+    if seal_at:
+        ink = (40, 40, 40)
+        cv2.circle(sheet, seal_at, 110, ink, 7)
+        cv2.circle(sheet, seal_at, 92, ink, 4)
+        cv2.putText(sheet, "No.50", (seal_at[0] - 55, seal_at[1] + 10), cv2.FONT_HERSHEY_SIMPLEX, 1.0, ink, 3)
+    return cv2.imencode(".png", sheet)[1].tobytes()
+
+
+def _photocopied(page: bytes):
+    """La misma hoja, fotocopiada: el sello sale del mismo negro que la redacción
+    y con el contraste que le sube la fotocopiadora. Es como llega la mitad de
+    las carpetas, y ahí el color no dice nada."""
+    sheet = cv2.imdecode(np.frombuffer(page, np.uint8), cv2.IMREAD_COLOR)
+    gray = cv2.cvtColor(sheet, cv2.COLOR_BGR2GRAY)
+    harsh = np.clip((gray.astype(np.float32) - 110) * 2.2 + 150, 0, 255).astype(np.uint8)
+    return cv2.imencode(".png", cv2.cvtColor(harsh, cv2.COLOR_GRAY2BGR))[1].tobytes()
 
 
 def _uploader(captures) -> UploadCapturesUseCase:
@@ -2255,6 +2321,29 @@ class SelloDelNotarioTests(unittest.TestCase):
 
     FIELDS = document_fields("possessors", DocumentType.FORM)
 
+    def test_the_two_seals_of_one_notary_say_the_same_number(self):
+        """La misma notaría estampa los dos sellos en la misma hoja: el redondo,
+        con la leyenda en corona y la fecha del nombramiento en el medio, y el
+        rectangular, con el nombre y el número en renglones derechos. El número
+        tiene que salir de cualquiera de los dos."""
+        redondo = "Abg. Miriam Aranibar Ayala NOTARIA DE FE PUBLICA N° 2 25.04.2018 DIRNOPLU"
+        rectangular = (
+            "Abg. Miriam Aranibar Ayala NOTARIA DE FE PUBLICA DIRNOPLU N° 2 "
+            "Cochabamba - Bolivia P.F. 25.04.2018"
+        )
+        for sello, texto in (("redondo", redondo), ("rectangular", rectangular)):
+            with self.subTest(sello=sello):
+                self.assertEqual(from_seals([texto], self.FIELDS), {"notary_number": "2"})
+
+    def test_the_mark_of_the_seal_read_as_anything_but_its_little_o(self):
+        """La marca del número vuelve de la fotocopia como se le ocurre al OCR."""
+        for leido in ("N° 2", "N 2", "N^2", "No. 2", "Nro 2"):
+            with self.subTest(leido=leido):
+                self.assertEqual(
+                    from_seals([f"NOTARIA DE FE PUBLICA {leido} Cochabamba"], self.FIELDS),
+                    {"notary_number": "2"},
+                )
+
     def test_the_number_is_read_out_of_a_legend_the_ocr_broke(self):
         """Tal como vuelve un sello redondo: sin "PUBLICA", con el oficio pegado
         al número y la N leída como parte de la palabra de antes."""
@@ -2338,6 +2427,116 @@ class LecturaDelSelloConOpenCvTests(unittest.TestCase):
         self.assertEqual(list(reader.read([b"esto no es una imagen"])), [])
         self.assertEqual(self.asked, [])
 
+    def test_the_rectangular_seal_is_found_too(self):
+        """El formulario trae el redondo arriba y el rectangular en la hoja de
+        firmas, y el número está en los dos. Buscar solo circunferencias dejaba
+        al segundo afuera."""
+        reader = self._reader(["NOTARIA DE FE PUBLICA No 50"])
+        self.assertEqual(
+            next(reader.read([_sheet_with_rectangular_seal()])), "NOTARIA DE FE PUBLICA No 50"
+        )
+        _name, crop = self.asked[0]
+        # El recorte es el sello y no la hoja: la hoja es más alta que ancha y el sello, al revés.
+        self.assertGreater(crop.shape[1], crop.shape[0])
+
+    def test_the_rectangular_seal_is_not_unwrapped(self):
+        """Sus renglones ya vienen derechos: desenrollarlos no deja nada que
+        leer, así que no se gasta esa llamada al OCR."""
+        reader = self._reader([])
+        self.assertEqual(list(reader.read([_sheet_with_rectangular_seal()])), [])
+        self.assertEqual([name for name, _crop in self.asked], ["sello_p1_1_1.jpg"])
+
+    def test_the_seal_is_found_in_a_photo_taken_over_a_yellow_folder(self):
+        """Así llegan las fotos: la hoja sobre la carpeta amarilla del trámite y
+        con luz cálida. Mirando solo cuánto color hay, la hoja entera era una
+        sola mancha y el sello quedaba escondido adentro."""
+        pages = (
+            # El sello redondo y el rectangular, con el centro y el ancho que
+            # tienen en la foto (la hoja va pegada 60 px adentro de la carpeta).
+            ("redondo", _sheet_with_seal(), (490, 680), 186),
+            ("rectangular", _sheet_with_rectangular_seal(), (465, 1050), 290),
+        )
+        for shape, page, (x, y), width in pages:
+            with self.subTest(sello=shape):
+                found = seals_in(cv2.imdecode(
+                    np.frombuffer(_photographed_over_a_yellow_folder(page), np.uint8), cv2.IMREAD_COLOR
+                ))
+                self.assertTrue(found, "no se encontró ningún sello")
+                best = found[0]
+                self.assertTrue(best.coloured, "lo encontró la forma y no la tinta")
+                self.assertAlmostEqual(best.x, x, delta=30)
+                self.assertAlmostEqual(best.y, y, delta=30)
+                self.assertAlmostEqual(best.w, width, delta=width * 0.25)
+
+    def test_the_seal_of_a_photocopy_is_found_without_any_colour(self):
+        """La carpeta llega fotocopiada tan seguido como en original, y ahí el
+        sello salió del mismo negro que la redacción: por el color no hay nada
+        que encontrar, y el sello igual tiene que salir."""
+        pages = (
+            ("redondo", _sheet_with_seal(), (430, 620), 186),
+            ("rectangular", _sheet_with_rectangular_seal(), (405, 990), 290),
+        )
+        for shape, page, (x, y), width in pages:
+            with self.subTest(sello=shape):
+                found = seals_in(cv2.imdecode(
+                    np.frombuffer(_photocopied(page), np.uint8), cv2.IMREAD_COLOR
+                ))
+                self.assertTrue(found, "no se encontró ningún sello")
+                best = found[0]
+                self.assertFalse(best.coloured, "la fotocopia no tiene tinta de color")
+                self.assertAlmostEqual(best.x, x, delta=40)
+                self.assertAlmostEqual(best.y, y, delta=40)
+                self.assertAlmostEqual(best.w, width, delta=width * 0.3)
+
+    def test_a_photocopied_seal_is_read_like_any_other(self):
+        """Lo que se manda a leer sigue siendo la estampa y no la hoja."""
+        reader = self._reader(["NOTARIA DE FE PUBLICA No 50"])
+        page = _photocopied(_sheet_with_rectangular_seal())
+        self.assertEqual(next(reader.read([page])), "NOTARIA DE FE PUBLICA No 50")
+        _name, crop = self.asked[0]
+        self.assertGreater(crop.shape[1], crop.shape[0])
+
+    def test_the_text_of_a_photocopied_sheet_is_not_taken_for_a_seal(self):
+        """La redacción es tinta oscura igual que el sello: lo que la deja afuera
+        es el tamaño. Un renglón es más fino que un sello y la hoja escrita
+        entera es más grande, así que una hoja sin sello no cuesta ni una
+        llamada al OCR."""
+        reader = self._reader(["lo que sea"])
+        self.assertEqual(list(reader.read([_photocopied(_sheet_of_text())])), [])
+        self.assertEqual(self.asked, [])
+
+    def test_the_two_seals_of_a_photocopied_sheet_are_both_found(self):
+        """La notaría estampa los dos en la misma hoja, uno al lado del otro, y
+        el número está en los dos: fotocopiados, los dos tienen que salir, porque
+        el que se lea primero puede no dejarse leer."""
+        found = seals_in(cv2.imdecode(
+            np.frombuffer(_photocopied(_sheet_with_both_seals()), np.uint8), cv2.IMREAD_COLOR
+        ))
+        redondo = [s for s in found if abs(s.x - 250) < 60 and abs(s.y - 800) < 60]
+        rectangular = [s for s in found if abs(s.x - 745) < 60 and abs(s.y - 800) < 60]
+        self.assertTrue(redondo, "no encontró el sello redondo")
+        self.assertTrue(rectangular, "no encontró el sello rectangular")
+
+    def test_a_photocopied_seal_stamped_over_the_text_is_found(self):
+        """El peor caso de la fotocopia: el sello cae sobre la redacción y es de
+        la misma tinta. Cerrando la mancha, el sello y el párrafo quedan pegados
+        en una sola más grande que un sello y se descartaban juntos; por eso se
+        mira además el trazo largo del aro, que las letras no tienen."""
+        found = seals_in(cv2.imdecode(
+            np.frombuffer(_photocopied(_sheet_of_text(seal_at=(600, 800))), np.uint8), cv2.IMREAD_COLOR
+        ))
+        self.assertTrue(found, "no se encontró ningún sello")
+        self.assertAlmostEqual(found[0].x, 600, delta=40)
+        self.assertAlmostEqual(found[0].y, 800, delta=40)
+
+    def test_the_seal_of_a_later_page_is_read_when_the_first_one_has_none(self):
+        """El sello no está siempre en la primera hoja: en este formulario el
+        rectangular va en la segunda, al lado de la tabla de huellas."""
+        reader = self._reader(["NOTARIA DE FE PUBLICA No 50"])
+        pages = [_png(), _sheet_with_rectangular_seal()]
+        self.assertEqual(next(reader.read(pages)), "NOTARIA DE FE PUBLICA No 50")
+        self.assertEqual([name for name, _crop in self.asked], ["sello_p2_1_1.jpg"])
+
 
 class LoQueElOcrDevuelveDeVerdadTests(unittest.TestCase):
     """Los mismos campos, pero sobre el texto tal como sale del OCR.
@@ -2350,8 +2549,9 @@ class LoQueElOcrDevuelveDeVerdadTests(unittest.TestCase):
 
     FIELDS = document_fields("possessors", DocumentType.FORM)
 
-    def _harvest(self, text):
-        return harvest({"full_text": text, "pages": [{"fields": [], "tables": []}]}, self.FIELDS)[0]
+    def _harvest(self, text, tables=()):
+        reading = {"full_text": text, "pages": [{"fields": [], "tables": list(tables)}]}
+        return harvest(reading, self.FIELDS)[0]
 
     def test_the_number_of_a_stamp_the_ocr_broke_apart(self):
         """El sello es redondo y va girado: "NOTARIA DE FE PUBLICA DE PRIMERA
@@ -2391,6 +2591,72 @@ class LoQueElOcrDevuelveDeVerdadTests(unittest.TestCase):
         self.assertEqual(values["notary_number"], "48")
         self.assertEqual(values["owner_name"], "JUAN CHILE ARIAS, ROBERTA HUMACAYA MAMANI")
         self.assertEqual(values["statement_dates"], "26/08/2014")
+
+    def test_the_identity_card_dictated_in_words(self):
+        """El formulario notarial dicta la cédula con todas sus letras y recién
+        después la escribe en cifras, entre paréntesis. Exigiendo la cifra
+        pegada al rótulo no entraba ningún poseedor de esta hoja."""
+        values = self._harvest(
+            "1.- DAVID FERNANDEZ BURGOA, con Cedula de Identidad Numero: seis, cinco, uno,\n"
+            "cinco, cinco, ocho, uno (6515581) con codigo Qr., mayor de edad, habil por derecho,\n"
+            "2.- DUNIA LIZET SEJAS GARCIA, con Cedula de Identidad Numero: cinco, uno, ocho,\n"
+            "seis, dos, cinco, cero (5186250) con codigo QR., mayor de edad, habil por derecho,"
+        )
+        self.assertEqual(values["owner_name"], "DAVID FERNANDEZ BURGOA, DUNIA LIZET SEJAS GARCIA")
+
+    SIGNATURE_PAGE = (
+        "Leido que les fue el acta que antecede, se ratifican con el tenor integro de su declaracion,\n"
+        "firmando y colocando sus impresiones digitales derecha junto con la suscrita Notaria de Fe\n"
+        "Publica, Doy Fe.\n"
+        "Firmado en documento original con codigo de contenido:\n"
+        "16458546b17020f3e5e56928a0b6cfdf4cbce41e0c78a6edf0083093e9985001\n"
+        "Nombre Firma Huella\n"
+        "DAVID FERNANDEZ BURGOA\n"
+        "Cedula de Identidad 6515581\n"
+        "DUNIA LIZET SEJAS GARCIA\n"
+        "Cedula de Identidad 5186250\n"
+    )
+
+    SIGNATURE_TABLE = [[
+        ["Nombre", "Firma", "Huella"],
+        ["DAVID FERNANDEZ BURGOA Cedula de Identidad 6515581", "", ""],
+        ["DUNIA LIZET SEJAS GARCIA Cedula de Identidad 5186250", "", ""],
+    ]]
+
+    def test_the_poseedores_of_the_signature_table_at_the_foot(self):
+        """La última hoja del formulario cierra con la tabla de firmas, y ahí
+        están otra vez los dos poseedores con su cédula debajo. No todas las
+        hojas la traen, pero cuando está es de donde salen más limpios."""
+        values = self._harvest(self.SIGNATURE_PAGE)
+        self.assertEqual(values["owner_name"], "DAVID FERNANDEZ BURGOA, DUNIA LIZET SEJAS GARCIA")
+
+    def test_the_signature_scrawl_does_not_stick_to_the_name(self):
+        """La fila sigue a la derecha con la firma y la huella, y detrás se
+        transparenta el reverso de la hoja; el OCR devuelve esos garabatos en el
+        mismo renglón del nombre. Leída la celda, el nombre termina donde termina
+        la celda."""
+        ensuciada = self.SIGNATURE_PAGE.replace(
+            "DAVID FERNANDEZ BURGOA\n", "DAVID FERNANDEZ BURGOA ap eiouapisau\n"
+        ).replace("DUNIA LIZET SEJAS GARCIA\n", "DUNIA LIZET SEJAS GARCIA uns aelouis\n")
+        values = self._harvest(ensuciada, tables=self.SIGNATURE_TABLE)
+        self.assertEqual(values["owner_name"], "DAVID FERNANDEZ BURGOA, DUNIA LIZET SEJAS GARCIA")
+
+    def test_the_names_of_the_act_win_over_an_empty_table(self):
+        """Una hoja sin cuadro de firmas sigue leyéndose de la redacción."""
+        values = self._harvest(
+            "1.-JUAN CHILE ARIAS.Con C.I:5918362 Cbba.,quien es mayor de edad,\n"
+            "2.-ROBERTA HUMACAYA MAMANI,con C.l:5932821 Cbba.,quien es mayor\n"
+        )
+        self.assertEqual(values["owner_name"], "JUAN CHILE ARIAS, ROBERTA HUMACAYA MAMANI")
+
+    def test_the_date_of_the_formulario_notarial(self):
+        """La hora va primero y en letras, y el día no lleva "los": "a horas
+        17:46 (diecisiete y cuarenta y seis), del dia, lunes veintiocho..."."""
+        values = self._harvest(
+            "a horas 17:46 (diecisiete y cuarenta y seis), del dia, lunes veintiocho del mes "
+            "de septiembre del ano dos mil veintiseis, Ante mi Mgr. MARGARITA OLIVERA COLQUE,"
+        )
+        self.assertEqual(values["statement_dates"], "28/09/2026")
 
 
 class FechasEnLetrasTests(unittest.TestCase):
@@ -2899,6 +3165,56 @@ class ResolucionMinisterialNoEsElNotarioTests(unittest.TestCase):
             from_seals(["NOTARIA DE FE PUBLICA N 37 25.04.2018"], self.FIELDS),
             {"notary_number": "37"},
         )
+
+
+class ElNotarioEscritoEnLaHojaTests(unittest.TestCase):
+    """La tercera forma de llegar al número del notario, además de los dos
+    sellos: escrito en la redacción ("Notaria de Fe Pública N° 2").
+
+    Las tres se prueban, y la del texto es la única que puede confundirse, porque
+    esa misma frase sigue con la dirección de la notaría y con el número del
+    trámite. Un número de otra cosa es peor que ninguno: el campo vacío se ve en
+    la pantalla y se le pregunta a la foto, y el equivocado se guarda callado.
+    """
+
+    FIELDS = document_fields("possessors", DocumentType.FORM)
+
+    def _harvest(self, text):
+        return harvest({"full_text": text, "pages": [{"fields": [], "tables": []}]}, self.FIELDS)[0]
+
+    def test_the_ways_the_sheet_writes_it(self):
+        for escrito in (
+            "Notaria de Fe Publica N° 2 de este Municipio",
+            "Notaria de Fe Publica N 2 de este Municipio",
+            "Notaria de Fe Publica No.2 de este Municipio",
+            "Notario de Fe Publica Nro. 2 del Distrito Judicial",
+            "Notario de Fe Publica de Primera Clase No 2 Dr. Tatiana Cespedes",
+        ):
+            with self.subTest(escrito=escrito):
+                self.assertEqual(self._harvest(escrito)["notary_number"], "2")
+
+    def test_the_street_of_the_notaria_is_not_its_number(self):
+        """La misma frase que la nombra dice dónde queda: "COMPARECE: en esta
+        Notaría ubicada en la calle Lanza N° 476". Con el rótulo alcanzaba para
+        guardar 476 como el notario."""
+        values = self._harvest(
+            "Notaria de Fe Publica de este Municipio, en la calle Lanza N 476 casi esquina Calama"
+        )
+        self.assertIsNone(values["notary_number"])
+
+    def test_the_number_of_the_tramite_is_not_its_number_either(self):
+        values = self._harvest(
+            "Notaria de Fe Publica, tramite N 3122/2026 PROGRAMA MI CASA SEGURA III"
+        )
+        self.assertIsNone(values["notary_number"])
+
+    def test_the_sheet_that_does_rotulate_it_still_counts(self):
+        """La hoja que sí lo rotula, con el número donde empieza el valor."""
+        reading = {
+            "full_text": "NOTARIA DE FE PUBLICA N 23 DEL DISTRITO JUDICIAL",
+            "pages": [{"fields": [], "tables": []}],
+        }
+        self.assertEqual(harvest(reading, self.FIELDS)[0]["notary_number"], "23")
 
 
 class LoQueSeLePreguntaALaFotoTests(unittest.TestCase):

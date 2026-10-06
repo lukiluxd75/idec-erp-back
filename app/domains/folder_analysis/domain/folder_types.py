@@ -298,6 +298,9 @@ class DocumentField:
     # The office asks for this one by number, not by name (the notary), so only the number of what was read is kept.
     number_only: bool = False
     patterns: Tuple[str, ...] = ()
+    # Los patrones que necesitan los renglones de la hoja sin juntar, para el
+    # valor que vive en un cuadro: se prueban antes que los de la redacción.
+    line_patterns: Tuple[str, ...] = ()
     # Cómo viene escrito el valor DENTRO del sello, para un campo que vive en la estampa redonda y no en la redacción.
     seal_patterns: Tuple[str, ...] = ()
     # Post-processing of what the pattern matched.
@@ -363,8 +366,15 @@ _NAME_WORD = rf"\b{_NOT_A_NAME}[A-Z]{{2,}}"
 # Los enlaces que SÍ van dentro de un apellido ("MARIA DE LA CRUZ PEREZ").
 _NAME_LINK = r"(?:DE|DEL|LA|LAS|LOS|Y|DA|DOS)"
 
+# El espacio que separa dos palabras de un nombre: cualquiera menos el salto de
+# renglón. Un nombre no sigue en el renglón de abajo, y leyendo la hoja renglón
+# por renglón (`line_patterns`) eso es justamente lo que lo mantiene en su celda.
+_WITHIN_LINE = r"[^\S\n]"
+
 # Un nombre completo: de dos a cinco palabras, con sus enlaces.
-_NAME = rf"{_NAME_WORD}(?:\s+(?:{_NAME_LINK}\s+){{0,2}}{_NAME_WORD}){{1,4}}"
+_NAME = (
+    rf"{_NAME_WORD}(?:{_WITHIN_LINE}+(?:{_NAME_LINK}{_WITHIN_LINE}+){{0,2}}{_NAME_WORD}){{1,4}}"
+)
 
 # La prosa que un acta mete ENTRE el nombre y su cédula ("NOELIA ALMENDRAS RODRIGUEZ, boliviana, mayor de edad, con C.I.
 _BETWEEN = rf"(?:[\s,.;-]+(?:{_NOT_NAME})\b)*"
@@ -378,20 +388,30 @@ NOTARIAL_FIELDS: Tuple["DocumentField", ...] = (
         printed=("NOTARIA DE FE PUBLICA", "NOTARIA", "NOTARIO"),
         number_only=True,
         patterns=(
-            r"NOTARI[AO]\s*DE\s*FE[A-Z\s,.-]{0,40}?(?:NRO|N[O0°])\.?\s*(\d{1,3})\b",
+            r"NOTARI[AO]\s*DE\s*FE[A-Z\s,.-]{0,40}?(?:NRO|N[O0°º])\.?\s*(\d{1,3})\b",
+            # La misma redacción, con la marca de número a secas: el OCR se come
+            # el gradito o lo cambia por otra cosa ("Notaria de Fe Pública N 2",
+            # "N^2"). La ventana es más corta que la de arriba porque una N
+            # suelta se confunde más fácil -- la de la calle Lanza N° 476 que esa
+            # misma frase nombra unas palabras después.
+            r"NOTARI[AO]\s*DE\s*FE[A-Z\s,.-]{0,30}?\bN\s*[.^*~:-]?\s*(\d{1,3})\b",
         ),
         seal_patterns=(
             # "NOTARIA DE FE PUBLICA No.
-            r"(?:NRO|N[O0°])\.?\s*(\d{1,3})\b",
+            r"(?:NRO|N[O0°º])\.?\s*(\d{1,3})\b",
             # El sello con la marca a secas, que es como sale impreso en el medio de muchos: "N 37" bajo "NOTARIA DE FE PUBLICA".
-            r"\bN\s*\.?\s*(\d{1,3})\b",
+            r"\bN\s*[.^*~]?\s*(\d{1,3})\b",
             # El sello al que el OCR le comió la marca: "DE PRIMERA CLASE 48".
             r"CLASE\s*(\d{1,3})\b",
         ),
         rejected_after=("RESOLUCION MINISTERIAL", "RESOLUCION", "MINISTERIAL", "R.M."),
         vision_hint=(
-            "el número de la notaría, que está DENTRO del sello redondo estampado en la hoja "
-            '(dice "NOTARIA DE FE PUBLICA" alrededor y el número en el medio, por ejemplo "Nº 37"). '
+            "el número de la notaría, que está DENTRO de un sello estampado en la hoja. Puede ser "
+            'el sello redondo (dice "NOTARIA DE FE PUBLICA" alrededor y el número en el medio, por '
+            'ejemplo "Nº 37") o el rectangular, que trae el nombre del notario, "NOTARIA DE FE '
+            'PÚBLICA" y el número en renglones derechos. El sello puede estar en cualquier página y '
+            "en cualquier parte de la hoja: encimado al título de arriba, o abajo junto a las firmas "
+            "y las huellas. "
             "Devuelva solo el número. NUNCA el número de la Resolución Ministerial impresa bajo el "
             'título "FORMULARIO NOTARIAL" (por ejemplo "Resolución Ministerial Nº 57/2020"), que no '
             "es el notario; ni el número de la cédula, ni el del trámite, ni una fecha."
@@ -403,9 +423,30 @@ NOTARIAL_FIELDS: Tuple["DocumentField", ...] = (
         printed=("NOMBRE DEL PROPIETARIO", "PROPIETARIO", "DECLARANTE"),
         collect_all=True,
         item_label="Poseedor",
+        line_patterns=(
+            # La tabla de firmas del pie, que no todas las hojas traen: una fila
+            # por poseedor, con su nombre y debajo su cédula ("DAVID FERNANDEZ
+            # BURGOA / Cédula de Identidad 6515581").
+            #
+            # Se lee por celda y por renglón, no en la redacción corrida, porque
+            # la fila sigue a la derecha con la firma y la huella y detrás se
+            # transparenta el reverso de la hoja: leído todo junto, esos
+            # garabatos se le pegaban al nombre ("DAVID FERNANDEZ BURGOA AP
+            # EIOUAPISAU"). La celda es la que corta por el costado, así que va
+            # primero; el renglón queda para la hoja a la que no se le
+            # reconocieron los cuadros.
+            rf"({_NAME})\b[ \t,.;:-]*{_ID_NUMBER}",
+            rf"(?m)^(?:\d{{1,2}}{_WITHIN_LINE}*[.-]{{0,2}}{_WITHIN_LINE}*)?({_NAME})\b[^\n]*\n"
+            rf"{_WITHIN_LINE}{{0,4}}{_ID_NUMBER}",
+        ),
         patterns=(
             # El nombre que lleva su cédula detrás, que es como lo escriben todas estas hojas.
             rf"({_NAME}){_BETWEEN}[\s,.;-]*\bCON\s+{_ID_NUMBER}",
+            # La hoja que dicta la cédula con todas sus letras y recién después
+            # la escribe en cifras, entre paréntesis ("con Cédula de Identidad
+            # Número: seis, cinco, uno, cinco, cinco, ocho, uno (6515581)"):
+            # entre el rótulo y la primera cifra hay un renglón de palabras.
+            rf"({_NAME}){_BETWEEN}[\s,.;-]*\bCON\s+{_ID_CARD}[^()\d]{{0,120}}\(\s*\d{{5,10}}\s*\)",
             # La hoja que presenta al declarante y no le escribe la cédula al lado.
             rf"\bSE\s+HI(?:ZO|CIERON)\s+PRESENTES?\b[\s,:.;-]+({_NAME})",
             rf"\bSE\s+PRESENT(?:O|ARON|A|AN)\b[\s,:.;-]+({_NAME})",

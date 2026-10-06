@@ -107,7 +107,11 @@ def _from_patterns(text: str, spec: Any, patterns: Optional[Sequence[str]] = Non
     most surely down to the one that only usually does.
 
     `patterns` replaces the field's own list, for a reading that is not the text
-    of the sheet and has its own wording -- the text of a seal (`seal_patterns`).
+    of the sheet and has its own wording: the text of a seal (`seal_patterns`),
+    or the sheet with its lines kept apart (`line_patterns`), which is what a
+    value that lives inside a cuadro needs -- there a line is a cell, and what
+    the row carries further right (the signature, the thumbprint, the back of the
+    sheet showing through) must not stick to what is captured.
     """
     transform = TRANSFORMS.get(getattr(spec, "transform", None))
     collect_all = getattr(spec, "collect_all", False)
@@ -142,6 +146,22 @@ def _labelled_pairs(reading: Dict[str, Any]) -> List[Tuple[str, str]]:
             if name and value:
                 pairs.append((compact(name), value))
     return pairs
+
+
+def _cells(reading: Dict[str, Any]) -> List[str]:
+    """El texto de cada celda de cada cuadro, una por renglón.
+
+    Una celda es una unidad igual que un renglón, y además es la única que corta
+    por el costado: en la tabla de firmas del pie, el nombre del poseedor está en
+    su celda y la firma garabateada en la de al lado, así que leída la celda el
+    garabato no se le pega al nombre.
+    """
+    cells: List[str] = []
+    for page in reading.get("pages") or []:
+        for table in page.get("tables") or []:
+            for row in table or []:
+                cells.extend(cell for cell in (normalize(text) for text in row or []) if cell)
+    return cells
 
 
 def _ends_the_label(text: str, position: int) -> bool:
@@ -185,7 +205,9 @@ def _lines(text: str) -> List[str]:
     return [line for line in (normalize(raw) for raw in (text or "").splitlines()) if line]
 
 
-def _from_text(lines: Sequence[str], alias: str, used: set) -> Optional[Tuple[str, int]]:
+def _from_text(
+    lines: Sequence[str], alias: str, used: set, spec: Optional[Any] = None
+) -> Optional[Tuple[str, int]]:
     """The label written in the body of the sheet, with what follows it, and the
     line it was found on (so a longer label does not lend its line to a shorter
     one: "FONDO 2 24.80" is not where "FONDO" gets its value from)."""
@@ -198,12 +220,32 @@ def _from_text(lines: Sequence[str], alias: str, used: set) -> Optional[Tuple[st
                 if not _ends_the_label(line, position):
                     break
                 value = _cut(line[position:])
-                if value:
+                if value and _answers_the_label(spec, value):
                     return value, index
                 break
             if char.isalnum():
                 seen += 1
     return None
+
+
+# Un número puesto donde empieza el valor: pegado al rótulo o detrás de su marca.
+_MARKED_NUMBER = re.compile(r"^\W{0,3}(?:NRO|N[O0°º]?)?\W{0,3}\d")
+
+
+def _answers_the_label(spec: Optional[Any], value: str) -> bool:
+    """Whether what follows the label inside a line really is its value.
+
+    Only asked of a field kept by its number (the notary), because that is where
+    a label found in the running prose turns into a wrong value instead of none:
+    "NOTARIA DE FE PUBLICA" is not a label on a form, it is part of the sentence,
+    and the first figure after it is as likely to be the street the notaría is on
+    ("en la calle Lanza N° 476") or the number of the trámite as the notary's.
+    Taken only when the number is where the value starts, which is how a sheet
+    that does rotulate it writes it ("NOTARIA DE FE PUBLICA: N 23 DEL DISTRITO").
+    """
+    if spec is None or not getattr(spec, "number_only", False):
+        return True
+    return bool(_MARKED_NUMBER.match(value))
 
 
 def _cut(value: str) -> Optional[str]:
@@ -226,12 +268,18 @@ def harvest(
     text = reading.get("full_text") or ""
     lines = _lines(text)
     prose = normalize(text)
+    # La hoja renglón por renglón, con cada celda de cada cuadro como uno más:
+    # para lo que vive en un cuadro y se pierde cuando la hoja se vuelve una
+    # sola línea (ver _from_patterns).
+    rows = "\n".join(lines + _cells(reading))
     found: Dict[str, str] = {}
     taken: set = set()
     used_lines: set = set()
 
     for spec in specs:
-        value = _from_patterns(prose, spec)
+        value = _from_patterns(rows, spec, getattr(spec, "line_patterns", ())) or _from_patterns(
+            prose, spec
+        )
         if value:
             found[spec.key] = value
 
@@ -250,7 +298,7 @@ def harvest(
     for spec, alias in _aliases(specs):
         if spec.key in found:
             continue
-        hit = _from_text(lines, alias, used_lines)
+        hit = _from_text(lines, alias, used_lines, spec)
         if hit:
             found[spec.key], line_index = hit
             used_lines.add(line_index)
