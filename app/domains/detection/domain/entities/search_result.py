@@ -6,14 +6,24 @@ FastAPI (see CLAUDE.md §3).
 
 `kind` discriminates which of the optional fields are populated:
 - "sector": sector_id, status, geom_geojson (the sector's own polygon, to
-  fitBounds on).
+  fitBounds on) -- PLUS the campaign_* fields below, if the sector has one.
 - "parcel": sector_id (which sector it belongs to), cadastral_code,
   validation_status, geom_geojson (the PARCEL's own polygon this time, for a
-  tighter fitBounds than the whole sector).
+  tighter fitBounds than the whole sector) -- PLUS the campaign_* fields
+  below, from the parcel's own sector.
 - "campaign": campaign_id, campaign_code, year_a, year_b (enough to drive
   the same campaign-switch flow the "Campaña" dropdown already uses --
   switching campaign resets the map, it doesn't fitBounds anywhere, since a
-  campaign has no single polygon)."""
+  campaign has no single polygon).
+
+campaign_id/campaign_code/campaign_name/year_a/year_b are set on "sector"
+and "parcel" results too (not just "campaign" ones): the map overlay only
+renders sectors belonging to whatever campaign is currently active, so
+landing on a sector/predio from a DIFFERENT campaign needs to switch to its
+campaign first, or its real polygon never appears -- confirmed bug: without
+this, the architect's view centers on the right spot but shows nothing
+(the search's own temporary highlight clears itself after a couple of
+seconds, with no durable polygon left behind)."""
 from dataclasses import dataclass
 from typing import Any, Optional
 

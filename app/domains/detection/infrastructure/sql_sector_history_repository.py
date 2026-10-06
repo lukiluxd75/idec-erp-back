@@ -259,16 +259,7 @@ class SqlSectorHistoryRepository(SectorHistoryPort):
             sector_query = sector_query.filter(ProcessedSectorModel.id == int(q))
         else:
             sector_query = sector_query.filter(ProcessedSectorModel.name.ilike(like))
-        for s in sector_query.order_by(ProcessedSectorModel.id.desc()).limit(limit).all():
-            results.append(
-                SearchResult(
-                    kind="sector",
-                    label=s.name or f"Sector #{s.id}",
-                    sector_id=s.id,
-                    status=s.status,
-                    geom_geojson=_geom_to_geojson(s.geom),
-                )
-            )
+        sectors_found = sector_query.order_by(ProcessedSectorModel.id.desc()).limit(limit).all()
 
         parcel_rows = (
             self._db.query(AffectedParcelModel, ProcessedSectorModel)
@@ -279,6 +270,40 @@ class SqlSectorHistoryRepository(SectorHistoryPort):
             .limit(limit)
             .all()
         )
+
+        # Selecting a sector/predio result must also switch the map to ITS
+        # campaign (see MapSearchBox's callers in DetectionPage) -- without
+        # this, the map overlay stays scoped to whatever campaign was
+        # already active and the found sector's real polygon never renders
+        # (confirmed: the architect lands on the right spot but sees
+        # nothing, since the sector isn't in the currently-loaded,
+        # campaign-filtered list). Batch-fetch once for both kinds.
+        campaign_ids = {s.campaign_id for s in sectors_found if s.campaign_id}
+        campaign_ids |= {sector.campaign_id for _, sector in parcel_rows if sector.campaign_id}
+        campaigns_by_id = (
+            {c.id: c for c in self._db.query(CampaignModel).filter(CampaignModel.id.in_(campaign_ids)).all()}
+            if campaign_ids
+            else {}
+        )
+
+        def _campaign_fields(campaign_id: Optional[int]) -> dict:
+            c = campaigns_by_id.get(campaign_id) if campaign_id else None
+            if not c:
+                return {}
+            return {"campaign_id": c.id, "campaign_code": c.code, "campaign_name": c.name, "year_a": c.year_a, "year_b": c.year_b}
+
+        for s in sectors_found:
+            results.append(
+                SearchResult(
+                    kind="sector",
+                    label=s.name or f"Sector #{s.id}",
+                    sector_id=s.id,
+                    status=s.status,
+                    geom_geojson=_geom_to_geojson(s.geom),
+                    **_campaign_fields(s.campaign_id),
+                )
+            )
+
         for parcel, sector in parcel_rows:
             results.append(
                 SearchResult(
@@ -288,6 +313,7 @@ class SqlSectorHistoryRepository(SectorHistoryPort):
                     cadastral_code=parcel.cadastral_code,
                     validation_status=parcel.validation_status,
                     geom_geojson=_geom_to_geojson(parcel.parcel_geom) if parcel.parcel_geom is not None else None,
+                    **_campaign_fields(sector.campaign_id),
                 )
             )
 
