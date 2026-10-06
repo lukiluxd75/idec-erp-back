@@ -2,8 +2,8 @@ import logging
 
 from app.domains.resolutions.domain.entities.resolution import PlanPage, PlantaStatus
 from app.domains.resolutions.domain.exceptions import PlanOcrUnavailableException, PlanPageNotFoundException
-from app.domains.resolutions.domain.plan_tiles import LADOS, mosaicos
-from app.domains.resolutions.domain.plan_title import TitleBlock, detect_plantas
+from app.domains.resolutions.domain.plan_tiles import LADOS, mosaicos, recortes_de_titulo
+from app.domains.resolutions.domain.plan_title import TitleBlock, detect_plantas, parece_trozo_de_titulo
 from app.domains.resolutions.domain.ports.plan_ocr_port import PlanOcrPort
 from app.domains.resolutions.domain.ports.resolution_repository_port import ResolutionRepositoryPort
 
@@ -47,6 +47,11 @@ class DetectPlanPagePlantaUseCase:
                     deteccion = detect_plantas(bloques)
                     if deteccion.plantas:
                         break
+                if not deteccion.plantas:
+                    # Los mosaicos pueden partir el título en el borde ("PLANTA 6" /
+                    # "6°PIS0"): se relee una ventana alrededor de cada trozo.
+                    bloques = bloques + self._releer_trozos(content, order_index, bloques)
+                    deteccion = detect_plantas(bloques)
             except PlanOcrUnavailableException as exc:
                 logger.warning("resolutions: OCR por mosaicos del plano %s/%s falló: %s", resolution_id, order_index, exc)
         detalle = {"motivo": deteccion.motivo, "candidatos": deteccion.candidatos, "bloques_ocr": len(bloques)}
@@ -65,3 +70,11 @@ class DetectPlanPagePlantaUseCase:
             for b in self._ocr.read(jpg, f"plano_{order_index}_m{n}.jpg"):
                 bloques.append(TitleBlock(b.text, b.x0 + x0, b.y0 + y0, b.x1 + x0, b.y1 + y0))
         return bloques
+
+    def _releer_trozos(self, content: bytes, order_index: int, bloques: list) -> list:
+        anclas = [(b.x0, b.y0, b.x1, b.y1) for b in bloques if parece_trozo_de_titulo(b.text)]
+        nuevos = []
+        for n, (jpg, x0, y0) in enumerate(recortes_de_titulo(content, anclas)):
+            for b in self._ocr.read(jpg, f"plano_{order_index}_r{n}.jpg"):
+                nuevos.append(TitleBlock(b.text, b.x0 + x0, b.y0 + y0, b.x1 + x0, b.y1 + y0))
+        return nuevos
