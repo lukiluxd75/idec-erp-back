@@ -50,7 +50,14 @@ class AreaModel(Base):
     )
     id_area_padre = Column(Integer, ForeignKey("area.id_area", ondelete="SET NULL"), nullable=True)
 
-    area_padre = relationship("AreaModel", remote_side="AreaModel.id_area")
+    # Con el camino completo y no solo "AreaModel": el dominio security tiene su
+    # propia clase con ese nombre (tabla `areas`, la del RBAC), y sobre la misma
+    # base declarativa el nombre a secas es ambiguo -- SQLAlchemy no arma ningún
+    # mapper y toda consulta muere con "Multiple classes found for path".
+    area_padre = relationship(
+        "app.domains.cite.infrastructure.models.AreaModel",
+        remote_side="app.domains.cite.infrastructure.models.AreaModel.id_area",
+    )
     configuraciones = relationship("ConfiguracionCiteModel", back_populates="area")
 
 
@@ -66,7 +73,9 @@ class ConfiguracionCiteModel(Base):
     prefijo = Column(String(20), nullable=False)
     activo = Column(Boolean, default=True, nullable=False)
 
-    area = relationship("AreaModel", back_populates="configuraciones")
+    area = relationship(
+        "app.domains.cite.infrastructure.models.AreaModel", back_populates="configuraciones"
+    )
     gestion = relationship("GestionModel", back_populates="configuraciones")
     documentos = relationship("DocumentoCiteModel", back_populates="configuracion")
 
