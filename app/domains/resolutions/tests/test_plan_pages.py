@@ -71,6 +71,12 @@ class TituloDePlantaTest(unittest.TestCase):
             "PLANTA SEMI SOTANO": ["PLANTA SEMISOTANO"],
             "PLANTA SÓTANO": ["PLANTA SOTANO"],
             "PLANTA BAJA.": ["PLANTA BAJA"],
+            # El OCR de los planos de dibujante lo lee pegado y con puntos.
+            ".PLANTABAJA..": ["PLANTA BAJA"],
+            "...PLANTASAJA.": ["PLANTA BAJA"],
+            ".PLANTA1°PISO...": _pisos(1),
+            "PLANTA3PISO": _pisos(3),
+            "PLANTATIPO2-4PISO": _pisos(2, 3, 4),
         }
         for texto, plantas in casos.items():
             with self.subTest(texto):
@@ -262,6 +268,150 @@ class PaginasDelPlanoTest(unittest.TestCase):
         page = self._pagina(1)
         self.assertEqual(page.plantas, ["PLANTA BAJA"])
         self.assertEqual(page.planta_status, PlantaStatus.MANUAL)
+
+
+class MosaicosTest(unittest.TestCase):
+    def test_cubre_la_imagen_con_solape_y_conserva_posicion(self):
+        import cv2
+        import numpy as np
+
+        from app.domains.resolutions.domain.plan_tiles import mosaicos
+
+        imagen = np.full((3000, 900, 3), 255, np.uint8)
+        ok, jpg = cv2.imencode(".jpg", imagen)
+        tiles = mosaicos(jpg.tobytes(), 700)
+        self.assertGreater(len(tiles), 4)
+        self.assertEqual(sorted({x0 for _, x0, _ in tiles}), [0, 560])
+        ultimo_y = max(y0 for _, _, y0 in tiles)
+        _, _, y0 = [t for t in tiles if t[2] == ultimo_y][0]
+        alto = cv2.imdecode(np.frombuffer([t for t in tiles if t[2] == ultimo_y][0][0], np.uint8), 1).shape[0]
+        self.assertEqual(ultimo_y + alto, 3000)
+
+    def test_imagen_chica_no_se_corta(self):
+        import cv2
+        import numpy as np
+
+        from app.domains.resolutions.domain.plan_tiles import mosaicos
+
+        ok, jpg = cv2.imencode(".jpg", np.full((500, 500, 3), 255, np.uint8))
+        self.assertEqual(mosaicos(jpg.tobytes(), 700), [])
+
+
+class CortesTest(unittest.TestCase):
+    def test_tramos_cubren_el_largo_con_solape(self):
+        from app.domains.resolutions.domain.plan_tiles import SOLAPE, _cortes
+
+        self.assertEqual(_cortes(500, 700), [(0, 500)])
+        self.assertEqual(_cortes(700, 700), [(0, 700)])
+        self.assertEqual(_cortes(1260, 700), [(0, 700), (560, 1260)])
+        tramos = _cortes(3000, 700)
+        self.assertEqual(tramos[0][0], 0)
+        self.assertEqual(tramos[-1][1], 3000)
+        for (_, fin), (ini, _) in zip(tramos, tramos[1:]):
+            self.assertEqual(fin - ini, int(700 * SOLAPE))  # solape fijo entre vecinos
+        self.assertTrue(all(fin - ini <= 700 for ini, fin in tramos))
+
+    def test_demasiados_mosaicos_no_se_cortan(self):
+        from unittest import mock
+
+        import cv2
+        import numpy as np
+
+        from app.domains.resolutions.domain import plan_tiles
+
+        ok, jpg = cv2.imencode(".jpg", np.full((3000, 900, 3), 255, np.uint8))
+        self.assertGreater(len(plan_tiles.mosaicos(jpg.tobytes(), 700)), 2)
+        with mock.patch.object(plan_tiles, "MAX_MOSAICOS", 2):
+            self.assertEqual(plan_tiles.mosaicos(jpg.tobytes(), 700), [])
+
+    def test_imagen_ilegible(self):
+        from app.domains.resolutions.domain.plan_tiles import mosaicos
+
+        self.assertEqual(mosaicos(b"no es una imagen", 700), [])
+
+
+class OcrPorTamano(PlanOcrPort):
+    """OCR de mentira: la pagina entera no lee nada; en un mosaico devuelve
+    `por_mosaico(alto_del_mosaico, n)` (n = indice del mosaico en el nombre)."""
+
+    def __init__(self, por_mosaico, falla_en_mosaicos=False):
+        self._por_mosaico = por_mosaico
+        self._falla = falla_en_mosaicos
+        self.llamadas = []
+
+    def read(self, image_bytes, filename="plano.jpg"):
+        import cv2
+        import numpy as np
+
+        self.llamadas.append(filename)
+        if "_m" not in filename:
+            return []
+        if self._falla:
+            raise PlanOcrUnavailableException("El servicio OCR no respondió a tiempo.")
+        alto = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), 1).shape[0]
+        return self._por_mosaico(alto, int(filename.rsplit("_m", 1)[1].split(".")[0]))
+
+
+class DeteccionPorMosaicosTest(unittest.TestCase):
+    def setUp(self):
+        import cv2
+        import numpy as np
+
+        self.repo = _new_repo()
+        ok, jpg = cv2.imencode(".jpg", np.full((3000, 900, 3), 255, np.uint8))
+        AddPlanPagesUseCase(self.repo).execute("res-1", [(jpg.tobytes(), "image/jpeg", [])], "app", USER)
+
+    def _detectar(self, ocr):
+        return DetectPlanPagePlantaUseCase(self.repo, ocr).execute("res-1", 1)
+
+    def test_titulo_que_solo_se_lee_en_un_mosaico(self):
+        # Mosaicos de 1400 de alto en y = 0, 1120, 2240: el titulo cae en el segundo.
+        ocr = OcrPorTamano(
+            lambda alto, n: [TitleBlock("PLANTA BAJA", 10, 20, 500, 120)] if (alto == 1400 and n == 1) else []
+        )
+        page = self._detectar(ocr)
+        self.assertEqual(page.plantas, ["PLANTA BAJA"])
+        self.assertEqual(page.planta_status, PlantaStatus.DETECTADA)
+        # Se leyo en mosaicos de 1400 y, al detectarse ahi, no se paso a los de 700.
+        self.assertEqual(ocr.llamadas, ["plano_1.jpg", "plano_1_m0.jpg", "plano_1_m1.jpg", "plano_1_m2.jpg"])
+
+    def test_coordenadas_del_mosaico_se_llevan_a_la_pagina(self):
+        from unittest import mock
+
+        from app.domains.resolutions.application.use_cases import detect_plan_page_planta_use_case as uc
+
+        vistos = []
+
+        def espia(bloques):
+            vistos.append(list(bloques))
+            return detect_plantas(bloques)
+
+        ocr = OcrPorTamano(
+            lambda alto, n: [TitleBlock("PLANTA BAJA", 10, 20, 500, 120)] if (alto == 1400 and n == 1) else []
+        )
+        with mock.patch.object(uc, "detect_plantas", espia):
+            self._detectar(ocr)
+        final = vistos[-1]
+        self.assertEqual([(b.text, b.x0, b.y0, b.x1, b.y1) for b in final], [("PLANTA BAJA", 10, 1140, 500, 1240)])
+
+    def test_baja_a_mosaicos_mas_chicos_si_con_los_grandes_no_basta(self):
+        ocr = OcrPorTamano(
+            lambda alto, n: [TitleBlock("PLANTA 1° PISO", 0, 0, 400, 60)] if (alto <= 700 and n == 0) else []
+        )
+        page = self._detectar(ocr)
+        self.assertEqual(page.plantas, _pisos(1))
+        # Pagina + 3 mosaicos de 1400 (sin titulo) + mosaicos de 700.
+        self.assertGreater(len(ocr.llamadas), 4)
+
+    def test_sin_titulo_en_ningun_mosaico(self):
+        page = self._detectar(OcrPorTamano(lambda alto, n: [TitleBlock("COCINA", 0, 0, 80, 20)]))
+        self.assertEqual(page.plantas, [])
+        self.assertEqual(page.planta_status, PlantaStatus.SIN_TITULO)
+
+    def test_ocr_que_falla_en_los_mosaicos_deja_sin_titulo(self):
+        page = self._detectar(OcrPorTamano(lambda alto, n: [], falla_en_mosaicos=True))
+        self.assertEqual(page.planta_status, PlantaStatus.SIN_TITULO)
+        self.assertEqual(page.plantas, [])
 
 
 if __name__ == "__main__":

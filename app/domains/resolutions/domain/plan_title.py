@@ -63,9 +63,12 @@ _PISO = r"PIS[O0]"
 _ORDINAL = r"(?:ER|RO|DO|TO|VO|NO|MO)?"
 _NUM = r"(\d{1,2}|[IL])"
 
-_RE_ESPECIAL = re.compile(r"^PLANTA (SEMI ?SOTANO|SOTANO|BAJA)$")
+# Los espacios son opcionales: el OCR suele leer el título de estos planos
+# pegado (".PLANTABAJA..", "PLANTA1°PISO.") -- los puntos y marcas de ordinal
+# ya los saca _normalizar.
+_RE_ESPECIAL = re.compile(r"^PLANTA ?(SEMI ?SOTANO|SOTANO|[BS8]AJA)$")
 _RE_PISOS = re.compile(
-    rf"^PLANTA (?:TIPO )?{_NUM} ?{_ORDINAL}(?: ?(?:-|A|AL|Y) ?{_NUM} ?{_ORDINAL})? ?{_PISO}$"
+    rf"^PLANTA ?(?:TIPO ?)?{_NUM} ?{_ORDINAL}(?: ?(?:-|A|AL|Y) ?{_NUM} ?{_ORDINAL})? ?{_PISO}$"
 )
 
 
@@ -79,7 +82,7 @@ def plantas_de_titulo(texto: str) -> Optional[List[str]]:
     t = _normalizar(texto)
     m = _RE_ESPECIAL.match(t)
     if m:
-        nombre = "SEMISOTANO" if m.group(1).startswith("SEMI") else m.group(1)
+        nombre = "SEMISOTANO" if m.group(1).startswith("SEMI") else ("BAJA" if m.group(1).endswith("AJA") else m.group(1))
         return [f"PLANTA {nombre}"]
     m = _RE_PISOS.match(t)
     if not m:
