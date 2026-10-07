@@ -20,7 +20,8 @@ from fastapi import APIRouter
 
 logger = logging.getLogger("uvicorn.error")
 
-# (package name under app.domains, URL prefix).
+# (package name under app.domains, URL prefix). An empty prefix means the
+# domain's own router already carries whatever path it wants to live at.
 _DOMAINS: tuple[tuple[str, str], ...] = (
     ("security", ""),
     ("geoextraction", "/geoextraction"),
@@ -35,6 +36,7 @@ _DOMAINS: tuple[tuple[str, str], ...] = (
     ("folder_analysis", "/folder-analysis"),
     ("procedurereports", "/procedurereports"),
     ("cite", ""),
+    ("cadastralviewer", ""),
 )
 
 api_router = APIRouter()
