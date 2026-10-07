@@ -24,8 +24,7 @@ class FolioListItem(BaseModel):
 
 class FolioDetail(FolioListItem):
     pages: List[FolioPageItem]
-    # What the pipeline extracted, what the reviewer saved, and the one to show
-    # (reviewed if any, else extracted).
+    # What the pipeline extracted, what the reviewer saved, and the one to show (reviewed if any, else extracted).
     extracted_data: Optional[Dict[str, Any]] = None
     reviewed_data: Optional[Dict[str, Any]] = None
     data: Optional[Dict[str, Any]] = None

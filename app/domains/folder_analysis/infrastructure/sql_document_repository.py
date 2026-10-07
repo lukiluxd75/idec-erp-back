@@ -51,6 +51,7 @@ def _to_entity(row: DocumentModel, with_data: bool) -> FolderDocument:
         extracted_data=row.extracted_data if with_data else None,
         reviewed_data=row.reviewed_data if with_data else None,
         error=row.error,
+        stage=row.stage,
         analyzed_at=row.analyzed_at,
         reviewed_at=row.reviewed_at,
     )
@@ -149,8 +150,6 @@ class SqlDocumentRepository(DocumentRepositoryPort):
 
     def replace_pages(self, document_id: str, capture_ids: List[str]) -> None:
         row = self._row(document_id, with_data=True)
-        # Flush the removal first: the (document_id, page_index) and capture_id
-        # unique constraints would clash with the new rows otherwise.
         row.pages.clear()
         self._db.flush()
         row.pages.extend(_new_pages(capture_ids))
@@ -201,8 +200,17 @@ class SqlDocumentRepository(DocumentRepositoryPort):
                 page_row.status, page_row.result, page_row.error = page.status, page.result, page.error
         row.status = status
         row.error = error
+        if status not in DocumentStatus.IN_PROGRESS:
+            row.stage = None
         if extracted_data is not None:
             row.extracted_data = extracted_data
+        self._db.commit()
+
+    def set_stage(self, document_id: str, stage: Optional[str]) -> None:
+        row = self._row(document_id)
+        if row is None:
+            return
+        row.stage = stage
         self._db.commit()
 
     def save_review(self, document_id: str, data: Dict[str, Any]) -> None:
@@ -211,9 +219,7 @@ class SqlDocumentRepository(DocumentRepositoryPort):
         row.reviewed_data = data
         row.status = DocumentStatus.REVIEWED
         row.reviewed_at = reviewed_at
-        # Keep one typed, queryable row per reviewed source document. The JSON
-        # snapshot is retained alongside columns so no extractor/reviewer field
-        # is lost when a document shape evolves.
+        # Keep one typed, queryable row per reviewed source document.
         _delete_reviewed_snapshots(self._db, row.id)
 
         if row.doc_type == "folio":

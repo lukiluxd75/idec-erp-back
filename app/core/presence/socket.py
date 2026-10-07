@@ -37,9 +37,6 @@ class SocketPresence:
         self.user_sub = user_sub
         self.channel = channel
         self.is_mobile = is_mobile
-        # One id per socket, not per account: the same architect may have the
-        # app on a phone and the ERP open on the desktop, and each connection
-        # owns its own row.
         self.device_id = device_id or f"ws-{uuid.uuid4().hex[:16]}"
         self._task: Optional[asyncio.Task] = None
 
@@ -83,9 +80,6 @@ class SocketPresence:
         except asyncio.CancelledError:
             raise
         except Exception:
-            # A heartbeat that dies must not take the socket with it: the row
-            # simply expires and the badge goes grey, which is the truthful
-            # outcome if this worker can no longer talk to the database.
             logger.warning("presence: latido detenido en %s", self.channel, exc_info=True)
 
     async def stop(self) -> None:
@@ -114,11 +108,6 @@ def is_phone_connected(user_sub: str, module_channel: str) -> bool:
         db = SessionLocal()
         return SqlPresenceStore(db).is_phone_connected(user_sub, module_channel)
     except Exception:
-        # Tambien cubre el fallo al ABRIR la sesion, no solo la consulta: esto
-        # se llama desde el broadcast de presencia, que corre dentro de
-        # manager.connect(); si lanzara, tumbaria la conexion del websocket.
-        # Ante la duda, "no conectado": apagar el indicador es mejor que
-        # afirmar un celular del que no se sabe nada.
         logger.warning("presence: no se pudo leer %s", module_channel, exc_info=True)
         return False
     finally:

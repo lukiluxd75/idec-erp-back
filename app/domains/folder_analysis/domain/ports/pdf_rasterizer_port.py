@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Optional
 
 
 class PdfRasterizerPort(ABC):
@@ -12,8 +12,11 @@ class PdfRasterizerPort(ABC):
     nothing downstream has to know it was ever a PDF."""
 
     @abstractmethod
-    def pages(self, content: bytes, max_pages: int) -> List[bytes]:
+    def pages(self, content: bytes, max_pages: Optional[int] = None) -> List[bytes]:
         """The pages of `content` as JPEGs, in reading order.
 
+        `max_pages` en None es sin tope, que es como lo pide la bandeja: una
+        carpeta entera escaneada de una sola vez es un caso normal, no un abuso.
+
         Raises InvalidCaptureException if the file is not a readable PDF, if it
-        is protected by a password, or if it has more than `max_pages` pages."""
+        is protected by a password, or if it has more pages than `max_pages`."""

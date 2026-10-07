@@ -11,9 +11,6 @@ class RotatedImage:
     content: bytes  # JPEG
     width: int
     height: int
-    # Maps a point of the source image onto this one (x' = M·[x, y, 1]) -- lets
-    # the pipeline reuse the OCR it already ran on the source instead of paying
-    # another OCR call just to learn where things moved.
     matrix: Affine
 
 

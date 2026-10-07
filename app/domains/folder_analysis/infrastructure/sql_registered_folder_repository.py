@@ -66,11 +66,32 @@ class SqlRegisteredFolderRepository(RegisteredFolderRepositoryPort):
             return None
         return self._to_entity(row)
 
+    def find_any(self, folder_id: str) -> Optional[RegisteredFolder]:
+        row = self._row(folder_id)
+        return None if row is None else self._to_entity(row)
+
     def list(self, user_sub: str) -> List[RegisteredFolder]:
         rows = self._db.execute(
             select(RegisteredFolderModel)
             .where(RegisteredFolderModel.user_sub == user_sub)
             .order_by(func.lower(RegisteredFolderModel.name))
+        ).scalars()
+        return [self._to_entity(row) for row in rows]
+
+    def search_by_name(
+        self, name: str, user_sub: Optional[str] = None, limit: int = 50
+    ) -> List[RegisteredFolder]:
+        term = (name or "").strip()
+        if not term:
+            return []
+        query = select(RegisteredFolderModel).where(
+            # ilike and not lower(): the column is indexed by nothing here either way, and ilike says what this is.
+            RegisteredFolderModel.name.ilike(f"%{_escape_like(term)}%", escape="\\")
+        )
+        if user_sub is not None:
+            query = query.where(RegisteredFolderModel.user_sub == user_sub)
+        rows = self._db.execute(
+            query.order_by(func.lower(RegisteredFolderModel.name)).limit(max(1, limit))
         ).scalars()
         return [self._to_entity(row) for row in rows]
 
@@ -137,8 +158,6 @@ class SqlRegisteredFolderRepository(RegisteredFolderRepositoryPort):
         row = self._row(folder_id)
         if row is None:
             return
-        # At the end of the carpeta, and only once: a document opened in it is
-        # already there, and filing it twice would break (folder_id, position).
         if any(str(item.document_id) == document_id for item in row.items):
             return
         row.items.append(
@@ -153,8 +172,6 @@ class SqlRegisteredFolderRepository(RegisteredFolderRepositoryPort):
         row = self._row(folder_id)
         if row is None:
             return
-        # Flush the removal first: the (folder_id, position) and document_id
-        # unique constraints would clash with the new rows otherwise.
         row.items.clear()
         self._db.flush()
         row.items.extend(_new_items(document_ids))
@@ -165,6 +182,11 @@ class SqlRegisteredFolderRepository(RegisteredFolderRepositoryPort):
         if row is not None:
             self._db.delete(row)
             self._db.commit()
+
+
+def _escape_like(term: str) -> str:
+    """The term as a literal inside a LIKE pattern."""
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _new_items(document_ids: List[str]) -> List[RegisteredFolderItemModel]:

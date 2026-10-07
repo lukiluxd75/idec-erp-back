@@ -59,7 +59,7 @@ pipeline {
                     New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
                 }
                 
-                $process = Start-Process robocopy -ArgumentList "`"$PWD`" `"$targetDir`" /MIR /XD .git .venv __pycache__ /XF Jenkinsfile /R:2 /W:1 /NJH /NJS" -Wait -NoNewWindow -PassThru
+                $process = Start-Process robocopy -ArgumentList "`"$PWD`" `"$targetDir`" /MIR /XD .git .venv __pycache__ /XF Jenkinsfile .env /R:2 /W:1 /NJH /NJS" -Wait -NoNewWindow -PassThru
                 
                 if ($process.ExitCode -le 7) {
                     Write-Host "Despliegue a IIS completado con éxito."
@@ -72,6 +72,7 @@ pipeline {
             }
         }
     }
+    
     post {
         success {
             echo '¡El pipeline del Backend se ejecutó y desplegó con éxito!'

@@ -35,19 +35,34 @@ _DOMAINS: tuple[tuple[str, str], ...] = (
     ("digitization", "/digitization"),
     ("folder_analysis", "/folder-analysis"),
     ("procedurereports", "/procedurereports"),
+    ("cite", ""),
     ("cadastralviewer", ""),
 )
 
 api_router = APIRouter()
 
+for _name, _prefix in _DOMAINS:
+    try:
+        _module = importlib.import_module(f"app.domains.{_name}.presentation.router")
+        api_router.include_router(_module.router, **({"prefix": _prefix} if _prefix else {}))
+    except Exception as exc:
+        # exc_info so the log carries the traceback: "No module named 'geoalchemy2'" alone does not say which import pulled it in.
+        logger.warning("Could not load domain '%s': %s", _name, exc, exc_info=True)
+
 
 def registered_domains() -> tuple[str, ...]:
-    """Return the domains this registry expects to mount."""
-    return tuple(name for name, _prefix in _DOMAINS)
+    """Domain names this module tries to mount, in mount order."""
+    return tuple(name for name, _ in _DOMAINS)
 
 
 def check_unregistered_domains() -> Iterable[str]:
-    """Find domain packages with routers that are missing from the registry."""
+    """Names of domains that exist under app/domains/ with a presentation router
+    but are absent from `_DOMAINS` — i.e. built but unreachable over HTTP.
+
+    Returns names rather than raising: a half-finished domain sitting on disk is
+    normal during development, and refusing to boot over it would be worse than
+    saying so. main.py logs the result at startup.
+    """
     import app.domains as domains_pkg
 
     known = set(registered_domains())
@@ -59,73 +74,8 @@ def check_unregistered_domains() -> Iterable[str]:
         try:
             spec = importlib.util.find_spec(router_path)
         except (ImportError, AttributeError, ValueError):
+            # find_spec imports parent packages, so a domain whose __init__ is broken raises here.
             continue
         if spec is not None:
             found.append(module.name)
     return tuple(found)
-
-try:
-    from app.domains.security.presentation.router import router as security_router
-    api_router.include_router(security_router)
-except Exception as exc:
-    logger.warning("Could not load domain 'security': %s", exc)
-
-try:
-    from app.domains.geoextraction.presentation.router import router as geoextraction_router
-    api_router.include_router(geoextraction_router, prefix="/geoextraction")
-except Exception as exc:
-    logger.warning("Could not load domain 'geoextraction': %s", exc)
-
-try:
-    from app.domains.detection.presentation.router import router as detection_router
-    api_router.include_router(detection_router, prefix="/detection")
-except Exception as exc:
-    logger.warning("Could not load domain 'detection': %s", exc)
-
-try:
-    from app.domains.resolutions.presentation.router import router as resolutions_router
-    api_router.include_router(resolutions_router)
-except Exception as exc:
-    logger.warning("Could not load domain 'resolutions': %s", exc)
-
-try:
-    from app.domains.chatbot.presentation.router import router as chatbot_router
-    api_router.include_router(chatbot_router)
-except Exception as exc:
-    logger.warning("Could not load domain 'chatbot': %s", exc)
-
-try:
-    from app.domains.folios.presentation.router import router as folios_router
-    api_router.include_router(folios_router)
-except Exception as exc:
-    logger.warning("Could not load domain 'folios': %s", exc)
-
-try:
-    from app.domains.appraisal_review.presentation.router import router as appraisal_review_router
-    api_router.include_router(appraisal_review_router, prefix="/appraisal-review")
-except Exception as exc:
-    logger.warning("Could not load domain 'appraisal_review': %s", exc)
-
-try:
-    from app.domains.templates.presentation.router import router as templates_router
-    api_router.include_router(templates_router)
-except Exception as exc:
-    logger.warning("Could not load domain 'templates': %s", exc)
-
-try:
-    from app.domains.digitization.presentation.router import router as digitization_router
-    api_router.include_router(digitization_router, prefix="/digitization")
-except Exception as exc:
-    logger.warning("Could not load domain 'digitization': %s", exc)
-
-try:
-    from app.domains.folder_analysis.presentation.router import router as folder_analysis_router
-    api_router.include_router(folder_analysis_router, prefix="/folder-analysis")
-except Exception as exc:
-    logger.warning("Could not load domain 'folder_analysis': %s", exc)
-
-try:
-    from app.domains.cadastralviewer.presentation.router import router as cadastralviewer_router
-    api_router.include_router(cadastralviewer_router)
-except Exception as exc:
-    logger.warning("Could not load domain 'cadastralviewer': %s", exc)

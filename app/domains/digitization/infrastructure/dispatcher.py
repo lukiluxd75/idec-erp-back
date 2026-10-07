@@ -27,8 +27,7 @@ logger = logging.getLogger("uvicorn.error")
 # Arbitrary constant identifying this dispatcher's advisory lock in idec_erp.
 _LEADER_LOCK_KEY = 820_260_923_001
 _FOLLOWER_RETRY_SECONDS = 15.0
-# How often a running job re-reads its stop flag. The vision worker asks between
-# tokens, several times a second, so without this the database would be hammered.
+# How often a running job re-reads its stop flag.
 _STOP_POLL_SECONDS = 2.0
 
 

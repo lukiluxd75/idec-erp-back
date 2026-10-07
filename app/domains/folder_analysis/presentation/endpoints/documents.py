@@ -5,6 +5,7 @@ from fastapi import APIRouter, BackgroundTasks, Body, Depends, Query, Response, 
 
 from app.domains.folder_analysis.application.use_cases import (
     AnalyzeDocumentUseCase,
+    ConsolidateDocumentsUseCase,
     CreateDocumentUseCase,
     DeleteDocumentUseCase,
     GetDocumentUseCase,
@@ -16,6 +17,7 @@ from app.domains.folder_analysis.application.use_cases import (
 from app.domains.folder_analysis.domain.entities import DocumentType
 from app.domains.folder_analysis.presentation.deps import (
     get_analyze_document_use_case,
+    get_consolidate_documents_use_case,
     get_create_document_use_case,
     get_delete_document_use_case,
     get_get_document_use_case,
@@ -27,6 +29,7 @@ from app.domains.folder_analysis.presentation.deps import (
 )
 from app.domains.folder_analysis.presentation.schemas.folder_analysis_schema import (
     AnalyzeRequest,
+    ConsolidateRequest,
     CreateDocumentRequest,
     DocType,
     DocumentDetail,
@@ -50,6 +53,18 @@ def create_document(
     document = use_case.execute(
         body.doc_type, body.capture_ids, user.sub, body.folder_id, body.folder_type
     )
+    return DocumentDetail.from_entity(document)
+
+
+@router.post("/consolidate", response_model=DocumentDetail)
+def consolidate_documents(
+    body: ConsolidateRequest,
+    use_case: ConsolidateDocumentsUseCase = Depends(get_consolidate_documents_use_case),
+    user: UserProfile = Depends(require_permission("folder-analysis.edit")),
+):
+    """Deja en un solo documento lo que quedó suelto en el carril que la carpeta
+    guarda sin leer: sus tarjetas y las fotos que sigan en la bandeja."""
+    document = use_case.execute(body.doc_type, user.sub, body.folder_id, body.folder_type)
     return DocumentDetail.from_entity(document)
 
 

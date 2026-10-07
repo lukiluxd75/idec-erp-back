@@ -13,9 +13,6 @@ CHANGE_TYPE_LABEL = {
     "unchanged": "Sin cambio",
 }
 
-# Kept in sync with ParcelValidationModal's CONSTRUCTION_TYPES -- "otro" never
-# reaches here as the literal word, only as the architect's free-text label
-# (see ReviewAffectedParcelUseCase), so it needs no entry of its own.
 CONSTRUCTION_TYPE_LABEL = {
     "nueva_construccion": "Construcción nueva",
     "ampliacion": "Ampliación",

@@ -1,8 +1,5 @@
 from app.core.errors.exceptions import DomainException
 
-# Technical auth/token exceptions (Keycloak communication) live in
-# core.security.exceptions, because any domain integrating Keycloak needs them,
-# not only `security`. Re-exported here for convenience within this domain.
 from app.core.security.exceptions import (  # noqa: F401
     InvalidCredentialsException,
     TokenVerificationException,

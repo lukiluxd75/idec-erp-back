@@ -26,8 +26,7 @@ class IngestDetectionResultUseCase:
     def execute(self, job_id: str, engine_result: dict[str, Any]) -> Optional[ProcessedSector]:
         sector = self._repository.find_by_job_id(job_id)
         if sector is None:
-            # Job not started through this ERP's start_detect_wms endpoint (e.g.
-            # a manual/lab call straight to the engine) -- nothing to attach it to.
+            # Ignore jobs that were not started through this ERP.
             return None
         if self._repository.is_ingested(sector.id):
             return sector

@@ -85,3 +85,23 @@ class ProcessedSectorDetail(BaseModel):
     created_at: Optional[datetime] = None
     processed_at: Optional[datetime] = None
     runs: List[RunDetail] = []
+
+
+class SearchResultItem(BaseModel):
+    """See the domain entity SearchResult's own docstring for what each
+    `kind` populates."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    kind: str
+    label: str
+    sector_id: Optional[int] = None
+    status: Optional[str] = None
+    cadastral_code: Optional[str] = None
+    validation_status: Optional[str] = None
+    campaign_id: Optional[int] = None
+    campaign_code: Optional[str] = None
+    campaign_name: Optional[str] = None
+    year_a: Optional[int] = None
+    year_b: Optional[int] = None
+    geom_geojson: Optional[dict[str, Any]] = None

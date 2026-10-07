@@ -45,8 +45,6 @@ class HeaderResult:
     data: Dict[str, Any]
     confidence: Dict[str, Optional[float]] = field(default_factory=dict)
     observations: List[str] = field(default_factory=list)
-    # For the fill log only: OCR text each field was taken from (same dotted
-    # keys as `confidence`) and the printed label found for each rótulo.
     sources: Dict[str, List[str]] = field(default_factory=dict)
     labels: Dict[str, Optional[str]] = field(default_factory=dict)
 
@@ -184,8 +182,7 @@ def parse_header(blocks: Sequence[OcrBlock], width: float) -> HeaderResult:
         conf["tipo_inmueble"] = round(kind.confidence, 4)
         src["tipo_inmueble"] = [kind.text]
 
-    # ---- Catastro: printed UNDER its label on the right half. A lone "x" (or
-    # nothing) is how the form marks it blank.
+    # ---- Catastro: printed UNDER its label on the right half.
     catastro_label = labels["catastro"]
     catastro_block = None
     if catastro_label is not None:
@@ -317,14 +314,9 @@ def _parse_linderos(
             elif current is not None:
                 parts[current].append(b)  # continuation on the same row
             elif previous_line_starts:
-                # Wrapped value: continues the lindero of the previous row whose
-                # start is horizontally closest.
+                # Wrapped value: continues the lindero of the previous row whose start is horizontally closest.
                 direction, start_x = min(previous_line_starts, key=lambda s: abs(s[1] - b.x0))
                 anchor = parts[direction][0]
-                # Measured against the lindero's own line height: the sideways
-                # "Dirección Administrativa y Financiera" of the left margin comes
-                # back as a single very tall block, and its own height would make
-                # any horizontal distance look close enough.
                 if abs(start_x - b.x0) < 6 * anchor.h and b.h < 2.5 * anchor.h:
                     parts[direction].append(b)
         previous_line_starts = line_starts or previous_line_starts

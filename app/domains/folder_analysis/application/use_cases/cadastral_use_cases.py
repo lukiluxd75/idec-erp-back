@@ -21,11 +21,9 @@ from app.domains.folder_analysis.domain.services.utm import utm_to_wgs84
 
 logger = logging.getLogger("uvicorn.error")
 
-# How far from the predio to look for the ones next to it: the cadastre never
-# lines two lots up to the centimetre.
+# How far from the predio to look for the ones next to it: the cadastre never lines two lots up to the centimetre.
 NEIGHBOUR_REACH_M = 3.0
-# A bit more than the street reach, so the street a side faces is never cut off
-# by the query itself.
+# A bit more than the street reach, so the street a side faces is never cut off by the query itself.
 STREET_QUERY_M = STREET_REACH_M + 10.0
 CROQUIS_LAYERS = ("usoSueloCertificado", "manzanasCertificado", "prediosCertificado1", "viasCertificado")
 
@@ -90,8 +88,6 @@ class LookupCadastralParcelUseCase:
             "plan": None,
         }
         if plan_text:
-            # A street the GIS does not have shows as a side with no neighbour: the
-            # frente of the plano can still be told from it, saying so.
             unmapped = [[list(side.start), list(side.end)] for side in analysis.sides if side.kind == KIND_NONE]
             result["plan"] = self._plan(plan_text, analysis.area_m2, result, streets, unmapped)
         return result
@@ -184,11 +180,9 @@ class LookupCadastralParcelUseCase:
         reading["survey_vertices_latlng"] = (
             _latlng([[v["east"], v["north"]] for v in survey["vertices"]]) if survey else []
         )
-        # What the architect compares: the surface of the plano (its vertices, and
-        # what it prints) against the GIS one.
+        # What the architect compares: the surface of the plano (its vertices, and what it prints) against the GIS one.
         area_plan = (survey or {}).get("area_net_m2") or (survey or {}).get("area_m2") or reading["declared_area_m2"]
-        # Frente and fondos from the vertices, once the GIS says which side is on the
-        # street. Empty (with the reason) when the figures cannot be trusted.
+        # Frente and fondos from the vertices, once the GIS says which side is on the street.
         street_paths = [path for street in streets for path in street.paths]
         reading["measures"] = plan_survey.measures(
             survey,
@@ -208,9 +202,6 @@ def _rounded(value: Any) -> Optional[float]:
     return round(float(value), 2) if isinstance(value, (int, float)) else None
 
 
-# The croquis is a square this many pixels wide, showing this many times the
-# predio, and never less than this half-width in metres around it (so the circle
-# of 50 m around the predio is not cut off on a small lot).
 CROQUIS_PIXELS = 600
 CROQUIS_TIMES = 4.0
 CROQUIS_MIN_HALF_M = 60.0
@@ -245,8 +236,7 @@ class GenerateCadastralCroquisUseCase:
         half = max(max(xmax - xmin, ymax - ymin) * CROQUIS_TIMES / 2.0, CROQUIS_MIN_HALF_M)
         cx, cy = (xmin + xmax) / 2.0, (ymin + ymax) / 2.0
         bbox = (cx - half, cy - half, cx + half, cy + half)
-        # The manzanas layer is the opaque one, as in the demo: it is the paper the
-        # rest is printed on.
+        # The manzanas layer is the opaque one, as in the demo: it is the paper the rest is printed on.
         layers = [
             self._gis.map_image(service, bbox, CROQUIS_PIXELS, transparent=service != "manzanasCertificado")
             for service in CROQUIS_LAYERS

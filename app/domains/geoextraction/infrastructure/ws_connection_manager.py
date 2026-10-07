@@ -76,11 +76,6 @@ class CapturesConnectionManager:
         only reaches sockets already open on THIS worker; the frontend's poll
         of GET .../presence is what makes the indicator right everywhere."""
         peers = [c for c in self._connections.values() if c.user_sub == user_sub]
-        # La verdad sale del store compartido, no de `peers`: este proceso solo
-        # ve sus propios sockets, asi que preguntarle a `peers` empujaba
-        # "no conectado" cuando el celular estaba en otro worker -- y ese push
-        # contradecia al poll, que ya lee lo correcto. Se lee en un hilo porque
-        # SQLAlchemy aqui es bloqueante y esto corre en el event loop.
         mobile_connected = await asyncio.to_thread(is_phone_connected, user_sub, CHANNEL_GEOEXTRACTION)
         payload = {"type": "presence", "mobile_connected": mobile_connected}
         dropped = []

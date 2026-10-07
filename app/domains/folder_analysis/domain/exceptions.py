@@ -93,3 +93,20 @@ class CadastralLookupFailedException(FolderAnalysisException):
 
 class CadastralParcelNotFoundException(FolderAnalysisException):
     http_status = 404
+
+
+class VisionReadingUnavailableException(FolderAnalysisException):
+    """La pasada final con el modelo de visión (las computadoras de los
+    arquitectos) no se pudo hacer. Nunca es fatal: la lectura se queda en lo que
+    dieron el OCR, las reglas y el sello, y queda dicho en las observaciones."""
+
+    http_status = 503
+
+
+class VisionReadingStoppedException(VisionReadingUnavailableException):
+    """Alguien detuvo esa computadora desde el monitor de digitalización mientras
+    miraba la foto. Se trata como cualquier otra falta de disponibilidad, pero no
+    se prueba con otra computadora después de que una persona pidió parar."""
+
+    def __init__(self, message: str = "La lectura se detuvo desde el monitor de computadoras."):
+        super().__init__(message)

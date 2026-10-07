@@ -35,9 +35,6 @@ class OllamaChatEngine(ChatEnginePort):
         self._chat_timeout = chat_timeout or settings.CHATBOT_CHAT_TIMEOUT_SECONDS
         self._vision_timeout = vision_timeout or settings.CHATBOT_VISION_TIMEOUT_SECONDS
         self._embedding_timeout = embedding_timeout or settings.CHATBOT_EMBEDDING_TIMEOUT_SECONDS
-        # The host is often one of the architects' PCs: mark it busy while the call
-        # runs so the digitization monitor shows it working, and take from it the
-        # "Detener" flag that monitor can raise.
         self._borrow = borrow or (lambda _host, _seconds: nullcontext(lambda: False))
 
     def _post(

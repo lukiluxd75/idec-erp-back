@@ -1,43 +1,86 @@
-from typing import List
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, Request, status
 
 from app.domains.folder_analysis.application.use_cases import (
     AddDocumentsToRegisteredFolderUseCase,
     CreateRegisteredFolderUseCase,
     DeleteRegisteredFolderUseCase,
+    GetFolderPhotoUseCase,
     GetRegisteredFolderUseCase,
     ListRegisteredFoldersUseCase,
     RemoveDocumentFromRegisteredFolderUseCase,
+    SaveBoardToFolderUseCase,
+    SearchRegisteredFoldersUseCase,
     UpdateRegisteredFolderUseCase,
 )
 from app.domains.folder_analysis.presentation.deps import (
     get_add_folder_documents_use_case,
     get_create_registered_folder_use_case,
     get_delete_registered_folder_use_case,
+    get_folder_photo_use_case,
     get_get_registered_folder_use_case,
     get_list_registered_folders_use_case,
     get_remove_folder_document_use_case,
+    get_save_board_to_folder_use_case,
+    get_search_registered_folders_use_case,
     get_update_registered_folder_use_case,
 )
+from app.domains.folder_analysis.domain.entities import MAX_NAME_LENGTH, CaptureVariant
+from app.domains.folder_analysis.presentation.endpoints.captures import cached_image
 from app.domains.folder_analysis.presentation.schemas.folder_analysis_schema import (
     AddRegisteredFolderDocumentsRequest,
     CreateRegisteredFolderRequest,
     RegisteredFolderOut,
+    SaveBoardToFolderRequest,
     UpdateRegisteredFolderRequest,
 )
-from app.domains.security.contracts import UserProfile, require_permission
+from app.domains.security.contracts import (
+    UsernameLookup,
+    UserProfile,
+    get_username_lookup,
+    has_permission,
+    require_permission,
+)
 
 router = APIRouter(prefix="/folders", tags=["Folder analysis · Carpetas registradas"])
 
 
 @router.get("", response_model=List[RegisteredFolderOut])
 def list_folders(
+    name: Optional[str] = Query(
+        None,
+        min_length=2,
+        max_length=MAX_NAME_LENGTH,
+        description="Búsqueda por nombre de carpeta (el número de la carpeta física).",
+    ),
     use_case: ListRegisteredFoldersUseCase = Depends(get_list_registered_folders_use_case),
+    search: SearchRegisteredFoldersUseCase = Depends(get_search_registered_folders_use_case),
+    owners: UsernameLookup = Depends(get_username_lookup),
+    administra: bool = Depends(has_permission("folder-analysis.admin")),
     user: UserProfile = Depends(require_permission("folder-analysis.view")),
 ):
-    """The user's carpetas A->Z, each with the saved documents filed in it."""
-    return [RegisteredFolderOut.from_entity(f) for f in use_case.execute(user.sub)]
+    """Sin `name`: las carpetas del usuario A->Z, cada una con sus documentos.
+
+    Con `name`: la búsqueda por nombre de carpeta. Quien administra el módulo
+    ("folder-analysis.admin") busca entre las carpetas de todos los usuarios y no
+    solo entre las suyas -- la carpeta física la escanea quien la tiene en la
+    mano, y hasta ahora nadie más podía volver a encontrarla. Quien no lo
+    administra busca entre las suyas, que es lo mismo que filtrar su lista.
+
+    Una carpeta ajena solo aparece así, buscándola por su nombre: nunca en la
+    lista. Viene marcada (`mine` en falso) con el nombre de su dueño, y es de
+    solo lectura -- los endpoints que escriben siguen exigiendo ser su dueño.
+    """
+    folders = (
+        search.execute(user.sub, name, across_users=administra)
+        if name
+        else use_case.execute(user.sub)
+    )
+    owner_by_sub = owners(f.user_sub for f in folders if f.user_sub != user.sub)
+    return [
+        RegisteredFolderOut.from_entity(f, user.sub, owner_by_sub.get(f.user_sub)) for f in folders
+    ]
 
 
 @router.post("", response_model=RegisteredFolderOut, status_code=status.HTTP_201_CREATED)
@@ -54,6 +97,18 @@ def create_folder(
     return RegisteredFolderOut.from_entity(folder)
 
 
+@router.post("/from-board", response_model=RegisteredFolderOut, status_code=status.HTTP_201_CREATED)
+def save_board_to_folder(
+    body: SaveBoardToFolderRequest,
+    use_case: SaveBoardToFolderUseCase = Depends(get_save_board_to_folder_use_case),
+    user: UserProfile = Depends(require_permission("folder-analysis.edit")),
+):
+    """Saves what was scanned on the loose board into a new carpeta named after
+    the physical folder's number."""
+    folder = use_case.execute(user.sub, body.folder_number, body.folder_type, body.document_ids)
+    return RegisteredFolderOut.from_entity(folder)
+
+
 @router.get("/{folder_id}", response_model=RegisteredFolderOut)
 def get_folder(
     folder_id: str,
@@ -61,6 +116,34 @@ def get_folder(
     user: UserProfile = Depends(require_permission("folder-analysis.view")),
 ):
     return RegisteredFolderOut.from_entity(use_case.execute(folder_id, user.sub))
+
+
+@router.get("/{folder_id}/photos/{capture_id}")
+def get_folder_photo(
+    folder_id: str,
+    capture_id: str,
+    request: Request,
+    variant: str = Query(CaptureVariant.PREVIEW, pattern="^(thumbnail|preview|original)$"),
+    use_case: GetFolderPhotoUseCase = Depends(get_folder_photo_use_case),
+    administra: bool = Depends(has_permission("folder-analysis.admin")),
+    user: UserProfile = Depends(require_permission("folder-analysis.view")),
+):
+    """Una foto escaneada en esta carpeta, para mirarla.
+
+    Es la foto de siempre, pero pedida por la carpeta y no por su dueño: así
+    quien administra el módulo puede ver lo que encontró buscando una carpeta
+    ajena, y solo eso -- las fotos de esa carpeta, nada de la bandeja de nadie.
+    Es de lectura: no hay forma de cambiar nada por acá.
+
+    `variant`: "thumbnail" para una tira de páginas, "preview" para el visor y
+    "original" solo cuando se acerca más de lo que el preview aguanta.
+    """
+    return cached_image(
+        request,
+        lambda: use_case.execute(folder_id, capture_id, user.sub, administra, variant),
+        capture_id,
+        variant,
+    )
 
 
 @router.put("/{folder_id}", response_model=RegisteredFolderOut)
@@ -84,7 +167,7 @@ def delete_folder(
     use_case: DeleteRegisteredFolderUseCase = Depends(get_delete_registered_folder_use_case),
     user: UserProfile = Depends(require_permission("folder-analysis.edit")),
 ):
-    """Deletes the carpeta only; its documents stay in "Datos guardados"."""
+    """Deletes the carpeta with its documents and their photos."""
     use_case.execute(folder_id, user.sub)
 
 
@@ -108,5 +191,5 @@ def remove_document(
     ),
     user: UserProfile = Depends(require_permission("folder-analysis.edit")),
 ):
-    """Takes the document out of the carpeta without deleting the document."""
+    """Takes the document out of the carpeta by deleting it with its photos."""
     return RegisteredFolderOut.from_entity(use_case.execute(folder_id, user.sub, document_id))

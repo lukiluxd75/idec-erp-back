@@ -41,8 +41,6 @@ _THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL)
 
 
 def _answer_format(template: Dict[str, Any]) -> str:
-    # The prompt carries the shape instead of Ollama's `format`: with the reasoning
-    # model a strict schema makes it loop ("token repeat limit reached").
     return (
         "Answer with ONLY one JSON object, no explanations, with exactly these keys "
         "(use null for values that are not on the document; lists may have any length):\n"
@@ -115,10 +113,6 @@ class OllamaVisionWorker(VisionWorkerPort):
             prompt = f"{USER_PROMPT}\n\n{_answer_format(GENERIC_TEMPLATE)}"
         payload = {
             "model": self._model,
-            # Streamed on purpose, although the answer is only usable whole: it is
-            # the one way to let go of a run half way through (Ollama drops the
-            # generation as soon as the client hangs up) and to hold the whole job
-            # to `request_timeout`, which otherwise only limits silence.
             "stream": True,
             "keep_alive": self._keep_alive,
             "options": {"temperature": 0, "num_ctx": self._num_ctx, "num_predict": self._num_predict},
@@ -133,8 +127,7 @@ class OllamaVisionWorker(VisionWorkerPort):
         except requests.RequestException as exc:
             raise WorkerUnavailableException(str(exc)) from exc
 
-        # Leaving this block for any reason closes the socket, which is what tells
-        # the PC to stop working on the image.
+        # Leaving this block for any reason closes the socket, which is what tells the PC to stop working on the image.
         with response:
             if response.status_code >= 400:
                 body = response.text[:300]

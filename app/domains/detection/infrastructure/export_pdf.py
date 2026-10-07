@@ -3,15 +3,17 @@ row styling as export_excel.py (see ExportCampaignReportUseCase), formatted
 for a formal/presentation read (architect profile, per the engineer's request)
 rather than a working spreadsheet. Same reportlab approach as
 app/domains/procedurereports/application/use_cases/export_pdf.py."""
+import base64
 from datetime import datetime
 from io import BytesIO
-from typing import List
+from typing import List, Optional
 
+from PIL import Image as PILImage
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import Image, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from app.domains.detection.domain.entities.affected_parcel_report_row import AffectedParcelReportRow
 from app.domains.detection.infrastructure.export_labels import (
@@ -32,12 +34,28 @@ HEADERS = [
     "Estado", "Motivo de rechazo", "Años", "Campaña", "Prob. (%)",
     "Validado por", "Fecha de validación", "Longitud", "Latitud",
 ]
-# Must sum to <= ~27.3cm (landscape A4 minus margins) or the table overflows
-# the page -- verified by rendering a real export (12 rows) and measuring.
 COL_WIDTHS_CM = [0.9, 2.0, 2.4, 1.8, 2.2, 1.8, 2.8, 1.5, 1.8, 1.1, 2.0, 2.4, 1.6, 1.6]
 
 
-def build_campaign_report_pdf(rows: List[AffectedParcelReportRow], campaign_label: str) -> bytes:
+def _chart_image_flowable(image_base64: str, max_width: float, max_height: float) -> Image:
+    """Decodes a data-URL/base64 PNG (captured client-side from the live
+    Recharts component, same pixels the architect already sees in
+    "Reportes") and scales it to fit the page while keeping its aspect
+    ratio -- the chart's own proportions vary (pie vs. bar vs. line), so a
+    fixed width/height would stretch some of them."""
+    raw = image_base64.split(",", 1)[-1] if "," in image_base64 else image_base64
+    buf = BytesIO(base64.b64decode(raw))
+    width_px, height_px = PILImage.open(buf).size
+    buf.seek(0)
+    scale = min(max_width / width_px, max_height / height_px)
+    return Image(buf, width=width_px * scale, height=height_px * scale)
+
+
+def build_campaign_report_pdf(
+    rows: List[AffectedParcelReportRow],
+    campaign_label: str,
+    charts: Optional[List[dict]] = None,
+) -> bytes:
     buf = BytesIO()
     doc = SimpleDocTemplate(
         buf,
@@ -111,6 +129,15 @@ def build_campaign_report_pdf(rows: List[AffectedParcelReportRow], campaign_labe
     if not rows:
         story.append(Spacer(1, 0.4 * cm))
         story.append(Paragraph("Sin predios confirmados o rechazados en esta campaña.", subtitle_style))
+
+    if charts:
+        max_w = landscape(A4)[0] - 2.4 * cm
+        max_h = landscape(A4)[1] - 4 * cm
+        for chart in charts:
+            story.append(PageBreak())
+            story.append(Paragraph(chart.get("title") or "Gráfica", title_style))
+            story.append(Spacer(1, 0.4 * cm))
+            story.append(_chart_image_flowable(chart["image_base64"], max_w, max_h))
 
     doc.build(story)
     buf.seek(0)

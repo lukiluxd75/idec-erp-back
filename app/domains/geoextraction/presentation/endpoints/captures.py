@@ -138,28 +138,15 @@ async def captures_ws(
 
     is_mobile = is_digid_app_user_agent(websocket.headers.get("user-agent", ""))
 
-    # Dos registros distintos, a proposito:
-    #  * el manager, en memoria de ESTE proceso, para el broadcast de `update`
-    #    (una pista para refrescar la lista; el frontend ya tolera perderla y
-    #    tiene su propio poll de respaldo).
-    #  * la presencia, en Postgres, porque el indicador "Celular conectado" si
-    #    tiene que ser igual en los cuatro workers -- ver core/presence.
     presence = SocketPresence(user.sub, CHANNEL_GEOEXTRACTION, is_mobile)
-    # presence.start() ANTES de manager.connect(): connect() emite el push de
-    # presencia, que ahora lee el store compartido, asi que la fila tiene que
-    # existir ya o el primer push saldria con "no conectado".
     await presence.start()
     await manager.connect(websocket, user.sub, is_mobile)
     try:
         while True:
-            # Client sends nothing on this socket: only used for server -> browser
-            # notify. receive_text() detects disconnect (WebSocketDisconnect)
-            # without busy-waiting.
+            # Client sends nothing on this socket: only used for server -> browser notify.
             await websocket.receive_text()
     except WebSocketDisconnect:
         pass
     finally:
-        # finally, no solo en WebSocketDisconnect: una caida sucia tiene que
-        # liberar la fila igual, o el badge se queda encendido hasta que expire.
         await presence.stop()
         await manager.disconnect(websocket)

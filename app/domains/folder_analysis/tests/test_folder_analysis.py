@@ -1,28 +1,37 @@
+import io
 import unittest
 import uuid
 from unittest.mock import patch
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import cv2
 import numpy as np
+import pypdfium2 as pdfium
 
 from app.domains.folder_analysis.application.document_synchronizer import DocumentSynchronizer
+from app.domains.folder_analysis.application.use_cases import capture_use_cases
+from app.domains.folder_analysis.application.use_cases.document_use_cases import MAX_PAGES
 from app.domains.folder_analysis.application.use_cases import (
     AddDocumentsToRegisteredFolderUseCase,
     ClearInboxUseCase,
     AnalyzeDocumentUseCase,
+    ConsolidateDocumentsUseCase,
     CreateDocumentUseCase,
     CreateRegisteredFolderUseCase,
     DeleteCaptureUseCase,
     DeleteDocumentUseCase,
     DeleteRegisteredFolderUseCase,
+    GetCaptureImageUseCase,
     GetDocumentUseCase,
     ListRegisteredFoldersUseCase,
     RegisteredFolderService,
     RemoveDocumentFromRegisteredFolderUseCase,
+    SaveBoardToFolderUseCase,
     ReviewDocumentUseCase,
     RunServerReadingUseCase,
+    GetFolderPhotoUseCase,
+    SearchRegisteredFoldersUseCase,
     SetDocumentPagesUseCase,
     UpdateRegisteredFolderUseCase,
     UploadCapturesUseCase,
@@ -38,10 +47,12 @@ from app.domains.folder_analysis.domain.entities import (
     FolderDocument,
     PageStatus,
     QueuedJob,
+    ReadingStage,
     RegisteredFolder,
 )
 from app.domains.folder_analysis.domain.exceptions import (
     CaptureNotAvailableException,
+    CaptureNotFoundException,
     DocumentAlreadyFiledException,
     DocumentBusyException,
     DocumentNotFoundException,
@@ -51,6 +62,7 @@ from app.domains.folder_analysis.domain.exceptions import (
     RegisteredFolderNameTakenException,
     RegisteredFolderNotFoundException,
     TaxStructurerUnavailableException,
+    VisionReadingUnavailableException,
 )
 from app.domains.folder_analysis.domain.extraction_profiles import (
     FOLDER_PROFILES,
@@ -67,16 +79,31 @@ from app.domains.folder_analysis.domain.folder_types import (
     document_fields,
     folder_type,
 )
-from app.domains.folder_analysis.domain.services.field_harvest import harvest, observation
-from app.domains.folder_analysis.domain.services.spanish_dates import to_iso_like, words_to_number
+from app.domains.folder_analysis.domain.services.field_harvest import (
+    from_seals,
+    from_vision,
+    harvest,
+    observation,
+    vision_wanted,
+)
+from app.domains.folder_analysis.domain.services.cadastral_code import to_gis_code
+from app.domains.folder_analysis.domain.services.spanish_dates import (
+    any_date,
+    leading_number,
+    to_iso_like,
+    words_to_number,
+)
 from app.domains.folder_analysis.domain.ports import (
     CaptureRepositoryPort,
     DocumentRepositoryPort,
     ExtractionQueuePort,
     RegisteredFolderRepositoryPort,
+    SealReadingPort,
     ServerReadingPort,
     TaxStructurerPort,
+    VisionReadingPort,
 )
+from app.domains.folder_analysis.presentation.schemas.folder_analysis_schema import CatalogOut
 from app.domains.folios.contracts import PageText, TextBlock
 from app.domains.folios.domain.exceptions import OcrUnavailableException
 from app.domains.folder_analysis.domain.services.document_progress import document_status
@@ -102,6 +129,7 @@ from app.domains.folder_analysis.infrastructure.ollama_fur_structurer import (
     OllamaFurStructurer,
     _json_object,
 )
+from app.domains.folder_analysis.infrastructure.opencv_seal_reader import OpenCvSealReader, seals_in
 from app.domains.folder_analysis.infrastructure.opencv_thumbnail import OpenCvThumbnail
 from app.domains.folder_analysis.infrastructure.pdfium_rasterizer import PdfiumRasterizer
 
@@ -156,9 +184,13 @@ class FakeCaptures(CaptureRepositoryPort):
 class FakeDocuments(DocumentRepositoryPort):
     def __init__(self):
         self.rows = {}
+        self.stages = []
+        self.clock = 0
 
     def create(self, user_sub, doc_type, capture_ids, folder_type=None):
-        doc = FolderDocument(str(uuid.uuid4()), user_sub, doc_type, DocumentStatus.DRAFT, NOW, NOW,
+        self.clock += 1
+        born = NOW + timedelta(seconds=self.clock)
+        doc = FolderDocument(str(uuid.uuid4()), user_sub, doc_type, DocumentStatus.DRAFT, born, born,
                              pages=[DocumentPage(c, i) for i, c in enumerate(capture_ids)],
                              folder_type=folder_type)
         self.rows[doc.id] = doc
@@ -169,9 +201,10 @@ class FakeDocuments(DocumentRepositoryPort):
         return doc if doc and doc.user_sub == user_sub else None
 
     def list(self, user_sub, doc_type=None, folder_id=None):
+        # Del mas nuevo al mas viejo, como el repositorio de verdad (su puerto lo dice: "Newest first").
         return [
             d
-            for d in self.rows.values()
+            for d in reversed(list(self.rows.values()))
             if d.user_sub == user_sub
             and (not doc_type or d.doc_type == doc_type)
             and (not folder_id or d.folder_id == folder_id)
@@ -194,8 +227,16 @@ class FakeDocuments(DocumentRepositoryPort):
 
     def save_progress(self, document_id, pages, status, extracted_data, error):
         doc = self.rows[document_id]
-        self.rows[document_id] = replace(doc, pages=pages, status=status, error=error,
+        # Como la base: una lectura que termina apaga el cartel de la etapa.
+        stage = doc.stage if status in DocumentStatus.IN_PROGRESS else None
+        self.rows[document_id] = replace(doc, pages=pages, status=status, error=error, stage=stage,
                                          extracted_data=extracted_data or doc.extracted_data)
+
+    def set_stage(self, document_id, stage):
+        # Las etapas por las que pasó, en orden, para poder comprobar que la pantalla se entera de la pasada del modelo de visión.
+        self.stages.append(stage)
+        if document_id in self.rows:
+            self.rows[document_id] = replace(self.rows[document_id], stage=stage)
 
     def save_review(self, document_id, data):
         self.rows[document_id] = replace(self.rows[document_id], reviewed_data=data, status=DocumentStatus.REVIEWED)
@@ -221,8 +262,7 @@ class FakeExtractor(ServerReadingPort):
 
     def __init__(self, data=None, error=None, on_each_page=None):
         self.data, self.error, self.calls = data or {}, error, []
-        # Runs right after the use case is told a page is finished, so a test can
-        # look at the document mid-reading.
+        # Runs right after the use case is told a page is finished, so a test can look at the document mid-reading.
         self._on_each_page = on_each_page
 
     def extract(self, pages, on_page=None):
@@ -237,8 +277,129 @@ class FakeExtractor(ServerReadingPort):
         return self.data, ["una observación"]
 
 
+class FakeSeals(SealReadingPort):
+    """Los sellos ya leídos. Deja ver qué fotos se le pidieron y, por ser
+    generador como el de verdad, que no se le piden más de las necesarias."""
+
+    def __init__(self, texts):
+        self.texts, self.pages, self.asked = texts, [], []
+
+    def read(self, pages):
+        self.pages.append(list(pages))
+        for text in self.texts:
+            self.asked.append(text)
+            yield text
+
+
+class FakeVision(VisionReadingPort):
+    """El modelo de visión ya contestado. Deja ver cuántas fotos se le mostraron
+    y qué campos se le preguntaron en cada una, que es lo que hay que cuidar:
+    cada foto son veinte o treinta segundos de una computadora."""
+
+    def __init__(self, answers, configured=True, fails=None):
+        self.answers, self.configured, self.fails = answers, configured, fails
+        self.asked = []
+
+    def is_configured(self):
+        return self.configured
+
+    def read(self, page, fields):
+        self.asked.append([spec.key for spec in fields])
+        if self.fails is not None:
+            raise self.fails
+        return self.answers.pop(0) if self.answers else {}
+
+
+def _pdf(pages: int = 1) -> bytes:
+    """Un PDF de `pages` hojas, armado acá para no guardar un binario de prueba."""
+    document = pdfium.PdfDocument.new()
+    for _ in range(pages):
+        document.new_page(300, 400)
+    buffer = io.BytesIO()
+    document.save(buffer)
+    return buffer.getvalue()
+
+
 def _png() -> bytes:
     return cv2.imencode(".png", np.full((800, 600, 3), 255, np.uint8))[1].tobytes()
+
+
+def _sheet_with_seal(centre=(430, 620), radius=90):
+    """Una hoja con un sello redondo estampado en tinta violeta, como el de un
+    notario: dos aros concéntricos y el número escrito derecho en el medio."""
+    sheet = np.full((800, 600, 3), 255, np.uint8)
+    cv2.putText(sheet, "SENOR NOTARIO DE FE PUBLICA", (30, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+    ink = (150, 30, 120)
+    cv2.circle(sheet, centre, radius, ink, 6)
+    cv2.circle(sheet, centre, radius - 14, ink, 3)
+    cv2.putText(sheet, "No.48", (centre[0] - 45, centre[1] + 8), cv2.FONT_HERSHEY_SIMPLEX, 0.8, ink, 2)
+    return cv2.imencode(".png", sheet)[1].tobytes()
+
+
+def _sheet_with_rectangular_seal(corner=(260, 900)):
+    """La hoja de firmas: la misma notaría estampa acá un sello rectangular, con
+    su nombre y su número escritos en renglones derechos, y del tamaño que tiene
+    en el papel (como un cuarto del ancho de la hoja)."""
+    sheet = np.full((1600, 1200, 3), 255, np.uint8)
+    cv2.putText(sheet, "Leido que les fue el acta que antecede", (60, 140), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 2)
+    ink = (60, 60, 200)
+    x, y = corner
+    cv2.rectangle(sheet, (x, y), (x + 290, y + 180), ink, 3)
+    cv2.putText(sheet, "NOTARIA DE FE", (x + 16, y + 70), cv2.FONT_HERSHEY_SIMPLEX, 0.7, ink, 2)
+    cv2.putText(sheet, "PUBLICA No 50", (x + 16, y + 140), cv2.FONT_HERSHEY_SIMPLEX, 0.7, ink, 2)
+    return cv2.imencode(".png", sheet)[1].tobytes()
+
+
+def _photographed_over_a_yellow_folder(page: bytes):
+    """La misma hoja, fotografiada como llegan: sobre la carpeta amarilla del
+    trámite y con luz cálida, que tiñe de amarillo el papel entero."""
+    sheet = cv2.imdecode(np.frombuffer(page, np.uint8), cv2.IMREAD_COLOR)
+    photo = np.full((sheet.shape[0] + 120, sheet.shape[1] + 120, 3), (20, 215, 240), np.uint8)
+    warm = cv2.addWeighted(sheet, 0.88, np.full_like(sheet, (120, 225, 245)), 0.12, 0)
+    photo[60 : 60 + sheet.shape[0], 60 : 60 + sheet.shape[1]] = warm
+    return cv2.imencode(".png", photo)[1].tobytes()
+
+
+def _sheet_with_both_seals():
+    """El pie de la hoja como lo estampa una notaría: su sello redondo al lado
+    del rectangular, los dos con el mismo número."""
+    sheet = np.full((1600, 1200, 3), 255, np.uint8)
+    cv2.putText(sheet, "Publica, Doy Fe.", (60, 140), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 2)
+    ink = (40, 40, 40)
+    cv2.circle(sheet, (250, 800), 110, ink, 7)
+    cv2.circle(sheet, (250, 800), 92, ink, 4)
+    cv2.putText(sheet, "No.2", (205, 810), cv2.FONT_HERSHEY_SIMPLEX, 1.0, ink, 3)
+    cv2.rectangle(sheet, (600, 710), (890, 890), ink, 3)
+    cv2.putText(sheet, "NOTARIA DE FE", (616, 780), cv2.FONT_HERSHEY_SIMPLEX, 0.7, ink, 2)
+    cv2.putText(sheet, "PUBLICA No 2", (616, 850), cv2.FONT_HERSHEY_SIMPLEX, 0.7, ink, 2)
+    return cv2.imencode(".png", sheet)[1].tobytes()
+
+
+def _sheet_of_text(seal_at=None):
+    """Una hoja escrita de arriba abajo, y si se pide, el sello estampado encima
+    de la redacción, que es donde cae cuando no hay lugar libre."""
+    sheet = np.full((1600, 1200, 3), 255, np.uint8)
+    for line in range(14):
+        cv2.putText(
+            sheet, "declaran que son poseedores del bien inmueble ubicado en",
+            (60, 180 + line * 95), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2,
+        )
+    if seal_at:
+        ink = (40, 40, 40)
+        cv2.circle(sheet, seal_at, 110, ink, 7)
+        cv2.circle(sheet, seal_at, 92, ink, 4)
+        cv2.putText(sheet, "No.50", (seal_at[0] - 55, seal_at[1] + 10), cv2.FONT_HERSHEY_SIMPLEX, 1.0, ink, 3)
+    return cv2.imencode(".png", sheet)[1].tobytes()
+
+
+def _photocopied(page: bytes):
+    """La misma hoja, fotocopiada: el sello sale del mismo negro que la redacción
+    y con el contraste que le sube la fotocopiadora. Es como llega la mitad de
+    las carpetas, y ahí el color no dice nada."""
+    sheet = cv2.imdecode(np.frombuffer(page, np.uint8), cv2.IMREAD_COLOR)
+    gray = cv2.cvtColor(sheet, cv2.COLOR_BGR2GRAY)
+    harsh = np.clip((gray.astype(np.float32) - 110) * 2.2 + 150, 0, 255).astype(np.uint8)
+    return cv2.imencode(".png", cv2.cvtColor(harsh, cv2.COLOR_GRAY2BGR))[1].tobytes()
 
 
 def _uploader(captures) -> UploadCapturesUseCase:
@@ -740,8 +901,7 @@ def _fur_blocks(rows, confidence=0.99):
     return blocks
 
 
-# A FUR as the OCR reads it: values next to their label, and one row of stacked
-# boxes (Nº INMUEBLE / COD. CAT. / CLASE / TIPO PROPIEDAD over their values).
+# A FUR as the OCR reads it: values next to their label, and one row of stacked boxes (Nº INMUEBLE / COD.
 FUR_ROWS = [
     [("FUR - COMPROBANTE DE PAGO", 100, 400), ("Nº 59122836", 500, 650)],
     [("GAM - COCHABAMBA", 100, 300)],
@@ -831,8 +991,7 @@ class TestFurParser(unittest.TestCase):
 
     def test_the_lines_printed_without_a_label(self):
         data = self.reading.data
-        # The number is printed on the title's line: it goes to its own field and
-        # is taken out of the type.
+        # The number is printed on the title's line: it goes to its own field and is taken out of the type.
         self.assertEqual(data["receipt_type"], "FUR - COMPROBANTE DE PAGO")
         self.assertEqual(data["receipt_number"], "59122836")
         self.assertEqual(data["municipality"], "GAM - COCHABAMBA")
@@ -883,8 +1042,7 @@ class TestFurParser(unittest.TestCase):
         self.assertEqual(reading.data["collecting_entity"], "BANCOUNION")
         self.assertEqual(reading.data["correspondent"], "0012")
         self.assertEqual(reading.data["taxable_base"], "350000.00")
-        # The label ends in a sign that is not a letter or a digit: it must not be
-        # left at the front of the value.
+        # The label ends in a sign that is not a letter or a digit: it must not be left at the front of the value.
         self.assertEqual(reading.data["discount_10"], "105.00")
         self.assertEqual(reading.data["location"], "URB.ALALAY VALLE HERMOSO")
 
@@ -1259,9 +1417,25 @@ class FakeRegisteredFolders(RegisteredFolderRepositoryPort):
             return None
         return self._entity(row)
 
+    def find_any(self, folder_id):
+        row = self.rows.get(folder_id)
+        return None if row is None else self._entity(row)
+
     def list(self, user_sub):
         rows = [r for fid, r in self.rows.items() if self._owners.get(fid) == user_sub]
         return [self._entity(r) for r in sorted(rows, key=lambda r: r["name"].lower())]
+
+    def search_by_name(self, name, user_sub=None, limit=50):
+        term = (name or "").strip().lower()
+        if not term:
+            return []
+        rows = [
+            r
+            for fid, r in self.rows.items()
+            if term in r["name"].lower()
+            and (user_sub is None or self._owners.get(fid) == user_sub)
+        ]
+        return [self._entity(r) for r in sorted(rows, key=lambda r: r["name"].lower())[:limit]]
 
     def update_details(self, folder_id, name, notes, data):
         self.rows[folder_id].update(name=name, notes=notes, data=dict(data or {}))
@@ -1445,34 +1619,50 @@ class TestRegisteredFolders(unittest.TestCase):
                 folder.id, "arq-1", [folio.id]
             )
 
-    def test_removing_leaves_the_document_saved_and_free_to_file_again(self):
-        folio = self._reviewed()
-        folder = self._create("Proyecto Sur", ids=[folio.id])
-        emptied = RemoveDocumentFromRegisteredFolderUseCase(self.folders, self.service).execute(
-            folder.id, "arq-1", folio.id
+    def _remover(self):
+        return RemoveDocumentFromRegisteredFolderUseCase(
+            self.folders, self.service, self.documents, self.captures
         )
-        self.assertEqual(emptied.document_ids, [])
-        self.assertEqual(self.documents.get(folio.id, "arq-1").status, DocumentStatus.REVIEWED)
-        self.assertEqual(self._create("Proyecto Norte", ids=[folio.id]).document_ids, [folio.id])
+
+    def test_removing_deletes_the_document_and_its_photos(self):
+        folio, plan = self._reviewed(), self._reviewed("plan")
+        folder = self._create("Proyecto Sur", ids=[folio.id, plan.id])
+        photo = folio.pages[0].capture_id
+        left = self._remover().execute(folder.id, "arq-1", folio.id)
+        self.assertEqual(left.document_ids, [plan.id])
+        self.assertIsNone(self.documents.get(folio.id, "arq-1"))
+        self.assertIsNone(self.captures.get(photo, "arq-1"))
+        self.assertIsNotNone(self.captures.get(plan.pages[0].capture_id, "arq-1"))
 
     def test_removing_something_that_is_not_in_the_carpeta(self):
         folder = self._create("Proyecto Sur")
         with self.assertRaises(DocumentNotFoundException):
-            RemoveDocumentFromRegisteredFolderUseCase(self.folders, self.service).execute(
+            self._remover().execute(
                 folder.id, "arq-1", self._reviewed().id
             )
 
-    def test_deleting_the_carpeta_keeps_its_documents(self):
-        folio = self._reviewed()
+    def _deleter(self):
+        return DeleteRegisteredFolderUseCase(self.folders, self.service, self.documents, self.captures)
+
+    def test_deleting_the_carpeta_deletes_its_documents_and_photos(self):
+        """They must not go back to the loose board as if they were the next folder's."""
+        folio, draft = self._reviewed(), self._draft()
+        kept = self._draft()
         folder = self._create("Proyecto Sur", ids=[folio.id])
-        DeleteRegisteredFolderUseCase(self.folders, self.service).execute(folder.id, "arq-1")
+        self.folders.file_document(folder.id, draft.id)
+        photos = [p.capture_id for d in (folio, draft) for p in d.pages]
+        self._deleter().execute(folder.id, "arq-1")
         self.assertEqual(ListRegisteredFoldersUseCase(self.folders).execute("arq-1"), [])
-        self.assertEqual(self.documents.get(folio.id, "arq-1").status, DocumentStatus.REVIEWED)
+        self.assertIsNone(self.documents.get(folio.id, "arq-1"))
+        self.assertIsNone(self.documents.get(draft.id, "arq-1"))
+        self.assertEqual(self.captures.get_many(photos, "arq-1"), [])
+        self.assertIsNotNone(self.documents.get(kept.id, "arq-1"))
+        self.assertEqual(len(self.captures.get_many([kept.pages[0].capture_id], "arq-1")), 1)
 
     def test_another_user_cannot_delete_the_carpeta(self):
         folder = self._create("Proyecto Sur")
         with self.assertRaises(RegisteredFolderNotFoundException):
-            DeleteRegisteredFolderUseCase(self.folders, self.service).execute(folder.id, "arq-2")
+            self._deleter().execute(folder.id, "arq-2")
 
     # -------------------------------------------------------------------- list
 
@@ -1499,15 +1689,19 @@ class TestRegisteredFolders(unittest.TestCase):
 
     def test_the_sheet_only_keeps_what_its_kind_declares(self):
         """The catalogue is the truth about a carpeta's fields: what is not one
-        of them would never be shown again, and a fixed field is not the user's
-        to write."""
+        of them would never be shown again.
+
+        "notary_number" está acá a propósito: era un campo de esta carpeta hasta
+        que se quitó el apartado de declaración jurada, y lo que una carpeta
+        guardada traiga de entonces tampoco vuelve a entrar."""
         folder = self._create(
             "Poseedores Sarco",
             kind="possessors",
-            data={"inventado": "x", "legal_status": "Municipal"},
+            data={"inventado": "x", "notary_number": "15", "cadastral_code": "00-33-432-012-0-00-000-000"},
         )
         self.assertNotIn("inventado", folder.data)
-        self.assertEqual(folder.data["legal_status"], "Particular")
+        self.assertNotIn("notary_number", folder.data)
+        self.assertEqual(folder.data["cadastral_code"], "00-33-432-012-0-00-000-000")
 
     def test_a_carpeta_without_a_kind_is_the_general_one(self):
         self.assertEqual(self._create("Proyecto Sur").folder_type, "general")
@@ -1543,6 +1737,43 @@ class TestRegisteredFolders(unittest.TestCase):
         folder = self._create("Proyecto Sur", ids=[folio.id])
         self.assertEqual(folder.documents[0].reviewed_data, {"registration_number": "1.1.1"})
 
+    # ------------------------------------------------- guardar tablero en carpeta
+
+    def _save_board(self, number="1520", ids=None, kind=None):
+        return SaveBoardToFolderUseCase(self.folders, self.documents, self.service).execute(
+            "arq-1", number, kind, ids or []
+        )
+
+    def test_the_board_goes_into_a_carpeta_named_after_its_number(self):
+        """Whatever state each document is in: the physical folder is saved whole."""
+        draft, reviewed = self._draft("plan"), self._reviewed("folio")
+        folder = self._save_board("  1520 ", [draft.id, reviewed.id])
+        self.assertEqual(folder.name, "1520")
+        self.assertEqual(folder.folder_type, "general")
+        self.assertEqual(folder.document_ids, [draft.id, reviewed.id])
+        self.assertEqual(self.documents.get(draft.id, "arq-1").folder_id, folder.id)
+
+    def test_saving_an_empty_board_is_refused(self):
+        with self.assertRaises(InvalidRegisteredFolderException):
+            self._save_board(ids=[])
+
+    def test_a_number_already_registered_is_refused(self):
+        self._create("1520")
+        with self.assertRaises(RegisteredFolderNameTakenException) as raised:
+            self._save_board("1520", [self._draft().id])
+        self.assertIn("1520", raised.exception.message)
+
+    def test_a_document_already_in_a_carpeta_is_not_moved(self):
+        draft = self._draft()
+        self._save_board("1520", [draft.id])
+        with self.assertRaises(DocumentAlreadyFiledException):
+            self._save_board("1521", [draft.id])
+
+    def test_a_document_outside_the_kinds_lanes_is_refused(self):
+        """The general kind has no carnet lane."""
+        with self.assertRaises(InvalidRegisteredFolderException):
+            self._save_board("1520", [self._draft("id_card").id])
+
 class DocumentosDentroDeUnaCarpetaTests(unittest.TestCase):
     """A document is opened inside a carpeta, so from the moment it is created it
     belongs to it -- and it has to be one of the types that carpeta works with."""
@@ -1565,7 +1796,7 @@ class DocumentosDentroDeUnaCarpetaTests(unittest.TestCase):
 
     def test_a_document_opened_in_a_carpeta_is_filed_in_it_as_a_draft(self):
         folder = self._folder()
-        document = self._create(DocumentType.SWORN_STATEMENT, folder.id)
+        document = self._create(DocumentType.FORM, folder.id)
         self.assertEqual(document.folder_id, folder.id)
         self.assertEqual(document.status, DocumentStatus.DRAFT)
         self.assertEqual(
@@ -1597,6 +1828,210 @@ class DocumentosDentroDeUnaCarpetaTests(unittest.TestCase):
         self.assertEqual(
             [d.id for d in self.documents.list("arq-1", folder_id=folder.id)], [mine.id]
         )
+
+
+class OtrosDocumentosNoSeLeenTests(unittest.TestCase):
+    """El carril de "otros documentos": lo que el poseedor trae de respaldo.
+
+    No tiene datos que sacarle, así que se guarda con sus fotos y nada más -- ni
+    OCR, ni cola, ni pantalla de revisión. Queda archivado desde que se suelta,
+    que es lo que hace que la pantalla no ofrezca analizarlo.
+    """
+
+    def setUp(self):
+        self.captures, self.documents, self.queue = FakeCaptures(), FakeDocuments(), FakeQueue()
+        self.folders = FakeRegisteredFolders(self.documents)
+        self.service = RegisteredFolderService(self.folders, self.documents)
+        self.photo = self.captures.create("arq-1", "p.png", "image/png", b"x", b"t")
+
+    def _create(self, doc_type=DocumentType.ID_CARD, ids=None):
+        return CreateDocumentUseCase(self.documents, self.captures, self.folders).execute(
+            doc_type, ids or [self.photo.id], "arq-1"
+        )
+
+    def _analyze(self, document):
+        return AnalyzeDocumentUseCase(self.documents, self.captures, self.queue).execute(
+            document.id, "arq-1"
+        )
+
+    def test_the_catalogue_and_the_lanes_agree_on_which_types_are_read(self):
+        """Los dos conjuntos tienen que cubrir ALL sin pisarse: si alguien agrega
+        un carril y se olvida de uno, se lee lo que no debía o al revés."""
+        self.assertEqual(
+            sorted(DocumentType.SERVER_READ + DocumentType.NOT_READ), sorted(DocumentType.ALL)
+        )
+        self.assertEqual(set(DocumentType.SERVER_READ) & set(DocumentType.NOT_READ), set())
+
+    def test_it_is_filed_the_moment_it_is_created(self):
+        document = self._create()
+        self.assertEqual(document.status, DocumentStatus.FILED)
+        self.assertEqual([p.status for p in document.pages], [PageStatus.DONE])
+
+    def test_its_photos_are_kept_assigned_to_it(self):
+        document = self._create()
+        self.assertEqual([p.capture_id for p in document.pages], [self.photo.id])
+        self.assertEqual(self.captures.list_by_status("arq-1", CaptureStatus.INBOX), [])
+
+    def test_asking_to_analyze_it_queues_nothing(self):
+        """La pantalla ya no ofrece el botón, pero la regla vive en el caso de
+        uso: una petición vieja no puede mandarlo al OCR por la ventana."""
+        document = self._analyze(self._create())
+        self.assertEqual(document.status, DocumentStatus.FILED)
+        self.assertEqual(self.queue.submitted, [])
+
+    def test_the_server_reading_leaves_it_alone(self):
+        document = self._create()
+        RunServerReadingUseCase(self.documents, self.captures, {}).execute(document.id, "arq-1")
+        self.assertEqual(
+            self.documents.get(document.id, "arq-1").status, DocumentStatus.FILED
+        )
+
+    def test_changing_its_pages_leaves_it_filed_again(self):
+        """replace_pages devuelve cualquier documento a borrador para que se
+        vuelva a analizar; este no tiene a qué volver."""
+        document = self._create()
+        other = self.captures.create("arq-1", "q.png", "image/png", b"x", b"t")
+        document = SetDocumentPagesUseCase(self.documents, self.captures).execute(
+            document.id, [self.photo.id, other.id], "arq-1"
+        )
+        self.assertEqual(document.status, DocumentStatus.FILED)
+        self.assertEqual(len(document.pages), 2)
+
+    def test_a_lane_that_is_read_is_untouched(self):
+        document = self._create(DocumentType.FORM)
+        self.assertEqual(document.status, DocumentStatus.DRAFT)
+
+    def test_it_is_named_otros_documentos_and_says_it_is_not_read(self):
+        spec = DOCUMENT_TYPES[DocumentType.ID_CARD]
+        self.assertEqual(spec.label, "Otros documentos")
+        self.assertIn("no se leen", spec.hint)
+
+
+class JuntarTodoEnUnDocumentoTests(unittest.TestCase):
+    """El botón del carril: lo suelto queda en un solo documento.
+
+    Un poseedor trae un montón de respaldos que no son un trámite cada uno sino
+    el mismo legajo. Esto junta las fotos que quedaron en la bandeja con las
+    tarjetas que ya están en el carril.
+    """
+
+    def setUp(self):
+        self.captures, self.documents = FakeCaptures(), FakeDocuments()
+        self.folders = FakeRegisteredFolders(self.documents)
+        self.service = RegisteredFolderService(self.folders, self.documents)
+
+    def _photo(self, name):
+        return self.captures.create("arq-1", name, "image/png", b"x", b"t")
+
+    def _folder(self):
+        return CreateRegisteredFolderUseCase(self.folders, self.service).execute(
+            "arq-1", "Poseedores Sarco", None, folder_type_key="possessors"
+        )
+
+    def _create(self, doc_type, capture_ids, folder_id=None):
+        return CreateDocumentUseCase(self.documents, self.captures, self.folders).execute(
+            doc_type, capture_ids, "arq-1", folder_id
+        )
+
+    def _consolidate(self, doc_type=DocumentType.ID_CARD, folder_id=None, folder_type_key="possessors"):
+        return ConsolidateDocumentsUseCase(self.documents, self.captures, self.folders).execute(
+            doc_type, "arq-1", folder_id, folder_type_key
+        )
+
+    def test_the_loose_photos_of_the_inbox_become_one_document(self):
+        photos = [self._photo(f"p{i}.png") for i in range(3)]
+        document = self._consolidate()
+        self.assertEqual(document.status, DocumentStatus.FILED)
+        self.assertEqual([p.capture_id for p in document.pages], [p.id for p in photos])
+        self.assertEqual(self.captures.list_by_status("arq-1", CaptureStatus.INBOX), [])
+
+    def test_the_cards_already_in_the_lane_are_merged_into_the_oldest(self):
+        first = self._create(DocumentType.ID_CARD, [self._photo("a.png").id])
+        second = self._create(DocumentType.ID_CARD, [self._photo("b.png").id])
+        document = self._consolidate()
+        self.assertEqual(document.id, first.id)
+        self.assertEqual(len(document.pages), 2)
+        self.assertIsNone(self.documents.get(second.id, "arq-1"))
+
+    def test_the_inbox_and_the_lane_go_into_the_same_one(self):
+        card = self._create(DocumentType.ID_CARD, [self._photo("a.png").id])
+        loose = self._photo("b.png")
+        document = self._consolidate()
+        self.assertEqual(document.id, card.id)
+        self.assertEqual([p.capture_id for p in document.pages][-1], loose.id)
+        self.assertEqual(len(document.pages), 2)
+
+    def test_the_pages_keep_their_order_and_the_loose_ones_go_last(self):
+        a, b = self._photo("a.png"), self._photo("b.png")
+        self._create(DocumentType.ID_CARD, [a.id])
+        self._create(DocumentType.ID_CARD, [b.id])
+        loose = self._photo("c.png")
+        self.assertEqual(
+            [p.capture_id for p in self._consolidate().pages], [a.id, b.id, loose.id]
+        )
+
+    def test_a_lane_that_is_read_is_refused(self):
+        self._photo("a.png")
+        with self.assertRaises(InvalidDocumentRequestException):
+            self._consolidate(DocumentType.FORM)
+
+    def test_with_nothing_to_gather_it_says_so(self):
+        with self.assertRaises(InvalidDocumentRequestException):
+            self._consolidate()
+
+    def test_more_photos_than_a_document_takes_is_refused_with_the_count(self):
+        for i in range(MAX_PAGES + 1):
+            self._photo(f"p{i}.png")
+        with self.assertRaises(InvalidDocumentRequestException) as caught:
+            self._consolidate()
+        self.assertIn(str(MAX_PAGES + 1), caught.exception.message)
+        # Nada a medias: las fotos siguen en la bandeja para repartirlas.
+        self.assertEqual(
+            len(self.captures.list_by_status("arq-1", CaptureStatus.INBOX)), MAX_PAGES + 1
+        )
+
+    def test_inside_a_carpeta_the_result_belongs_to_it_only_once(self):
+        folder = self._folder()
+        self._create(DocumentType.ID_CARD, [self._photo("a.png").id], folder.id)
+        self._photo("b.png")
+        document = self._consolidate(folder_id=folder.id)
+        self.assertEqual(
+            self.folders.get(folder.id, "arq-1").document_ids, [document.id]
+        )
+
+    def test_if_the_rebuild_fails_the_photos_go_back_to_the_inbox(self):
+        """Las tarjetas que se borraron ya no están. Sin esto sus fotos quedaban
+        asignadas a nada: fuera de la bandeja y fuera de todo documento, o sea
+        invisibles."""
+        a, b = self._photo("a.png"), self._photo("b.png")
+        self._create(DocumentType.ID_CARD, [a.id])
+        self._create(DocumentType.ID_CARD, [b.id])
+
+        def boom(*args, **kwargs):
+            raise RuntimeError("se cayó la base")
+
+        self.documents.replace_pages = boom
+        with self.assertRaises(RuntimeError):
+            self._consolidate()
+        self.assertIn(b.id, [c.id for c in self.captures.list_by_status("arq-1", CaptureStatus.INBOX)])
+
+    def test_on_the_loose_board_the_cards_already_in_a_carpeta_are_left_alone(self):
+        """Once the board is saved into a carpeta, its carnets belong there: the
+        next folder scanned on the loose board must not swallow them."""
+        folder = self._folder()
+        filed = self._create(DocumentType.ID_CARD, [self._photo("a.png").id])
+        self.folders.file_document(folder.id, filed.id)
+        self._photo("b.png")
+        document = self._consolidate()
+        self.assertNotEqual(document.id, filed.id)
+        self.assertEqual(len(self.documents.get(filed.id, "arq-1").pages), 1)
+
+    def test_it_does_not_touch_another_lane(self):
+        other = self._create(DocumentType.FORM, [self._photo("a.png").id])
+        self._photo("b.png")
+        self._consolidate()
+        kept = self.documents.get(other.id, "arq-1")
+        self.assertEqual([p.capture_id for p in kept.pages], [p.capture_id for p in other.pages])
 
 
 class VaciarLaBandejaTests(unittest.TestCase):
@@ -1643,7 +2078,7 @@ class CosechaDeCamposTests(unittest.TestCase):
     """
 
     PLAN = document_fields("possessors", DocumentType.PLAN)
-    STATEMENT = document_fields("possessors", DocumentType.SWORN_STATEMENT)
+    STATEMENT = document_fields("possessors", DocumentType.FORM)
 
     def _reading(self, text="", fields=()):
         return {
@@ -1720,7 +2155,7 @@ class ActaNotarialTests(unittest.TestCase):
     """Un acta notarial no rotula nada: el número del notario, la persona y la
     fecha viven dentro de su redacción, y la fecha viene escrita con letras."""
 
-    FIELDS = document_fields("possessors", DocumentType.SWORN_STATEMENT)
+    FIELDS = document_fields("possessors", DocumentType.FORM)
 
     # El párrafo de apertura, tal como lo lee el OCR de un acta de Cochabamba.
     ACTA = (
@@ -1763,6 +2198,467 @@ class ActaNotarialTests(unittest.TestCase):
         self.assertEqual(set(self._harvest("HOJA CUALQUIERA").values()), {None})
 
 
+class MinutaDirigidaAlNotarioTests(unittest.TestCase):
+    """La otra forma del mismo trámite: una minuta no es un acta.
+
+    No dice "ante mí" ni "compareció" -- va dirigida al notario ("SEÑOR NOTARIO
+    DE FE PÚBLICA, sírvase insertar"), enumera a las partes con su cédula
+    colgando del nombre, cita las fechas de los documentos que la anteceden y
+    recién al final, junto a la ciudad, pone la suya. El notario no se nombra en
+    el texto: está en el sello.
+
+    De una de estas (una guarda con cesión, cuatro hojas) salía el notario como
+    "DE FE", y el nombre y la fecha vacíos.
+    """
+
+    FIELDS = document_fields("possessors", DocumentType.FORM)
+
+    MINUTA = (
+        "IVON JANNET RICO LEDEZMA ABOGADO NOTARIA DE FE PUBLICA DE PRIMERA CLASE No. 48\n"
+        "Cochabamba - Bolivia\n"
+        "SEÑOR NOTARIO DE FE PÚBLICA\n"
+        "Entre los documentos de escrituras públicas que se encuentran a su cargo sírvase\n"
+        "insertar una de GUARDA DEFINITIVA Y / O TUTELA, DERECHO DE VISITA.\n"
+        "PRIMERA: (DE LAS PARTES) Dirá usted señor notario que son parte del presente documento:\n"
+        "1.- JUAN CHILE ARIAS. Con C.I:5918362 Cbba., quien es mayor de edad, hábil por ley\n"
+        "de nacionalidad boliviano, de ocupación Albañil, con domicilio en Pucara Molle Molle - Cbba.\n"
+        "2.- ROBERTA HUMACAYA MAMANI, con C.I: 5932821 Cbba., quien es mayor de edad.\n"
+        "SEGUNDA: (DE LOS ANTECEDENTES) según sentencia de fecha 08 de Agosto del presente año.\n"
+        "CUARTO: (DE LOS BIENES) compraron un lote de terreno Registrado en Derechos Reales a\n"
+        "Fs. 2542, Ptda. 2542, en fecha 08 de Agosto de 1996. Con una superficie de 10.116 m2.\n"
+        "Adquirido de su anterior dueño según documento de fecha 29 de Agosto del 2007, y\n"
+        "reconocido ante Notario de Primera Clase Nro. 44 Dr. Tatiana Céspedes Morales.\n"
+        "Ud. señor notario sirvase agregar las demás clausulas de estilo y seguridad.\n"
+        "Cochabamba 26 de Agosto del 2014\n"
+        "ADJUNTAR AL FORMULARIO DE RECONOCIMIENTO DE FIRMAS N° 3025076"
+    )
+
+    def _harvest(self, text, fields=None):
+        reading = {"full_text": text, "pages": [{"fields": fields or [], "tables": []}]}
+        return harvest(reading, self.FIELDS)[0]
+
+    def test_reads_the_three_values_out_of_the_minuta(self):
+        values = self._harvest(self.MINUTA)
+        self.assertEqual(values["notary_number"], "48")
+        self.assertEqual(values["owner_name"], "JUAN CHILE ARIAS, ROBERTA HUMACAYA MAMANI")
+        self.assertEqual(values["statement_dates"], "26/08/2014")
+
+    def test_every_poseedor_is_read_not_only_the_first(self):
+        """La carpeta va a nombre de los dos cónyuges: quedarse con el primero
+        obligaba a copiar el otro a mano sin que nada avisara que faltaba."""
+        self.assertEqual(
+            self._harvest(self.MINUTA)["owner_name"].split(", "),
+            ["JUAN CHILE ARIAS", "ROBERTA HUMACAYA MAMANI"],
+        )
+
+    def test_the_same_poseedor_named_twice_is_kept_once(self):
+        values = self._harvest(
+            "1.- JUAN CHILE ARIAS. Con C.I:5918362 Cbba. "
+            "Reitera el señor JUAN CHILE ARIAS, con C.I: 5918362 Cbba."
+        )
+        self.assertEqual(values["owner_name"], "JUAN CHILE ARIAS")
+
+    def test_a_looser_wording_does_not_add_a_second_reading_of_the_same_person(self):
+        """Un acta la lee la frase "se hizo presente"; el patrón suelto de la
+        minuta leería la misma persona arrastrando la palabra de antes, y las dos
+        lecturas quedaban juntas."""
+        values = self._harvest(
+            "se hizo presente NOELIA ALMENDRAS RODRIGUEZ con Cédula de Identidad N° 8806991"
+        )
+        self.assertEqual(values["owner_name"], "NOELIA ALMENDRAS RODRIGUEZ")
+
+    def test_the_notary_of_the_stamp_is_read_through_its_office(self):
+        """El sello mete el oficio entre el nombre del cargo y el número."""
+        self.assertEqual(
+            self._harvest("NOTARIA DE FE PUBLICA DE PRIMERA CLASE No. 48")["notary_number"], "48"
+        )
+
+    def test_the_notary_of_an_earlier_document_is_not_taken(self):
+        """La minuta nombra al notario que reconoció el documento anterior. Ese
+        no lleva "de fe pública" delante y no es el de esta hoja."""
+        self.assertIsNone(
+            self._harvest("reconocido ante Notario de Primera Clase Nro. 44")["notary_number"]
+        )
+
+    def test_the_heading_does_not_pass_as_the_number_of_the_notary(self):
+        """"NOTARIO" encabeza la hoja y le prestaba su línea a "DE FE PUBLICA",
+        que se guardaba como si fuera el número."""
+        values = self._harvest(
+            "SEÑOR NOTARIO DE FE PUBLICA", [{"name": "NOTARIO", "value": "DE FE"}]
+        )
+        self.assertIsNone(values["notary_number"])
+
+    def test_the_date_of_the_act_wins_over_the_ones_it_cites(self):
+        """1996 y 2007 son del antecedente y vienen antes en la hoja; 2014 es la
+        de la minuta y cierra el documento."""
+        self.assertEqual(self._harvest(self.MINUTA)["statement_dates"], "26/08/2014")
+
+    def test_a_year_written_after_del(self):
+        self.assertEqual(
+            self._harvest("Cochabamba 26 de Agosto del 2014")["statement_dates"], "26/08/2014"
+        )
+
+    def test_a_sheet_whose_only_date_is_presented_as_one_is_still_read(self):
+        """Si no hay otra, la fecha citada es la que hay."""
+        self.assertEqual(
+            self._harvest("Declaración jurada de fecha 12 de marzo de 2025")["statement_dates"],
+            "12/03/2025",
+        )
+
+    def test_the_name_is_cut_at_the_identity_card(self):
+        values = self._harvest("2.- ROBERTA HUMACAYA MAMANI, con C.I: 5932821 Cbba., mayor de edad")
+        self.assertEqual(values["owner_name"], "ROBERTA HUMACAYA MAMANI")
+
+
+class SelloDelNotarioTests(unittest.TestCase):
+    """El número del notario sale del sello, que es donde siempre está.
+
+    La redacción no lo trae: una minuta va dirigida al notario y no lo nombra, y
+    el notario que sí nombra es el que reconoció el documento anterior. El sello
+    se busca en la foto y se lee aparte, así que acá llega el texto de UN sello y
+    lo que se comprueba es qué número se le saca.
+    """
+
+    FIELDS = document_fields("possessors", DocumentType.FORM)
+
+    def test_the_two_seals_of_one_notary_say_the_same_number(self):
+        """La misma notaría estampa los dos sellos en la misma hoja: el redondo,
+        con la leyenda en corona y la fecha del nombramiento en el medio, y el
+        rectangular, con el nombre y el número en renglones derechos. El número
+        tiene que salir de cualquiera de los dos."""
+        redondo = "Abg. Miriam Aranibar Ayala NOTARIA DE FE PUBLICA N° 2 25.04.2018 DIRNOPLU"
+        rectangular = (
+            "Abg. Miriam Aranibar Ayala NOTARIA DE FE PUBLICA DIRNOPLU N° 2 "
+            "Cochabamba - Bolivia P.F. 25.04.2018"
+        )
+        for sello, texto in (("redondo", redondo), ("rectangular", rectangular)):
+            with self.subTest(sello=sello):
+                self.assertEqual(from_seals([texto], self.FIELDS), {"notary_number": "2"})
+
+    def test_the_mark_of_the_seal_read_as_anything_but_its_little_o(self):
+        """La marca del número vuelve de la fotocopia como se le ocurre al OCR."""
+        for leido in ("N° 2", "N 2", "N^2", "No. 2", "Nro 2"):
+            with self.subTest(leido=leido):
+                self.assertEqual(
+                    from_seals([f"NOTARIA DE FE PUBLICA {leido} Cochabamba"], self.FIELDS),
+                    {"notary_number": "2"},
+                )
+
+    def test_the_number_is_read_out_of_a_legend_the_ocr_broke(self):
+        """Tal como vuelve un sello redondo: sin "PUBLICA", con el oficio pegado
+        al número y la N leída como parte de la palabra de antes."""
+        self.assertEqual(
+            from_seals(["NOTARIA DEFE PULCA DEP.SMERA CLAN0.48 COCHABAMBA BOLIVIA"], self.FIELDS),
+            {"notary_number": "48"},
+        )
+
+    def test_the_number_without_its_mark(self):
+        """Al sello le comió la marca: queda el oficio y el número."""
+        self.assertEqual(
+            from_seals(["ABOGADO NOTARIA DE FE PUBLICA DE PRIMERA CLASE 48"], self.FIELDS),
+            {"notary_number": "48"},
+        )
+
+    def test_a_stamp_with_no_number_leaves_the_field_to_the_text(self):
+        self.assertEqual(from_seals(["NOTARIA DE FE PUBLICA COCHABAMBA BOLIVIA"], self.FIELDS), {})
+
+    def test_no_more_stamps_are_read_once_the_number_came_out(self):
+        """Cada lectura de sello cuesta una llamada al OCR: en cuanto el número
+        salió, las fotos que siguen no se procesan."""
+        asked = []
+
+        def texts():
+            for text in ["ILEGIBLE", "NOTARIA DE FE PUBLICA No 23", "OTRO SELLO No 99"]:
+                asked.append(text)
+                yield text
+
+        self.assertEqual(from_seals(texts(), self.FIELDS), {"notary_number": "23"})
+        self.assertEqual(len(asked), 2)
+
+    def test_a_document_that_asks_for_nothing_stamped_reads_no_stamp(self):
+        """El plano no tiene nada en un sello, así que no se le busca ninguno."""
+        self.assertEqual(from_seals(["NOTARIA No 23"], document_fields("possessors", DocumentType.PLAN)), {})
+
+
+class LecturaDelSelloConOpenCvTests(unittest.TestCase):
+    """El sello encontrado en la foto, con OpenCV de verdad y el OCR falso.
+
+    Lo que se comprueba no es qué dice el sello --eso lo deciden los patrones del
+    catálogo-- sino que se lo encuentre en la hoja y que lo que se manda a leer
+    sea el sello y no la página entera.
+    """
+
+    def _reader(self, answers):
+        self.asked = []
+
+        def read_page(content, filename=None):
+            image = cv2.imdecode(np.frombuffer(content, np.uint8), cv2.IMREAD_COLOR)
+            self.asked.append((filename, image))
+            text = answers.pop(0) if answers else ""
+            blocks = [TextBlock(text, 0.95, 0, 0, 10, 10)] if text else []
+            return PageText(blocks=blocks, width=10, height=10)
+
+        return OpenCvSealReader(read_page=read_page)
+
+    def test_the_stamp_is_found_and_only_the_stamp_is_sent_to_the_ocr(self):
+        reader = self._reader(["NOTARIA DE FE PUBLICA No.48"])
+        self.assertEqual(next(reader.read([_sheet_with_seal()])), "NOTARIA DE FE PUBLICA No.48")
+        self.assertEqual(len(self.asked), 1)
+        name, crop = self.asked[0]
+        self.assertTrue(name.startswith("sello_p1"), name)
+        # El recorte es cuadrado y es el sello: la hoja es más alta que ancha.
+        self.assertAlmostEqual(crop.shape[0] / crop.shape[1], 1.0, delta=0.05)
+
+    def test_the_ring_is_unwrapped_when_the_straight_crop_said_nothing(self):
+        """La leyenda va curvada: puesta en línea es una tira ancha y baja."""
+        reader = self._reader(["", "NOTARIA DE FE PUBLICA No.48"])
+        self.assertEqual(next(reader.read([_sheet_with_seal()])), "NOTARIA DE FE PUBLICA No.48")
+        self.assertEqual(len(self.asked), 2)
+        _name, strip = self.asked[1]
+        self.assertGreater(strip.shape[1], strip.shape[0] * 3)
+
+    def test_a_sheet_with_no_stamp_costs_no_ocr_call(self):
+        reader = self._reader(["lo que sea"])
+        self.assertEqual(list(reader.read([_png()])), [])
+        self.assertEqual(self.asked, [])
+
+    def test_a_photo_that_is_not_an_image_is_skipped(self):
+        reader = self._reader(["lo que sea"])
+        self.assertEqual(list(reader.read([b"esto no es una imagen"])), [])
+        self.assertEqual(self.asked, [])
+
+    def test_the_rectangular_seal_is_found_too(self):
+        """El formulario trae el redondo arriba y el rectangular en la hoja de
+        firmas, y el número está en los dos. Buscar solo circunferencias dejaba
+        al segundo afuera."""
+        reader = self._reader(["NOTARIA DE FE PUBLICA No 50"])
+        self.assertEqual(
+            next(reader.read([_sheet_with_rectangular_seal()])), "NOTARIA DE FE PUBLICA No 50"
+        )
+        _name, crop = self.asked[0]
+        # El recorte es el sello y no la hoja: la hoja es más alta que ancha y el sello, al revés.
+        self.assertGreater(crop.shape[1], crop.shape[0])
+
+    def test_the_rectangular_seal_is_not_unwrapped(self):
+        """Sus renglones ya vienen derechos: desenrollarlos no deja nada que
+        leer, así que no se gasta esa llamada al OCR."""
+        reader = self._reader([])
+        self.assertEqual(list(reader.read([_sheet_with_rectangular_seal()])), [])
+        self.assertEqual([name for name, _crop in self.asked], ["sello_p1_1_1.jpg"])
+
+    def test_the_seal_is_found_in_a_photo_taken_over_a_yellow_folder(self):
+        """Así llegan las fotos: la hoja sobre la carpeta amarilla del trámite y
+        con luz cálida. Mirando solo cuánto color hay, la hoja entera era una
+        sola mancha y el sello quedaba escondido adentro."""
+        pages = (
+            # El sello redondo y el rectangular, con el centro y el ancho que
+            # tienen en la foto (la hoja va pegada 60 px adentro de la carpeta).
+            ("redondo", _sheet_with_seal(), (490, 680), 186),
+            ("rectangular", _sheet_with_rectangular_seal(), (465, 1050), 290),
+        )
+        for shape, page, (x, y), width in pages:
+            with self.subTest(sello=shape):
+                found = seals_in(cv2.imdecode(
+                    np.frombuffer(_photographed_over_a_yellow_folder(page), np.uint8), cv2.IMREAD_COLOR
+                ))
+                self.assertTrue(found, "no se encontró ningún sello")
+                best = found[0]
+                self.assertTrue(best.coloured, "lo encontró la forma y no la tinta")
+                self.assertAlmostEqual(best.x, x, delta=30)
+                self.assertAlmostEqual(best.y, y, delta=30)
+                self.assertAlmostEqual(best.w, width, delta=width * 0.25)
+
+    def test_the_seal_of_a_photocopy_is_found_without_any_colour(self):
+        """La carpeta llega fotocopiada tan seguido como en original, y ahí el
+        sello salió del mismo negro que la redacción: por el color no hay nada
+        que encontrar, y el sello igual tiene que salir."""
+        pages = (
+            ("redondo", _sheet_with_seal(), (430, 620), 186),
+            ("rectangular", _sheet_with_rectangular_seal(), (405, 990), 290),
+        )
+        for shape, page, (x, y), width in pages:
+            with self.subTest(sello=shape):
+                found = seals_in(cv2.imdecode(
+                    np.frombuffer(_photocopied(page), np.uint8), cv2.IMREAD_COLOR
+                ))
+                self.assertTrue(found, "no se encontró ningún sello")
+                best = found[0]
+                self.assertFalse(best.coloured, "la fotocopia no tiene tinta de color")
+                self.assertAlmostEqual(best.x, x, delta=40)
+                self.assertAlmostEqual(best.y, y, delta=40)
+                self.assertAlmostEqual(best.w, width, delta=width * 0.3)
+
+    def test_a_photocopied_seal_is_read_like_any_other(self):
+        """Lo que se manda a leer sigue siendo la estampa y no la hoja."""
+        reader = self._reader(["NOTARIA DE FE PUBLICA No 50"])
+        page = _photocopied(_sheet_with_rectangular_seal())
+        self.assertEqual(next(reader.read([page])), "NOTARIA DE FE PUBLICA No 50")
+        _name, crop = self.asked[0]
+        self.assertGreater(crop.shape[1], crop.shape[0])
+
+    def test_the_text_of_a_photocopied_sheet_is_not_taken_for_a_seal(self):
+        """La redacción es tinta oscura igual que el sello: lo que la deja afuera
+        es el tamaño. Un renglón es más fino que un sello y la hoja escrita
+        entera es más grande, así que una hoja sin sello no cuesta ni una
+        llamada al OCR."""
+        reader = self._reader(["lo que sea"])
+        self.assertEqual(list(reader.read([_photocopied(_sheet_of_text())])), [])
+        self.assertEqual(self.asked, [])
+
+    def test_the_two_seals_of_a_photocopied_sheet_are_both_found(self):
+        """La notaría estampa los dos en la misma hoja, uno al lado del otro, y
+        el número está en los dos: fotocopiados, los dos tienen que salir, porque
+        el que se lea primero puede no dejarse leer."""
+        found = seals_in(cv2.imdecode(
+            np.frombuffer(_photocopied(_sheet_with_both_seals()), np.uint8), cv2.IMREAD_COLOR
+        ))
+        redondo = [s for s in found if abs(s.x - 250) < 60 and abs(s.y - 800) < 60]
+        rectangular = [s for s in found if abs(s.x - 745) < 60 and abs(s.y - 800) < 60]
+        self.assertTrue(redondo, "no encontró el sello redondo")
+        self.assertTrue(rectangular, "no encontró el sello rectangular")
+
+    def test_a_photocopied_seal_stamped_over_the_text_is_found(self):
+        """El peor caso de la fotocopia: el sello cae sobre la redacción y es de
+        la misma tinta. Cerrando la mancha, el sello y el párrafo quedan pegados
+        en una sola más grande que un sello y se descartaban juntos; por eso se
+        mira además el trazo largo del aro, que las letras no tienen."""
+        found = seals_in(cv2.imdecode(
+            np.frombuffer(_photocopied(_sheet_of_text(seal_at=(600, 800))), np.uint8), cv2.IMREAD_COLOR
+        ))
+        self.assertTrue(found, "no se encontró ningún sello")
+        self.assertAlmostEqual(found[0].x, 600, delta=40)
+        self.assertAlmostEqual(found[0].y, 800, delta=40)
+
+    def test_the_seal_of_a_later_page_is_read_when_the_first_one_has_none(self):
+        """El sello no está siempre en la primera hoja: en este formulario el
+        rectangular va en la segunda, al lado de la tabla de huellas."""
+        reader = self._reader(["NOTARIA DE FE PUBLICA No 50"])
+        pages = [_png(), _sheet_with_rectangular_seal()]
+        self.assertEqual(next(reader.read(pages)), "NOTARIA DE FE PUBLICA No 50")
+        self.assertEqual([name for name, _crop in self.asked], ["sello_p2_1_1.jpg"])
+
+
+class LoQueElOcrDevuelveDeVerdadTests(unittest.TestCase):
+    """Los mismos campos, pero sobre el texto tal como sale del OCR.
+
+    Las reglas se escribieron mirando el papel y por eso no encontraban nada: la
+    hoja llega fotografiada y PaddleOCR la devuelve rota. Los textos de abajo son
+    literales de la lectura de una minuta de cuatro hojas, no una transcripción
+    -- se perdían el notario, la fecha y la segunda poseedora.
+    """
+
+    FIELDS = document_fields("possessors", DocumentType.FORM)
+
+    def _harvest(self, text, tables=()):
+        reading = {"full_text": text, "pages": [{"fields": [], "tables": list(tables)}]}
+        return harvest(reading, self.FIELDS)[0]
+
+    def test_the_number_of_a_stamp_the_ocr_broke_apart(self):
+        """El sello es redondo y va girado: "NOTARIA DE FE PUBLICA DE PRIMERA
+        CLASE No. 48" vuelve partido, sin "PUBLICA", con "DE FE" pegado y con la
+        O del "No." cambiada por un cero."""
+        for read_as in (
+            "ABOGADO NOTARIA DEFE PULCA DEP.SMERA CLAN0.48",
+            "RICo AROGADO NOTARIADEFE PURUCA DEPAIMERA CLASENo.48",
+        ):
+            with self.subTest(read_as=read_as):
+                self.assertEqual(self._harvest(read_as)["notary_number"], "48")
+
+    def test_the_i_of_the_identity_card_read_as_an_l(self):
+        """"con C.I: 5932821" vuelve "CON C.L:5932821", y con la I exigida la
+        segunda poseedora no entraba."""
+        values = self._harvest("A. 2.-ROBERTA HUMACAYA MAMANI,CON C.L:5932821 Cbba.")
+        self.assertEqual(values["owner_name"], "ROBERTA HUMACAYA MAMANI")
+
+    def test_the_closing_date_written_over_the_ruled_line(self):
+        """La fecha va escrita sobre el renglón: el OCR mete barras donde hay
+        espacios y lee un cero en "Agosto"."""
+        values = self._harvest("Y SEGURIDAD. CHABAMBA/26 DE/AGOST0 DEL 2014 3025076")
+        self.assertEqual(values["statement_dates"], "26/08/2014")
+
+    def test_the_whole_reading_gives_the_three_values(self):
+        values = self._harvest(
+            "ABOGADO NOTARIA DEFE PULCA DEP.SMERA CLAN0.48 SENORNOTARIODEFEPUBLICA\n"
+            "Entre los dacumentos de escrituras publicas que se encuentran a su cargo\n"
+            "PRIMERA: (DE LAS PARTES) Dirä usted senor notario que son parte del\n"
+            "presente-documento: 1.-JUAN CHILE ARIAS.Con C.I:5918362 Cbba.,quien es mayor de edad,\n"
+            "2.-ROBERTA HUMACAYA MAMANI,con C.l:5932821 Cbba.,quien es mayor\n"
+            "segün sentencia de fecha 08 de Agosto del presente ano. tramitado. en el\n"
+            "reconocido ante Notario de Primera Clase Nro. 44 Dr. Tatiana Cespedes Morales\n"
+            "categoria de instrumento duplico y Ud. serior notario sirvase agregar las\n"
+            "demas clausulas.de estilo y seguridad. chabamba/26 de/Agost0 del 2014 3025076"
+        )
+        self.assertEqual(values["notary_number"], "48")
+        self.assertEqual(values["owner_name"], "JUAN CHILE ARIAS, ROBERTA HUMACAYA MAMANI")
+        self.assertEqual(values["statement_dates"], "26/08/2014")
+
+    def test_the_identity_card_dictated_in_words(self):
+        """El formulario notarial dicta la cédula con todas sus letras y recién
+        después la escribe en cifras, entre paréntesis. Exigiendo la cifra
+        pegada al rótulo no entraba ningún poseedor de esta hoja."""
+        values = self._harvest(
+            "1.- DAVID FERNANDEZ BURGOA, con Cedula de Identidad Numero: seis, cinco, uno,\n"
+            "cinco, cinco, ocho, uno (6515581) con codigo Qr., mayor de edad, habil por derecho,\n"
+            "2.- DUNIA LIZET SEJAS GARCIA, con Cedula de Identidad Numero: cinco, uno, ocho,\n"
+            "seis, dos, cinco, cero (5186250) con codigo QR., mayor de edad, habil por derecho,"
+        )
+        self.assertEqual(values["owner_name"], "DAVID FERNANDEZ BURGOA, DUNIA LIZET SEJAS GARCIA")
+
+    SIGNATURE_PAGE = (
+        "Leido que les fue el acta que antecede, se ratifican con el tenor integro de su declaracion,\n"
+        "firmando y colocando sus impresiones digitales derecha junto con la suscrita Notaria de Fe\n"
+        "Publica, Doy Fe.\n"
+        "Firmado en documento original con codigo de contenido:\n"
+        "16458546b17020f3e5e56928a0b6cfdf4cbce41e0c78a6edf0083093e9985001\n"
+        "Nombre Firma Huella\n"
+        "DAVID FERNANDEZ BURGOA\n"
+        "Cedula de Identidad 6515581\n"
+        "DUNIA LIZET SEJAS GARCIA\n"
+        "Cedula de Identidad 5186250\n"
+    )
+
+    SIGNATURE_TABLE = [[
+        ["Nombre", "Firma", "Huella"],
+        ["DAVID FERNANDEZ BURGOA Cedula de Identidad 6515581", "", ""],
+        ["DUNIA LIZET SEJAS GARCIA Cedula de Identidad 5186250", "", ""],
+    ]]
+
+    def test_the_poseedores_of_the_signature_table_at_the_foot(self):
+        """La última hoja del formulario cierra con la tabla de firmas, y ahí
+        están otra vez los dos poseedores con su cédula debajo. No todas las
+        hojas la traen, pero cuando está es de donde salen más limpios."""
+        values = self._harvest(self.SIGNATURE_PAGE)
+        self.assertEqual(values["owner_name"], "DAVID FERNANDEZ BURGOA, DUNIA LIZET SEJAS GARCIA")
+
+    def test_the_signature_scrawl_does_not_stick_to_the_name(self):
+        """La fila sigue a la derecha con la firma y la huella, y detrás se
+        transparenta el reverso de la hoja; el OCR devuelve esos garabatos en el
+        mismo renglón del nombre. Leída la celda, el nombre termina donde termina
+        la celda."""
+        ensuciada = self.SIGNATURE_PAGE.replace(
+            "DAVID FERNANDEZ BURGOA\n", "DAVID FERNANDEZ BURGOA ap eiouapisau\n"
+        ).replace("DUNIA LIZET SEJAS GARCIA\n", "DUNIA LIZET SEJAS GARCIA uns aelouis\n")
+        values = self._harvest(ensuciada, tables=self.SIGNATURE_TABLE)
+        self.assertEqual(values["owner_name"], "DAVID FERNANDEZ BURGOA, DUNIA LIZET SEJAS GARCIA")
+
+    def test_the_names_of_the_act_win_over_an_empty_table(self):
+        """Una hoja sin cuadro de firmas sigue leyéndose de la redacción."""
+        values = self._harvest(
+            "1.-JUAN CHILE ARIAS.Con C.I:5918362 Cbba.,quien es mayor de edad,\n"
+            "2.-ROBERTA HUMACAYA MAMANI,con C.l:5932821 Cbba.,quien es mayor\n"
+        )
+        self.assertEqual(values["owner_name"], "JUAN CHILE ARIAS, ROBERTA HUMACAYA MAMANI")
+
+    def test_the_date_of_the_formulario_notarial(self):
+        """La hora va primero y en letras, y el día no lleva "los": "a horas
+        17:46 (diecisiete y cuarenta y seis), del dia, lunes veintiocho..."."""
+        values = self._harvest(
+            "a horas 17:46 (diecisiete y cuarenta y seis), del dia, lunes veintiocho del mes "
+            "de septiembre del ano dos mil veintiseis, Ante mi Mgr. MARGARITA OLIVERA COLQUE,"
+        )
+        self.assertEqual(values["statement_dates"], "28/09/2026")
+
+
 class FechasEnLetrasTests(unittest.TestCase):
     def test_the_year_of_an_old_minuta_and_of_a_recent_one(self):
         self.assertEqual(words_to_number("MIL NOVECIENTOS NOVENTA Y DOS"), 1992)
@@ -1798,16 +2694,19 @@ class LecturaQueLlenaLaCarpetaTests(unittest.TestCase):
         self.service = RegisteredFolderService(self.folders, self.documents)
         self.photo = self.captures.create("arq-1", "p.png", "image/png", b"x", b"t")
 
-    def _read(self, document, data):
+    def _read(self, document, data, seals=None, vision=None, vision_max_pages=3):
         RunServerReadingUseCase(
             self.documents,
             self.captures,
             {document.doc_type: FakeExtractor(data)},
             folders=self.folders,
+            seals=seals,
+            vision=vision,
+            vision_max_pages=vision_max_pages,
         ).execute(document.id, "arq-1")
         return self.documents.get(document.id, "arq-1")
 
-    def _document(self, folder=None, doc_type=DocumentType.SWORN_STATEMENT):
+    def _document(self, folder=None, doc_type=DocumentType.FORM):
         document = CreateDocumentUseCase(self.documents, self.captures, self.folders).execute(
             doc_type, [self.photo.id], "arq-1", folder.id if folder else None, "possessors"
         )
@@ -1843,23 +2742,31 @@ class LecturaQueLlenaLaCarpetaTests(unittest.TestCase):
         document = self._read(self._document(), self._statement())
         self.assertEqual(
             document.extracted_data["values"],
-            {"notary_number": "23", "owner_name": "MARIA LOPEZ", "statement_dates": "12 de marzo de 2025"},
+            {"notary_number": "23", "owner_name": "MARIA LOPEZ", "statement_dates": "12/03/2025"},
         )
         # La lectura entera se conserva: los valores se suman, no la reemplazan.
         self.assertEqual(document.extracted_data["full_text"], "DECLARACION JURADA")
 
+    # El plano, que es de donde la hoja de la carpeta toma su único campo leído.
+    CODE = "00-33-432-012-0-00-000-000"
+
+    def _plan(self):
+        return {
+            "full_text": f"PLANO DE UBICACION\nCódigo Catastral: {self.CODE}",
+            "pages": [],
+            "reading": {"observations": []},
+        }
+
     def test_they_fill_the_empty_fields_of_the_carpeta(self):
         folder = self._folder()
-        self._read(self._document(folder), self._statement())
-        sheet = self.folders.get(folder.id, "arq-1").data
-        self.assertEqual(sheet["notary_number"], "23")
-        self.assertEqual(sheet["owner_name"], "MARIA LOPEZ")
+        self._read(self._document(folder, DocumentType.PLAN), self._plan())
+        self.assertEqual(self.folders.get(folder.id, "arq-1").data["cadastral_code"], self.CODE)
 
     def test_what_the_architect_typed_is_never_overwritten(self):
-        folder = self._folder({"owner_name": "Como lo escribí yo"})
-        self._read(self._document(folder), self._statement())
+        folder = self._folder({"cadastral_code": "Como lo escribí yo"})
+        self._read(self._document(folder, DocumentType.PLAN), self._plan())
         self.assertEqual(
-            self.folders.get(folder.id, "arq-1").data["owner_name"], "Como lo escribí yo"
+            self.folders.get(folder.id, "arq-1").data["cadastral_code"], "Como lo escribí yo"
         )
 
     def test_a_document_outside_a_carpeta_still_gets_its_values(self):
@@ -1879,6 +2786,85 @@ class LecturaQueLlenaLaCarpetaTests(unittest.TestCase):
         read = self._read(self.documents.get(document.id, "arq-1"), {"full_text": "FOLIO REAL"})
         self.assertNotIn("values", read.extracted_data)
 
+    def test_the_number_of_the_stamp_wins_over_the_one_in_the_text(self):
+        """El notario escrito en una minuta es el del documento anterior; el de
+        esta hoja está en el sello, y es el que vale."""
+        document = self._read(
+            self._document(doc_type=DocumentType.FORM),
+            {
+                "full_text": "reconocido ante Notaria de Fe Publica Nro. 44",
+                "pages": [],
+                "reading": {"observations": []},
+            },
+            seals=FakeSeals(["NOTARIA DEFE PULCA DEP.SMERA CLAN0.48"]),
+        )
+        self.assertEqual(document.extracted_data["values"]["notary_number"], "48")
+
+    def test_a_stamp_that_disagrees_with_the_text_is_said_so(self):
+        """Tomar uno de los dos en silencio es lo que no se puede hacer: el
+        arquitecto tiene que poder mirar la foto."""
+        document = self._read(
+            self._document(doc_type=DocumentType.FORM),
+            {
+                "full_text": "reconocido ante Notaria de Fe Publica Nro. 44",
+                "pages": [],
+                "reading": {"observations": []},
+            },
+            seals=FakeSeals(["NOTARIA DE FE PUBLICA No 48"]),
+        )
+        notes = document.extracted_data["reading"]["observations"]
+        self.assertTrue(any("sello" in note and "48" in note and "44" in note for note in notes), notes)
+
+    def test_the_text_answers_when_no_stamp_was_found(self):
+        document = self._read(
+            self._document(doc_type=DocumentType.FORM),
+            {
+                "full_text": "ante mí, Notaria de Fe Pública Nº 3, compareció JUAN PEREZ LOPEZ con C.I. 123",
+                "pages": [],
+                "reading": {"observations": []},
+            },
+            seals=FakeSeals([]),
+        )
+        self.assertEqual(document.extracted_data["values"]["notary_number"], "3")
+
+    def test_the_stamp_is_looked_for_in_the_photos_of_the_document(self):
+        seals = FakeSeals(["NOTARIA DE FE PUBLICA No 23"])
+        self._read(
+            self._document(doc_type=DocumentType.FORM),
+            {"full_text": "HOJA SIN NOTARIO", "pages": [], "reading": {"observations": []}},
+            seals=seals,
+        )
+        self.assertEqual(seals.pages, [[b"x"]])
+
+    def test_what_the_stamp_gave_is_not_reported_as_missing(self):
+        """Nombrarlo como vacío mandaría a cargar a mano algo que ya está leído."""
+        document = self._read(
+            self._document(doc_type=DocumentType.FORM),
+            {"full_text": "HOJA SIN NOTARIO", "pages": [], "reading": {"observations": []}},
+            seals=FakeSeals(["NOTARIA DE FE PUBLICA No 23"]),
+        )
+        self.assertEqual(document.extracted_data["values"]["notary_number"], "23")
+        notes = document.extracted_data["reading"]["observations"]
+        missing = next(note for note in notes if "No se encontraron" in note)
+        self.assertNotIn("Notario", missing)
+
+    def test_a_stamp_reader_that_breaks_leaves_the_reading_as_it_was(self):
+        class Roto(SealReadingPort):
+            def read(self, pages):
+                raise RuntimeError("el servicio de OCR no responde")
+                yield ""  # pragma: no cover - lo hace generador, como el de verdad
+
+        document = self._read(
+            self._document(doc_type=DocumentType.FORM),
+            {
+                "full_text": "ante mí, Notaria de Fe Pública Nº 3",
+                "pages": [],
+                "reading": {"observations": []},
+            },
+            seals=Roto(),
+        )
+        self.assertEqual(document.extracted_data["values"]["notary_number"], "3")
+
     def test_what_was_not_found_is_written_in_the_observations(self):
         """El arquitecto tiene que ver qué quedó vacío, no descubrirlo después."""
         document = self._read(
@@ -1887,6 +2873,122 @@ class LecturaQueLlenaLaCarpetaTests(unittest.TestCase):
         )
         notes = document.extracted_data["reading"]["observations"]
         self.assertTrue(any("No se encontraron" in note for note in notes), notes)
+
+
+class BuscarCarpetasDeOtrosUsuariosTests(unittest.TestCase):
+    """Buscar una carpeta registrada por su nombre.
+
+    Una carpeta física la escanea quien la tiene en la mano, así que queda a su
+    nombre y el resto no podía volver a encontrarla. Quien administra el módulo
+    busca entre las de todos; quien no, entre las suyas, que es lo mismo que
+    filtrar su lista. En los dos casos es solo buscar y solo por nombre: una
+    carpeta ajena no entra en la lista de nadie ni se puede escribir.
+    """
+
+    def setUp(self):
+        self.documents = FakeDocuments()
+        self.folders = FakeRegisteredFolders(self.documents)
+        self.service = RegisteredFolderService(self.folders, self.documents)
+        self._folder("arq-1", "Carpeta 1024")
+        self._folder("arq-2", "Carpeta 2048")
+        self._folder("arq-2", "Carpeta 2049")
+
+    def _folder(self, user_sub, name):
+        return CreateRegisteredFolderUseCase(self.folders, self.service).execute(user_sub, name)
+
+    def _search(self, name, across_users=False, user_sub="arq-1"):
+        found = SearchRegisteredFoldersUseCase(self.folders).execute(
+            user_sub, name, across_users=across_users
+        )
+        return [folder.name for folder in found]
+
+    def test_an_administrator_finds_the_carpeta_of_another_user(self):
+        self.assertEqual(self._search("2048", across_users=True), ["Carpeta 2048"])
+
+    def test_without_the_permission_only_the_own_carpetas_are_searched(self):
+        self.assertEqual(self._search("2048"), [])
+        self.assertEqual(self._search("1024"), ["Carpeta 1024"])
+
+    def test_the_search_is_by_name_and_not_a_listing(self):
+        """Lo ajeno aparece porque se lo buscó: la lista sigue siendo la propia."""
+        self.assertEqual([f.name for f in self.folders.list("arq-1")], ["Carpeta 1024"])
+
+    def test_several_matches_come_back_a_to_z(self):
+        self.assertEqual(
+            self._search("Carpeta 204", across_users=True), ["Carpeta 2048", "Carpeta 2049"]
+        )
+
+    def test_a_term_too_short_searches_nothing(self):
+        """Con una letra, buscar entre las de todos devuelve media base."""
+        self.assertEqual(self._search("2", across_users=True), [])
+        self.assertEqual(self._search("", across_users=True), [])
+
+    def test_a_carpeta_of_another_user_still_cannot_be_opened_by_id(self):
+        """Encontrarla no es poder entrar en ella: lo que escribe pasa por
+        require_folder, que sigue exigiendo ser el dueño."""
+        found = SearchRegisteredFoldersUseCase(self.folders).execute(
+            "arq-1", "2048", across_users=True
+        )
+        with self.assertRaises(RegisteredFolderNotFoundException):
+            self.service.require_folder(found[0].id, "arq-1")
+
+    def test_the_photos_of_a_carpeta_found_this_way_can_be_looked_at(self):
+        """Encontrarla sirve de poco sin ver lo escaneado: las fotos se piden por
+        la carpeta, no por su dueño."""
+        captures = FakeCaptures()
+        documents = FakeDocuments()
+        folders = FakeRegisteredFolders(documents)
+        service = RegisteredFolderService(folders, documents)
+        photo = captures.create("arq-2", "p.png", "image/png", b"la foto", b"mini")
+        document = documents.create("arq-2", DocumentType.PLAN, [photo.id])
+        folder = CreateRegisteredFolderUseCase(folders, service).execute("arq-2", "Carpeta 4096")
+        # Como cuando se escanea dentro de la carpeta: entra en ella desde que se abre.
+        folders.file_document(folder.id, document.id)
+        use_case = GetFolderPhotoUseCase(folders, GetCaptureImageUseCase(captures, OpenCvThumbnail()))
+
+        content, _mime = use_case.execute(
+            folder.id, photo.id, "arq-1", administra=True, variant="original"
+        )
+        self.assertEqual(content, b"la foto")
+
+    def test_without_the_permission_the_photos_of_another_user_are_out_of_reach(self):
+        captures = FakeCaptures()
+        documents = FakeDocuments()
+        folders = FakeRegisteredFolders(documents)
+        service = RegisteredFolderService(folders, documents)
+        photo = captures.create("arq-2", "p.png", "image/png", b"la foto", b"mini")
+        document = documents.create("arq-2", DocumentType.PLAN, [photo.id])
+        folder = CreateRegisteredFolderUseCase(folders, service).execute("arq-2", "Carpeta 4096")
+        # Como cuando se escanea dentro de la carpeta: entra en ella desde que se abre.
+        folders.file_document(folder.id, document.id)
+        use_case = GetFolderPhotoUseCase(folders, GetCaptureImageUseCase(captures, OpenCvThumbnail()))
+
+        with self.assertRaises(RegisteredFolderNotFoundException):
+            use_case.execute(folder.id, photo.id, "arq-1", administra=False, variant="original")
+
+    def test_a_photo_that_is_not_of_that_carpeta_is_not_served_through_it(self):
+        """La carpeta no es una puerta a la bandeja de su dueño: solo se llega a
+        lo que está archivado en ella."""
+        captures = FakeCaptures()
+        documents = FakeDocuments()
+        folders = FakeRegisteredFolders(documents)
+        service = RegisteredFolderService(folders, documents)
+        suelta = captures.create("arq-2", "otra.png", "image/png", b"suelta", b"mini")
+        folder = CreateRegisteredFolderUseCase(folders, service).execute("arq-2", "Carpeta 4096")
+        use_case = GetFolderPhotoUseCase(folders, GetCaptureImageUseCase(captures, OpenCvThumbnail()))
+
+        with self.assertRaises(CaptureNotFoundException):
+            use_case.execute(folder.id, suelta.id, "arq-1", administra=True, variant="original")
+
+    def test_the_answer_says_whose_each_carpeta_is(self):
+        """Es lo que la pantalla usa para marcarla como ajena y de solo lectura."""
+        found = SearchRegisteredFoldersUseCase(self.folders).execute(
+            "arq-1", "Carpeta", across_users=True
+        )
+        self.assertEqual(
+            {folder.name: folder.user_sub for folder in found},
+            {"Carpeta 1024": "arq-1", "Carpeta 2048": "arq-2", "Carpeta 2049": "arq-2"},
+        )
 
 
 class CatalogoDeCarpetasTests(unittest.TestCase):
@@ -1921,7 +3023,10 @@ class CatalogoDeCarpetasTests(unittest.TestCase):
                 if field.source == FieldSource.FIXED:
                     self.assertTrue(field.value, field.key)
 
-    def test_poseedores_carries_its_five_documents_and_its_sheet(self):
+    def test_poseedores_carries_its_four_documents_and_its_sheet(self):
+        """Eran cinco: el carril de declaración jurada se quitó, porque es la
+        misma hoja que el formulario. Con él se fue el apartado de la hoja que se
+        llenaba desde ahí."""
         poseedores = folder_type("possessors")
         self.assertEqual(
             poseedores.document_types,
@@ -1929,7 +3034,6 @@ class CatalogoDeCarpetasTests(unittest.TestCase):
                 DocumentType.APPRAISAL,
                 DocumentType.PLAN,
                 DocumentType.FORM,
-                DocumentType.SWORN_STATEMENT,
                 DocumentType.ID_CARD,
             ),
         )
@@ -1938,9 +3042,58 @@ class CatalogoDeCarpetasTests(unittest.TestCase):
             [
                 "cadastral_code", "street", "boundaries", "frontage", "rear_frontage", "depth", "depth_2",
                 "usable_area",
-                "notary_number", "property_number", "owner_name", "statement_dates", "legal_status",
             ],
         )
+
+    def test_the_catalogue_says_which_fields_carry_several_values(self):
+        """La pantalla le da un apartado a cada poseedor, y para saber a qué campo
+        hacerle eso no lo conoce por su nombre: se lo dice el catálogo."""
+        poseedores = folder_type("possessors")
+        values = {
+            doc_type: {field.key: field for field in document_fields(poseedores.key, doc_type)}
+            for doc_type in poseedores.document_types
+            if document_fields(poseedores.key, doc_type)
+        }
+        owner = values[DocumentType.FORM]["owner_name"]
+        self.assertTrue(owner.collect_all)
+        self.assertEqual(owner.item_label, "Poseedor")
+        # Y el que trae uno solo no lo dice, así que la pantalla le da una caja.
+        self.assertFalse(values[DocumentType.FORM]["notary_number"].collect_all)
+        self.assertIsNone(values[DocumentType.FORM]["notary_number"].item_label)
+
+    def test_what_carries_several_reaches_the_screen_as_such(self):
+        """El contrato con la web: sin estas dos claves la pantalla no tendría de
+        dónde saberlo (presentation/schemas, DocumentValueOut)."""
+        catalog = CatalogOut.current()
+        poseedores = next(ft for ft in catalog.folder_types if ft.key == "possessors")
+        by_key = {v.key: v for v in poseedores.document_values[DocumentType.FORM]}
+        self.assertTrue(by_key["owner_name"].multiple)
+        self.assertEqual(by_key["owner_name"].item_label, "Poseedor")
+        self.assertFalse(by_key["statement_dates"].multiple)
+
+    def test_several_owners_travel_in_one_text_separated_by_comma(self):
+        """Es la forma que la pantalla abre en apartados y vuelve a cerrar para
+        guardar. Si esto cambia, hay que cambiar utils/multiValue.js con ella."""
+        values, _ = harvest(
+            {
+                "full_text": (
+                    "se hicieron presentes JUAN PEREZ LOPEZ con C.I. 123456 "
+                    "y MARIA ROJAS VARGAS con C.I. 654321"
+                ),
+                "pages": [],
+            },
+            document_fields("possessors", DocumentType.FORM),
+        )
+        self.assertEqual(values["owner_name"], "JUAN PEREZ LOPEZ, MARIA ROJAS VARGAS")
+
+    def test_the_lane_that_was_retired_is_in_no_carpeta(self):
+        """El tipo sigue en el catálogo por los documentos que ya se guardaron con
+        él --sin su entrada perderían el nombre en pantalla-- pero ninguna carpeta
+        lo lleva, así que no se puede crear uno nuevo."""
+        self.assertIn(DocumentType.SWORN_STATEMENT, DOCUMENT_TYPES)
+        for spec in FOLDER_TYPES.values():
+            with self.subTest(spec.key):
+                self.assertNotIn(DocumentType.SWORN_STATEMENT, spec.document_types)
 
     def test_an_unknown_carpeta_falls_back_to_the_general_one(self):
         """The carpetas created before the catalogue carry no kind, and they
@@ -1968,6 +3121,944 @@ class PerfilDeExtraccionPorCarpetaTests(unittest.TestCase):
 
     def test_a_document_with_no_rules_gets_the_generic_digitization(self):
         self.assertIs(profile_for(DocumentType.SWORN_STATEMENT), GENERIC_PROFILE)
+
+
+class ResolucionMinisterialNoEsElNotarioTests(unittest.TestCase):
+    """Un formulario notarial imprime "Resolución Ministerial Nº 57/2020" debajo
+    del título, a un centímetro del sello. Esa marca de número se lee igual que la
+    del sello, así que 57 entraba donde iba el número del notario -- y 57 es el
+    mismo en TODOS los formularios, así que no era un valor flojo sino el de otro
+    campo."""
+
+    FIELDS = document_fields("possessors", DocumentType.FORM)
+
+    def _harvest(self, text):
+        return harvest({"full_text": text, "pages": []}, self.FIELDS)[0]
+
+    def test_the_number_of_the_resolution_is_not_taken_as_the_notary(self):
+        values = self._harvest(
+            "NOTARIA DE FE PUBLICA FORMULARIO NOTARIAL Resolucion Ministerial N° 57/2020"
+        )
+        self.assertIsNone(values["notary_number"])
+
+    def test_the_notary_is_still_read_when_the_resolution_comes_first(self):
+        """Descartar uno no puede apagar el patrón: lo que viene después sigue
+        buscándose."""
+        values = self._harvest(
+            "FORMULARIO NOTARIAL Resolucion Ministerial N° 57/2020 "
+            "ante mi, Notaria de Fe Publica N° 37, se hizo presente"
+        )
+        self.assertEqual(values["notary_number"], "37")
+
+    def test_the_seal_does_not_take_it_either(self):
+        """El recorte del sello alcanza esa línea cuando el círculo detectado sale
+        un poco grande, que es lo que pasó con la foto que lo destapó."""
+        self.assertEqual(
+            from_seals(["FORMULARIO NOTARIAL Resolucion Ministerial N° 57/2020"], self.FIELDS),
+            {},
+        )
+
+    def test_the_mark_of_the_seal_without_its_little_o(self):
+        """El "º" chico del sello se pierde en la foto más veces de las que se
+        lee: "N 37" bajo "NOTARIA DE FE PUBLICA"."""
+        self.assertEqual(
+            from_seals(["NOTARIA DE FE PUBLICA N 37 25.04.2018"], self.FIELDS),
+            {"notary_number": "37"},
+        )
+
+
+class ElNotarioEscritoEnLaHojaTests(unittest.TestCase):
+    """La tercera forma de llegar al número del notario, además de los dos
+    sellos: escrito en la redacción ("Notaria de Fe Pública N° 2").
+
+    Las tres se prueban, y la del texto es la única que puede confundirse, porque
+    esa misma frase sigue con la dirección de la notaría y con el número del
+    trámite. Un número de otra cosa es peor que ninguno: el campo vacío se ve en
+    la pantalla y se le pregunta a la foto, y el equivocado se guarda callado.
+    """
+
+    FIELDS = document_fields("possessors", DocumentType.FORM)
+
+    def _harvest(self, text):
+        return harvest({"full_text": text, "pages": [{"fields": [], "tables": []}]}, self.FIELDS)[0]
+
+    def test_the_ways_the_sheet_writes_it(self):
+        for escrito in (
+            "Notaria de Fe Publica N° 2 de este Municipio",
+            "Notaria de Fe Publica N 2 de este Municipio",
+            "Notaria de Fe Publica No.2 de este Municipio",
+            "Notario de Fe Publica Nro. 2 del Distrito Judicial",
+            "Notario de Fe Publica de Primera Clase No 2 Dr. Tatiana Cespedes",
+        ):
+            with self.subTest(escrito=escrito):
+                self.assertEqual(self._harvest(escrito)["notary_number"], "2")
+
+    def test_the_street_of_the_notaria_is_not_its_number(self):
+        """La misma frase que la nombra dice dónde queda: "COMPARECE: en esta
+        Notaría ubicada en la calle Lanza N° 476". Con el rótulo alcanzaba para
+        guardar 476 como el notario."""
+        values = self._harvest(
+            "Notaria de Fe Publica de este Municipio, en la calle Lanza N 476 casi esquina Calama"
+        )
+        self.assertIsNone(values["notary_number"])
+
+    def test_the_number_of_the_tramite_is_not_its_number_either(self):
+        values = self._harvest(
+            "Notaria de Fe Publica, tramite N 3122/2026 PROGRAMA MI CASA SEGURA III"
+        )
+        self.assertIsNone(values["notary_number"])
+
+    def test_the_sheet_that_does_rotulate_it_still_counts(self):
+        """La hoja que sí lo rotula, con el número donde empieza el valor."""
+        reading = {
+            "full_text": "NOTARIA DE FE PUBLICA N 23 DEL DISTRITO JUDICIAL",
+            "pages": [{"fields": [], "tables": []}],
+        }
+        self.assertEqual(harvest(reading, self.FIELDS)[0]["notary_number"], "23")
+
+
+class LoQueSeLePreguntaALaFotoTests(unittest.TestCase):
+    """Qué campos van a la pasada del modelo de visión y qué se guarda de lo que
+    conteste. Cada foto cuesta medio minuto de una computadora de los arquitectos,
+    así que lo que NO se pregunta importa tanto como lo que sí."""
+
+    FIELDS = document_fields("possessors", DocumentType.FORM)
+
+    def _keys(self, values):
+        return [spec.key for spec in vision_wanted(self.FIELDS, values)]
+
+    def test_what_is_stamped_is_asked_even_when_the_text_answered(self):
+        """El número del notario vive en un sello y al lado está la resolución
+        ministerial: que el texto haya dicho algo no quiere decir que sea eso."""
+        self.assertIn("notary_number", self._keys({"notary_number": "57"}))
+
+    def test_what_the_text_read_well_is_not_sent_to_a_model(self):
+        values = {
+            "notary_number": "37",
+            "owner_name": "MARIA LOPEZ",
+            "statement_dates": "12/03/2025",
+        }
+        self.assertEqual(self._keys(values), ["notary_number"])
+
+    def test_an_empty_field_is_asked_for(self):
+        self.assertIn("owner_name", self._keys({"owner_name": None}))
+
+    def test_a_document_that_declares_nothing_costs_no_call(self):
+        self.assertEqual(vision_wanted(document_fields("possessors", DocumentType.PLAN), {}), [])
+
+    def test_only_the_number_of_the_notary_is_kept(self):
+        answer = from_vision({"notary_number": "Notaría N° 37"}, self.FIELDS)
+        self.assertEqual(answer["notary_number"], "37")
+
+    def test_what_the_photo_does_not_show_stays_empty(self):
+        """null y "[ilegible]" son las dos formas en que se le pidió decir que no
+        está: ninguna de las dos entra en la carpeta."""
+        answer = from_vision(
+            {"notary_number": None, "owner_name": "[ilegible]", "statement_dates": ""},
+            self.FIELDS,
+        )
+        self.assertEqual(answer, {})
+
+    def test_a_key_nobody_asked_for_does_not_enter(self):
+        self.assertEqual(from_vision({"inventado": "algo"}, self.FIELDS), {})
+
+
+class LaFotoMiradaAlFinalTests(unittest.TestCase):
+    """La última pasada de la lectura en servidor: el modelo de visión mirando la
+    foto, después del OCR y del sello."""
+
+    def setUp(self):
+        self.captures, self.documents = FakeCaptures(), FakeDocuments()
+        self.folders = FakeRegisteredFolders(self.documents)
+        self.photo = self.captures.create("arq-1", "p.png", "image/png", b"x", b"t")
+
+    def _of(self, doc_type, photos):
+        document = CreateDocumentUseCase(self.documents, self.captures, self.folders).execute(
+            doc_type, photos, "arq-1", None, "possessors"
+        )
+        AnalyzeDocumentUseCase(self.documents, self.captures, FakeQueue()).execute(
+            document.id, "arq-1"
+        )
+        return self.documents.get(document.id, "arq-1")
+
+    def _photos(self, count):
+        return [
+            self.captures.create("arq-1", "p%d.png" % i, "image/png", b"x", b"t").id
+            for i in range(count)
+        ]
+
+    def _run(self, document, data, vision=None, seals=None, vision_max_pages=3):
+        RunServerReadingUseCase(
+            self.documents,
+            self.captures,
+            {document.doc_type: FakeExtractor(data)},
+            folders=self.folders,
+            seals=seals,
+            vision=vision,
+            vision_max_pages=vision_max_pages,
+        ).execute(document.id, "arq-1")
+        return self.documents.get(document.id, "arq-1")
+
+    @staticmethod
+    def _formulario(text="FORMULARIO NOTARIAL Resolucion Ministerial N° 57/2020"):
+        return {"full_text": text, "pages": [], "reading": {"observations": []}}
+
+    def test_what_is_seen_in_the_photo_wins_over_the_text(self):
+        """El caso que destapó esto: el texto daba 57, el de la resolución
+        ministerial, y en el sello de la hoja dice 37."""
+        vision = FakeVision([{"notary_number": "37"}])
+        document = self._run(
+            self._of(DocumentType.FORM, [self.photo.id]),
+            self._formulario("ante Notaria de Fe Publica N° 57, se hizo presente"),
+            vision=vision,
+        )
+        self.assertEqual(document.extracted_data["values"]["notary_number"], "37")
+
+    def test_a_disagreement_is_said_out_loud(self):
+        vision = FakeVision([{"notary_number": "37"}])
+        document = self._run(
+            self._of(DocumentType.FORM, [self.photo.id]),
+            self._formulario("ante Notaria de Fe Publica N° 57, se hizo presente"),
+            vision=vision,
+        )
+        notes = document.extracted_data["reading"]["observations"]
+        self.assertTrue(any("foto" in n and "37" in n and "57" in n for n in notes), notes)
+
+    def test_the_photo_is_looked_at_after_the_stamp(self):
+        """El sello se lee primero porque es barato; la foto decide al final."""
+        vision = FakeVision([{"notary_number": "37"}])
+        document = self._run(
+            self._of(DocumentType.FORM, [self.photo.id]),
+            self._formulario(),
+            vision=vision,
+            seals=FakeSeals(["NOTARIA DE FE PUBLICA No 48"]),
+        )
+        self.assertEqual(document.extracted_data["values"]["notary_number"], "37")
+
+    def test_nothing_is_asked_when_the_pass_is_off(self):
+        vision = FakeVision([{"notary_number": "37"}], configured=False)
+        document = self._run(
+            self._of(DocumentType.FORM, [self.photo.id]), self._formulario(), vision=vision
+        )
+        self.assertEqual(vision.asked, [])
+        self.assertIsNone(document.extracted_data["values"]["notary_number"])
+
+    def test_a_pass_that_is_off_says_so_instead_of_leaving_a_silence(self):
+        """Había algo que preguntarle a la foto y no se pudo. Sin decirlo, el
+        arquitecto ve el campo vacío y no tiene cómo saber si la hoja no lo dice o
+        si faltó la pasada."""
+        document = self._run(
+            self._of(DocumentType.FORM, [self.photo.id]),
+            self._formulario(),
+            vision=FakeVision([], configured=False),
+        )
+        notes = document.extracted_data["reading"]["observations"]
+        self.assertTrue(any("modelo de visión" in note for note in notes), notes)
+
+    def test_a_document_with_nothing_to_ask_says_nothing_either(self):
+        """El plano no le pregunta nada al modelo, así que que la pasada esté
+        apagada no es noticia para él."""
+        document = self._run(
+            self._of(DocumentType.PLAN, [self.photo.id]),
+            {"full_text": "PLANO", "pages": [], "reading": {"observations": []}},
+            vision=FakeVision([], configured=False),
+        )
+        notes = document.extracted_data["reading"]["observations"]
+        self.assertFalse(any("modelo de visión" in note for note in notes), notes)
+
+    def test_a_computer_that_could_not_look_leaves_the_reading_as_it_was(self):
+        """Una computadora apagada no puede hacer fallar una lectura que ya está
+        hecha: queda lo que leyó el texto y queda dicho por qué."""
+        vision = FakeVision([], fails=VisionReadingUnavailableException("Ninguna contestó."))
+        document = self._run(
+            self._of(DocumentType.FORM, [self.photo.id]),
+            self._formulario("ante Notaria de Fe Publica N° 37, se hizo presente"),
+            vision=vision,
+        )
+        self.assertEqual(document.status, DocumentStatus.EXTRACTED)
+        self.assertEqual(document.extracted_data["values"]["notary_number"], "37")
+        notes = document.extracted_data["reading"]["observations"]
+        self.assertTrue(any("modelo de visión" in n for n in notes), notes)
+
+    def test_an_unexpected_error_does_not_break_the_reading_either(self):
+        vision = FakeVision([], fails=RuntimeError("boom"))
+        document = self._run(
+            self._of(DocumentType.FORM, [self.photo.id]), self._formulario(), vision=vision
+        )
+        self.assertEqual(document.status, DocumentStatus.EXTRACTED)
+
+    def test_the_photos_that_follow_are_not_looked_at_once_everything_came_out(self):
+        """Veinte segundos por foto: en cuanto están todos los campos, se corta."""
+        vision = FakeVision(
+            [{"notary_number": "37", "owner_name": "MARIA LOPEZ", "statement_dates": "12/03/2025"}]
+        )
+        self._run(self._of(DocumentType.FORM, self._photos(3)), self._formulario(), vision=vision)
+        self.assertEqual(len(vision.asked), 1)
+
+    def test_only_what_is_still_missing_is_asked_of_the_next_photo(self):
+        vision = FakeVision([{"notary_number": "37"}, {"owner_name": "MARIA LOPEZ"}])
+        self._run(self._of(DocumentType.FORM, self._photos(2)), self._formulario(), vision=vision)
+        self.assertEqual(vision.asked[0], ["notary_number", "owner_name", "statement_dates"])
+        self.assertEqual(vision.asked[1], ["owner_name", "statement_dates"])
+
+    def test_a_long_document_does_not_cost_a_whole_computer(self):
+        vision = FakeVision([])
+        self._run(
+            self._of(DocumentType.FORM, self._photos(6)),
+            self._formulario(),
+            vision=vision,
+            vision_max_pages=2,
+        )
+        self.assertEqual(len(vision.asked), 2)
+
+    def test_a_lane_that_asks_for_nothing_never_reaches_the_model(self):
+        vision = FakeVision([{"notary_number": "37"}])
+        self._run(
+            self._of(DocumentType.PLAN, [self.photo.id]),
+            {"full_text": "PLANO", "pages": []},
+            vision=vision,
+        )
+        self.assertEqual(vision.asked, [])
+
+
+class LaBandejaNoTieneTopeTests(unittest.TestCase):
+    """Cuántas fotos entran en "Fotos recibidas" no se limita: una carpeta de
+    poseedores llega con las hojas que llega, y hacer dos viajes porque el envío
+    pasaba de diez archivos era trabajo inventado.
+
+    Lo único que se mira es cuánto pesa junto lo que llega en UNA petición, que
+    es lo que el servidor tiene que sostener en memoria mientras la lee entera.
+    """
+
+    def setUp(self):
+        self.captures = FakeCaptures()
+
+    def test_a_batch_far_over_the_old_ten_is_received(self):
+        photos = [(_png(), "image/png", "p%d.png" % i) for i in range(40)]
+        created = _uploader(self.captures).execute(photos, "arq-1")
+        self.assertEqual(len(created), 40)
+        self.assertEqual(len(self.captures.list_by_status("arq-1", CaptureStatus.INBOX)), 40)
+
+    def test_the_inbox_holds_everything_that_was_sent(self):
+        """Y en varios envíos también: la bandeja no se vacía ni se recorta."""
+        uploader = _uploader(self.captures)
+        for batch in range(3):
+            uploader.execute([(_png(), "image/png", "b%d-%d.png" % (batch, i)) for i in range(15)], "arq-1")
+        self.assertEqual(len(self.captures.list_by_status("arq-1", CaptureStatus.INBOX)), 45)
+
+    def test_what_weighs_more_than_one_request_can_hold_is_refused_with_how_to_fix_it(self):
+        """El tope que queda es de memoria, no de cantidad, y el mensaje lo dice:
+        el arquitecto tiene que saber que puede mandarlas en dos tandas."""
+        files = [(b"x" * 600, "image/jpeg", "a.jpg"), (b"x" * 600, "image/jpeg", "b.jpg")]
+        with patch.object(capture_use_cases, "MAX_UPLOAD_BYTES", 1000):
+            with self.assertRaises(InvalidCaptureException) as caught:
+                _uploader(self.captures).execute(files, "arq-1")
+        self.assertIn("no tiene límite de fotos", caught.exception.message)
+        # Y no se guardó nada: la subida es entera o ninguna.
+        self.assertEqual(self.captures.list_by_status("arq-1", CaptureStatus.INBOX), [])
+
+    def test_one_file_is_still_measured_on_its_own(self):
+        """Quitar el tope de cuántas no quita el de cuánto pesa una: un archivo de
+        más de 15 MB sigue siendo un error con su nombre adelante."""
+        with self.assertRaises(InvalidCaptureException) as caught:
+            _uploader(self.captures).execute([(b"x" * (16 * 1024 * 1024), "image/jpeg", "gorda.jpg")], "arq-1")
+        self.assertIn("gorda.jpg", caught.exception.message)
+
+
+class UnPdfLargoEsUnaCarpetaEscaneadaTests(unittest.TestCase):
+    """Un PDF se separa en una foto por página y ya no se corta a las veinte:
+    cincuenta hojas escaneadas de una vez es una carpeta entera, que es justo lo
+    que la bandeja tiene que poder recibir."""
+
+    def test_a_pdf_longer_than_the_old_twenty_pages_comes_in_whole(self):
+        created = _uploader(FakeCaptures()).execute(
+            [(_pdf(pages=28), "application/pdf", "carpeta.pdf")], "arq-1"
+        )
+        self.assertEqual(len(created), 28)
+
+    def test_the_pages_keep_their_reading_order(self):
+        created = _uploader(FakeCaptures()).execute(
+            [(_pdf(pages=25), "application/pdf", "carpeta.pdf")], "arq-1"
+        )
+        self.assertEqual(created[0].file_name, "carpeta · pág. 1")
+        self.assertEqual(created[-1].file_name, "carpeta · pág. 25")
+
+    def test_a_caller_that_asks_for_a_cap_still_gets_one(self):
+        """El tope sigue existiendo para quien lo pida: lo que cambió es que la
+        bandeja no lo pide."""
+        with self.assertRaises(InvalidCaptureException):
+            PdfiumRasterizer().pages(_pdf(pages=4), 2)
+
+
+class LaPantallaSabeEnQueAndaLaLecturaTests(unittest.TestCase):
+    """El cartel de etapa que el servidor publica mientras lee.
+
+    Hace falta porque las dos últimas pasadas trabajan sobre el documento entero
+    y no sobre una foto: cuando empiezan, todas las fotos ya figuran leídas y la
+    pantalla no tendría de dónde saber que sigue avanzando. La del modelo de
+    visión se lleva entre veinte y treinta segundos por foto, así que sin esto el
+    cartel decía "Interpretando" y se quedaba quieto hasta un minuto.
+    """
+
+    def setUp(self):
+        self.captures, self.documents = FakeCaptures(), FakeDocuments()
+        self.folders = FakeRegisteredFolders(self.documents)
+        self.photo = self.captures.create("arq-1", "p.png", "image/png", b"x", b"t")
+
+    def _run(self, doc_type=DocumentType.FORM, data=None, vision=None, seals=None):
+        document = CreateDocumentUseCase(self.documents, self.captures, self.folders).execute(
+            doc_type, [self.photo.id], "arq-1", None, "possessors"
+        )
+        AnalyzeDocumentUseCase(self.documents, self.captures, FakeQueue()).execute(
+            document.id, "arq-1"
+        )
+        RunServerReadingUseCase(
+            self.documents,
+            self.captures,
+            {doc_type: FakeExtractor(data or {"full_text": "FORMULARIO", "pages": [], "reading": {"observations": []}})},
+            folders=self.folders,
+            seals=seals,
+            vision=vision,
+        ).execute(document.id, "arq-1")
+        return self.documents.get(document.id, "arq-1")
+
+    def test_the_vision_pass_announces_itself_before_looking(self):
+        self._run(vision=FakeVision([{"notary_number": "37"}]))
+        self.assertIn(ReadingStage.VISION, self.documents.stages)
+
+    def test_the_stamp_pass_announces_itself_too(self):
+        self._run(seals=FakeSeals(["NOTARIA DE FE PUBLICA No 48"]))
+        self.assertIn(ReadingStage.SEALS, self.documents.stages)
+
+    def test_the_stamps_are_announced_before_the_model(self):
+        """El orden del cartel es el orden del trabajo: primero el sello, que es
+        barato, y recién al final la foto."""
+        self._run(
+            seals=FakeSeals(["ILEGIBLE"]), vision=FakeVision([{"notary_number": "37"}])
+        )
+        stages = [stage for stage in self.documents.stages if stage]
+        self.assertEqual(stages.index(ReadingStage.SEALS) < stages.index(ReadingStage.VISION), True)
+
+    def test_a_document_with_nothing_to_ask_never_lights_the_model_up(self):
+        """Un plano no le pregunta nada al modelo: aparecer en pantalla como si lo
+        estuviera esperando sería mentir sobre lo que tarda."""
+        self._run(
+            doc_type=DocumentType.PLAN,
+            data={"full_text": "PLANO", "pages": []},
+            vision=FakeVision([{"notary_number": "37"}]),
+        )
+        self.assertNotIn(ReadingStage.VISION, self.documents.stages)
+
+    def test_a_reading_that_ended_is_in_no_stage(self):
+        """El cartel se apaga al guardar, que es por donde salen todas las
+        lecturas: uno encendido en un documento ya leído mandaría a la pantalla a
+        mostrar para siempre que el modelo está mirando."""
+        document = self._run(vision=FakeVision([{"notary_number": "37"}]))
+        self.assertEqual(document.status, DocumentStatus.EXTRACTED)
+        self.assertIsNone(document.stage)
+
+    def test_a_reading_that_failed_is_in_no_stage_either(self):
+        document = CreateDocumentUseCase(self.documents, self.captures, self.folders).execute(
+            DocumentType.FORM, [self.photo.id], "arq-1", None, "possessors"
+        )
+        AnalyzeDocumentUseCase(self.documents, self.captures, FakeQueue()).execute(
+            document.id, "arq-1"
+        )
+        self.documents.set_stage(document.id, ReadingStage.VISION)
+        RunServerReadingUseCase(
+            self.documents,
+            self.captures,
+            {DocumentType.FORM: FakeExtractor(error=OcrUnavailableException("El OCR no responde."))},
+            folders=self.folders,
+        ).execute(document.id, "arq-1")
+        failed = self.documents.get(document.id, "arq-1")
+        self.assertEqual(failed.status, DocumentStatus.FAILED)
+        self.assertIsNone(failed.stage)
+
+    def test_a_cartel_that_could_not_be_written_does_not_stop_the_reading(self):
+        """Es un cartel para una pantalla: perderlo no puede costar una lectura."""
+        def explode(_document_id, _stage):
+            raise RuntimeError("database hiccup")
+
+        with patch.object(FakeDocuments, "set_stage", explode):
+            document = self._run(vision=FakeVision([{"notary_number": "37"}]))
+        self.assertEqual(document.status, DocumentStatus.EXTRACTED)
+        self.assertEqual(document.extracted_data["values"]["notary_number"], "37")
+
+
+# Un formulario notarial de verdad, como lo lee el OCR: el de la foto 21.jpg.
+FORMULARIO_NOTARIAL = """FORMULARIO NOTARIAL
+Resolución Ministerial N° 57/2020
+Código de seguridad: RL123ZKxxo6t
+VALOR Bs. 3.-
+DECLARACIONES VOLUNTARIAS
+NÚMERO: UN MIL CIENTO CINCUENTA Y UN/DOS MIL VEINTISEIS - 1151/2026-
+En el municipio de Cochabamba del departamento de Cochabamba del Estado Plurinacional de
+Bolivia, a horas 13:18 (trece y dieciocho), del día, lunes veintiun del mes de septiembre del año dos
+mil veintiseis, ANTE MÍ ANGEL RODRIGUEZ SALAZAR, Notario de Fe Pública N° 15 del municipio
+de Cochabamba del departamento de Cochabamba, se hizo presente NOELIA ALMENDRAS
+RODRIGUEZ con Cédula de Identidad N° 8806991 (ocho, ocho, cero, seis, nueve, nueve, uno),
+Boliviana, Soltera, con profesión y/o ocupación ESTUDIANTE, con domicilio en AV. PETROLERA
+KM. 10 . B/ VILLA SAN SALVADOR - CBBA quien se apersona en su propio derecho, en su
+condición de SOLICITANTE. A quien de identificarle en oficina y haciéndose responsable del
+contenido y veracidad de su afirmación encontrándose en pleno goce, capacidad y ejercicio de sus
+derechos civiles para este acto, dijo:-
+Declaro: ser poseedora, del bien inmueble con código catastral N° 00-33-432-012-0-00-000-000-
+Declaro: la veracidad de datos técnicos consignados en los formularios y otros registros
+informatices, consignados en los sistemas del Gobierno Autónomo Municipal de Cochabamba.-
+Con lo que termino la declaración, que le fue leida en su integridad, ratificándose en el tenor integro
+de la presente declaración suscribe la declarante juntamente conmigo ANTE MI, ÁNGEL
+RODRÍGUEZ SALAZAR, ABOGADO NOTARIO DE FE PUBLICA NUMERO QUINCE, DEL
+MUNICIPIO DE COCHABAMBA- CERCADO.-de este distrito judicial, de todo lo que doy fe.-
+CONCLUSION.-
+Con lo que concluyo DOY FE.-
+Firmado en documento original con código de contenido:
+8abf1b7f5ae19a8182ffe69dadcab18e790cf393975da2829cf4f7da36aaa4f9.-
+Nombre Firma Huella
+NOELIA ALMENDRAS RODRIGUEZ
+Cédula de Identidad 8806991
+Abg. Angel Rodriguez Salazar
+NOTARÍA DE FE PÚBLICA
+DIRNOPLU N° 15
+https://sinplu.dirnoplu.gob.bo/verificacion-documentos/b50031fc-RLi23ZKxxo6t
+Este es un documento firmado digitalmente por la/el Notario de Fe Pública
+"""
+
+
+class FormularioNotarialEnteroTests(unittest.TestCase):
+    """La hoja completa, leída de punta a punta.
+
+    Es la prueba que importa: cada valor por separado se saca con un patrón, pero
+    lo que rompe en producción es la hoja entera -- el número de la Resolución
+    Ministerial al lado del sello, la fecha del nombramiento del notario dentro
+    del sello, y el nombre del notario escrito antes y más grande que el del
+    poseedor.
+    """
+
+    FIELDS = document_fields("possessors", DocumentType.FORM)
+
+    def setUp(self):
+        self.values, self.missing = harvest(
+            {"full_text": FORMULARIO_NOTARIAL, "pages": []}, self.FIELDS
+        )
+
+    def test_the_notary_is_the_one_of_the_seal_and_not_the_resolution(self):
+        self.assertEqual(self.values["notary_number"], "15")
+
+    def test_the_owner_is_the_one_who_appeared_and_not_the_notary(self):
+        self.assertEqual(self.values["owner_name"], "NOELIA ALMENDRAS RODRIGUEZ")
+
+    def test_the_date_is_the_one_of_the_act_in_figures(self):
+        self.assertEqual(self.values["statement_dates"], "21/09/2026")
+
+    def test_nothing_is_left_for_the_architect_to_type(self):
+        self.assertEqual(self.missing, [])
+
+
+class FechaDeUnActaEnSusMuchasFormasTests(unittest.TestCase):
+    """Cómo escriben la fecha estas hojas. No hay una redacción: cada notaría
+    tiene la suya, y la misma notaría la cambia entre el formulario y la
+    declaración jurada."""
+
+    FIELDS = document_fields("possessors", DocumentType.FORM)
+
+    FORMAS = [
+        ("21/09/2026", "del dia, lunes veintiun del mes de septiembre del ano dos mil veintiseis, ANTE MI"),
+        ("21/09/2026", "a los veintiun dias del mes de septiembre de dos mil veintiseis, ante mi"),
+        ("21/09/2026", "del dia lunes 21 del mes de septiembre del ano 2026, ANTE MI"),
+        ("21/09/2026", "del dia veintiuno de septiembre del ano dos mil veintiseis, ANTE MI"),
+        ("21/09/2026", "a los 21 dias del mes de septiembre de 2026."),
+        ("21/09/2026", "a los veintiun dias de septiembre de dos mil veintiseis"),
+        ("21/09/2026", "del dia 21 de septiembre de 2026, ante mi"),
+        ("31/01/2025", "el dia martes treinta y uno del mes de enero del ano dos mil veinticinco,"),
+        ("01/01/2025", "el dia primero del mes de enero del ano dos mil veinticinco y en presencia de"),
+        ("05/03/2024", "dia 5 de marzo de 2024"),
+        ("12/03/2025", "declaracion jurada de fecha 12 de marzo de 2025"),
+        ("26/08/2014", "26 de/Agosto del 2014"),
+        # El día de semana solo, sin "del día" delante.
+        ("21/09/2026", "Lunes veinte y uno del mes de septiembre del dos mil veintiseis"),
+        ("21/09/2026", "Lunes veinte y uno del mes de septiembre del dos mil veintiseis, ANTE MI"),
+        ("21/09/2026", "lunes 21 del mes de septiembre del 2026"),
+        ("21/09/2026", "martes veinte y uno de septiembre de dos mil veintiseis"),
+        # El día compuesto escrito separado, que es la mitad de las veces.
+        ("21/09/2026", "del dia veinte y un del mes de septiembre del ano dos mil veintiseis"),
+        ("28/02/2025", "a los veinte y ocho dias del mes de febrero de dos mil veinticinco"),
+        # Y en cifras, rotulada o suelta.
+        ("21/09/2026", "Fecha: 21/09/2026"),
+        ("21/09/2026", "FECHA 21-09-2026"),
+        ("21/09/2026", "Cochabamba, 21/09/2026"),
+        ("21/09/2026", "En la ciudad de Cochabamba, 21.09.2026, ante mi"),
+        # Suelta en letras, sin nada que la anuncie.
+        ("21/09/2026", "En la ciudad de Cochabamba, veinte y uno de septiembre de dos mil veintiseis"),
+    ]
+
+    def test_every_wording_gives_the_same_date(self):
+        for expected, text in self.FORMAS:
+            with self.subTest(text):
+                values, _ = harvest({"full_text": text, "pages": []}, self.FIELDS)
+                self.assertEqual(values["statement_dates"], expected)
+
+    def test_the_number_of_the_resolution_is_not_a_date(self):
+        values, _ = harvest(
+            {"full_text": "Resolucion Ministerial N 57/2020 codigo RL123ZKxxo6t", "pages": []},
+            self.FIELDS,
+        )
+        self.assertIsNone(values["statement_dates"])
+
+    def test_the_date_inside_the_seal_is_not_the_date_of_the_act(self):
+        """La chica que va dentro del sello es la del nombramiento del notario, y
+        viene pegada al número de la notaría. Que una fecha en cifras siga a otro
+        número es lo que la delata: eso es una línea de registro, no una fecha."""
+        values, _ = harvest(
+            {"full_text": "NOTARIA DE FE PUBLICA N 15 22.04.2018 DIRNOPLU", "pages": []}, self.FIELDS
+        )
+        self.assertIsNone(values["statement_dates"])
+
+    def test_a_number_of_the_sheet_is_not_a_date_in_figures(self):
+        """La hoja está llena de números con barras y guiones. Lo que separa a una
+        fecha es el año de cuatro cifras en el último lugar."""
+        for text in [
+            "codigo catastral N 00-33-432-012-0-00-000-000",
+            "NUMERO: UN MIL CIENTO CINCUENTA Y UN/DOS MIL VEINTISEIS - 1151/2026-",
+            "Resolucion Ministerial N 57/2020 codigo RL123ZKxxo6t",
+        ]:
+            with self.subTest(text):
+                values, _ = harvest({"full_text": text, "pages": []}, self.FIELDS)
+                self.assertIsNone(values["statement_dates"])
+
+    def test_a_labelled_date_in_figures_is_not_cut_to_its_day(self):
+        """El principio de una fecha se lee igual que el principio de una medida
+        del plano, así que "FECHA: 21/09/2026" se guardaba como "21"."""
+        values, _ = harvest(
+            {
+                "full_text": "DECLARACION JURADA",
+                "pages": [{"fields": [{"name": "FECHA", "value": "21/09/2026"}]}],
+            },
+            self.FIELDS,
+        )
+        self.assertEqual(values["statement_dates"], "21/09/2026")
+
+    def test_a_labelled_date_in_words_is_stored_in_figures(self):
+        """Venga de donde venga, la oficina la guarda en dd/mm/aaaa."""
+        values, _ = harvest(
+            {
+                "full_text": "DECLARACION JURADA",
+                "pages": [{"fields": [{"name": "FECHA", "value": "12 de marzo de 2025"}]}],
+            },
+            self.FIELDS,
+        )
+        self.assertEqual(values["statement_dates"], "12/03/2025")
+
+    def test_a_day_that_does_not_exist_is_not_a_date(self):
+        """Un "31 de febrero" no es una fecha floja: es una lectura equivocada, y
+        guardarla deja en la carpeta algo que nadie vuelve a mirar."""
+        self.assertIsNone(to_iso_like("31", "FEBRERO", "2026"))
+        self.assertIsNone(to_iso_like("29", "FEBRERO", "2025"))
+        self.assertEqual(to_iso_like("29", "FEBRERO", "2024"), "29/02/2024")
+
+    def test_a_photo_does_not_hand_over_a_clean_sentence(self):
+        """La misma frase, leída de una foto en vez de un texto limpio.
+
+        Es lo que de verdad llega: el OCR mete la raya del renglón entre las
+        palabras, cambia la I por una L, y el notario escribe "ventiun" donde la
+        ortografía dice "veintiún". Cada una de estas dejaba el campo vacío.
+        """
+        for expected, text in [
+            ("21/09/2026", "del día, lunes veintiun del-mes de septiembre del año dos mil veintiseis"),
+            ("21/09/2026", "del día, lunes veintiun del mes de. septiembre. del año dos mil veintiseis"),
+            ("21/09/2026", "del día: lunes veintiun del mes de septiembre del año: dos mil veintiseis"),
+            ("21/09/2026", "del día, lunes veintiun del mes de septlembre del año dos mil veintiseis"),
+            ("21/09/2026", "del día, lunes velntiun del mes de septiembre del año dos mil veintiseis"),
+            ("21/09/2026", "del día, lunes ventiun del mes de septiembre del año dos mil veintiseis"),
+            ("21/09/2026", "del día, lunes veintiun del mes de septiembre del año dos mil veintlseis"),
+            ("21/09/2026", "del día, lunes veintiun del mes de setiembre del año dos mil veintiseis"),
+            ("16/09/2026", "del día, miércoles diez y seis del mes de septiembre del año dos mil veintiseis"),
+            ("16/09/2026", "del día, miércoles diesiseis de septiembre de dos mil veintiseis"),
+        ]:
+            with self.subTest(text):
+                values, _ = harvest({"full_text": text, "pages": []}, self.FIELDS)
+                self.assertEqual(values["statement_dates"], expected)
+
+    def test_a_word_that_is_not_a_number_does_not_become_one(self):
+        """El parecido se exige alto a propósito: una fecha inventada no la
+        vuelve a mirar nadie, y un campo vacío sí se avisa."""
+        self.assertIsNone(leading_number("CUALQUIER COSA"))
+        self.assertIsNone(leading_number("MUNICIPIO"))
+        self.assertIsNone(leading_number("RODRIGUEZ"))
+        values, _ = harvest(
+            {"full_text": "a horas 13:18 (trece y dieciocho), ANTE MI", "pages": []}, self.FIELDS
+        )
+        self.assertIsNone(values["statement_dates"])
+
+    def test_the_number_is_cut_where_it_stops_being_one(self):
+        """Es lo que deja capturar con holgura: el patrón ya no tiene que adivinar
+        dónde termina la fecha."""
+        self.assertEqual(leading_number("DOS MIL VEINTISEIS ANTE MI ANGEL"), 2026)
+        self.assertEqual(leading_number("VEINTIUN DEL MES DE"), 21)
+        # El día compuesto se escribe junto y separado, y vale lo mismo.
+        self.assertEqual(leading_number("VEINTIUNO"), leading_number("VEINTE Y UNO"))
+        self.assertEqual(leading_number("VEINTE Y OCHO"), 28)
+        self.assertEqual(leading_number("2026"), 2026)
+        self.assertIsNone(leading_number("CUALQUIER COSA"))
+
+
+class LaFechaQueContestaElModeloTests(unittest.TestCase):
+    """La oficina guarda la fecha en dd/mm/aaaa y en ninguna otra forma. Al modelo
+    de visión se le pide así, pero también la devuelve como la leyó de la hoja o
+    con el año adelante, así que se la pasa por una sola puerta antes de
+    guardarla."""
+
+    FIELDS = document_fields("possessors", DocumentType.FORM)
+
+    def test_every_shape_it_answers_is_stored_the_same_way(self):
+        for raw in [
+            "21/09/2026",
+            "21-9-2026",
+            "2026-09-21",
+            "21 de septiembre de 2026",
+            "veintiuno de septiembre de dos mil veintiseis",
+            "Veintiún de septiembre del año dos mil veintiséis",
+            "21/9/26",
+        ]:
+            with self.subTest(raw):
+                self.assertEqual(any_date(raw), "21/09/2026")
+
+    def test_what_cannot_be_read_as_a_date_is_not_stored(self):
+        for raw in ["09/21/2026", "31/02/2026", "cualquier cosa", ""]:
+            with self.subTest(raw):
+                self.assertIsNone(any_date(raw))
+
+    def test_the_answer_of_the_model_reaches_the_carpeta_in_figures(self):
+        answer = from_vision({"statement_dates": "21 de septiembre de 2026"}, self.FIELDS)
+        self.assertEqual(answer["statement_dates"], "21/09/2026")
+
+    def test_a_date_the_model_wrote_in_a_shape_nobody_understands_is_dropped(self):
+        self.assertEqual(from_vision({"statement_dates": "el lunes pasado"}, self.FIELDS), {})
+
+
+class NombreDelPoseedorEnSusMuchasFormasTests(unittest.TestCase):
+    """Cómo presentan al poseedor estas hojas, y qué NO es su nombre.
+
+    Lo que sostiene la lectura es la lista de palabras que un acta pone alrededor
+    de un nombre y no son parte de él (folder_types._NOT_NAME): sin ella entraban
+    el verbo, el tratamiento, la nacionalidad y el estado civil.
+    """
+
+    FIELDS = document_fields("possessors", DocumentType.FORM)
+
+    ANTE_MI = (
+        "ANTE MI ANGEL RODRIGUEZ SALAZAR, Notario de Fe Publica N 15 del municipio "
+        "de Cochabamba del departamento de Cochabamba, "
+    )
+
+    FORMAS = [
+        ("NOELIA ALMENDRAS RODRIGUEZ",
+         "se hizo presente NOELIA ALMENDRAS RODRIGUEZ con Cedula de Identidad N 8806991 (ocho, ocho)"),
+        ("NOELIA ALMENDRAS RODRIGUEZ",
+         "se hizo presente NOELIA ALMENDRAS RODRIGUEZ, boliviana, mayor de edad, con C.I. 8806991"),
+        ("NOELIA ALMENDRAS RODRIGUEZ",
+         "se hizo presente la senora NOELIA ALMENDRAS RODRIGUEZ con C.I. N 8806991"),
+        ("JUAN PEREZ LOPEZ, MARIA ROJAS VARGAS",
+         "se hicieron presentes JUAN PEREZ LOPEZ con C.I. 123456 y MARIA ROJAS VARGAS con C.I. 654321"),
+        ("JUAN PEREZ LOPEZ", "comparecio JUAN PEREZ LOPEZ con Cedula de Identidad 123456"),
+        ("JUAN PEREZ LOPEZ", "comparecen JUAN PEREZ LOPEZ con Cedula de Identidad 123456"),
+        ("JUAN PEREZ LOPEZ", "se presento JUAN PEREZ LOPEZ con C.I. 123456"),
+        ("MARIA DE LA CRUZ PEREZ", "se hizo presente MARIA DE LA CRUZ PEREZ con C.I. 999888"),
+    ]
+
+    def _harvest(self, text):
+        return harvest({"full_text": self.ANTE_MI + text, "pages": []}, self.FIELDS)[0]
+
+    def test_every_wording_gives_the_same_name(self):
+        for expected, text in self.FORMAS:
+            with self.subTest(text):
+                self.assertEqual(self._harvest(text)["owner_name"], expected)
+
+    def test_the_signature_table_answers_when_the_wording_could_not_be_read(self):
+        """El nombre vuelve a estar impreso al pie, rotulado y con su cédula
+        debajo: es la red cuando la foto salió ilegible en el párrafo."""
+        values, _ = harvest(
+            {
+                "full_text": "Nombre Firma Huella NOELIA ALMENDRAS RODRIGUEZ Cedula de Identidad 8806991",
+                "pages": [],
+            },
+            self.FIELDS,
+        )
+        self.assertEqual(values["owner_name"], "NOELIA ALMENDRAS RODRIGUEZ")
+
+    def test_the_notary_is_never_the_owner(self):
+        for text in [
+            "de este distrito judicial, de todo lo que doy fe.",
+            "ANTE MI, ANGEL RODRIGUEZ SALAZAR, ABOGADO NOTARIO DE FE PUBLICA NUMERO QUINCE",
+        ]:
+            with self.subTest(text):
+                values, _ = harvest({"full_text": text, "pages": []}, self.FIELDS)
+                self.assertIsNone(values["owner_name"])
+
+    def test_a_word_that_only_looks_like_a_card_is_not_one(self):
+        """La marca de la cédula es dos letras, así que sin pedir el número detrás
+        cualquier palabra que empiece igual la imitaba."""
+        values, _ = harvest(
+            {"full_text": "se hizo presente con ciudadania boliviana y vecindad", "pages": []},
+            self.FIELDS,
+        )
+        self.assertIsNone(values["owner_name"])
+
+
+AVALUO = """GOBIERNO AUTONOMO MUNICIPAL DE COCHABAMBA
+FORMULARIO PARA ACTUALIZACION DE DATOS TECNICOS
+DECLARACION JURADA
+33-432-012-0-00-000-000          0        8806991015
+Código catastral              # Inmueble      PMC
+1.- Información del propietario     2.- Información legal      Formulario No.: 493002
+NOELIA ALMENDRAS RODRIGUEZ          Matricula: No registra     Fecha: 26/08/2026
+CI:8806991 Cochabamba               Asiento: No registra       Código: I92314F493002
+                                    Fecha DDRR: No registra
+Croquis del predio    LOTE N° 5    CALLE DE 12.50 MTS.
+Lote N° 4  Sup. Total Util 299.02 m2    25.01    23.91    13.24    21.67
+3.- Descripción del predio    Frente de lote: 35.01    Zona homogénea: Zona 11
+Ltd.: -17,394013, Lgt.: -66,156951   Superficie Lote: 294.66   Fondo del lote: 25.01
+6.- Características de la(s) construcciones
+1 2009 2009 A 93.00 M2 1 Marginal -
+2 2020 2009 A 93.00 M2 1 Interes Social -
+3 2024 2009 A 93.00 M2 1 Interes Social -
+Página 1/2
+"""
+
+
+class CodigoCatastralDelAvaluoTests(unittest.TestCase):
+    """El avalúo no identifica al predio por su matrícula --su casilla de
+    información legal dice "No registra"-- sino por el código catastral, impreso
+    grande en la cabecera y con el rótulo DEBAJO, como pie."""
+
+    APPRAISAL = document_fields("possessors", DocumentType.APPRAISAL)
+    PLAN = document_fields("possessors", DocumentType.PLAN)
+
+    def _code(self, text, fields=None):
+        values, _ = harvest({"full_text": text, "pages": []}, fields or self.APPRAISAL)
+        return values["cadastral_code"]
+
+    def test_it_is_read_as_the_sheet_prints_it(self):
+        self.assertEqual(self._code(AVALUO), "33-432-012-0-00-000-000")
+
+    def test_the_plano_keeps_printing_it_with_the_pair_in_front(self):
+        code = self._code("Código Catastral: 00-33-432-012-0-00-000-000", self.PLAN)
+        self.assertEqual(code, "00-33-432-012-0-00-000-000")
+
+    def test_both_sheets_are_the_same_predio_for_the_gis(self):
+        """Los dos primeros dígitos no son parte del código: lo dice
+        cadastral_code.to_gis_code() desde antes que el avalúo se leyera."""
+        self.assertEqual(
+            to_gis_code(self._code(AVALUO)),
+            to_gis_code(self._code("Código Catastral: 00-33-432-012-0-00-000-000", self.PLAN)),
+        )
+
+    def test_the_other_numbers_of_the_sheet_are_not_the_code(self):
+        """La hoja está llena de números largos: el del formulario, el PMC, las
+        coordenadas del predio y la cédula del propietario."""
+        for text in [
+            "Formulario No.: 493002 Código: I92314F493002",
+            "Ltd.: -17,394013, Lgt.: -66,156951",
+            "Fecha: 26/08/2026 CI:8806991 Cochabamba",
+            "8806991015 PMC # Inmueble 0",
+        ]:
+            with self.subTest(text):
+                self.assertIsNone(self._code(text))
+
+    def test_the_appraisal_asks_for_nothing_else(self):
+        """La superficie útil y el código: lo demás de esta hoja todavía no se le
+        pide."""
+        self.assertEqual(
+            sorted(field.key for field in self.APPRAISAL), ["cadastral_code", "usable_area"]
+        )
+
+
+class SuperficieUtilDelAvaluoTests(unittest.TestCase):
+    """El avalúo imprime DOS superficies y solo una es la que pide la carpeta:
+    "Superficie Lote: 294.66" en su cuadro de descripción, que es el área del
+    lote, y "Sup. Total Util 299.02 m2" escrita sobre el croquis, que es la
+    útil."""
+
+    FIELDS = document_fields("possessors", DocumentType.APPRAISAL)
+
+    def _area(self, text):
+        values, _ = harvest({"full_text": text, "pages": []}, self.FIELDS)
+        return values["usable_area"]
+
+    def test_the_useful_one_is_taken_and_not_the_lot(self):
+        self.assertEqual(self._area(AVALUO), "299.02 M2")
+
+    def test_the_lot_area_alone_is_not_the_useful_one(self):
+        """Si la útil no se pudo leer, el campo queda vacío y se avisa: guardar el
+        área del lote en su lugar sería guardar otro número sin decirlo."""
+        self.assertIsNone(self._area("3.- Descripcion del predio Superficie Lote: 294.66 Ubicacion: Medio"))
+
+    def test_the_table_of_constructions_is_not_a_surface(self):
+        """Cada construcción repite sus metros, y el avalúo de esta hoja repite
+        "93.00 M2" tres veces: la cifra más repetida de la hoja NO es su
+        superficie útil."""
+        self.assertIsNone(
+            self._area(
+                "6.- Caracteristicas 1 2009 2009 A 93.00 M2 1 Marginal "
+                "2 2020 2009 A 93.00 M2 1 Interes Social 3 2024 2009 A 93.00 M2"
+            )
+        )
+
+    def test_it_is_also_read_when_the_sheet_labels_it(self):
+        self.assertEqual(self._area("SUPERFICIE TOTAL UTIL: 299.02 M2"), "299.02 M2")
+
+
+class ElCompletadoDelPlanoEsDelPlanoTests(unittest.TestCase):
+    """Buscar la cifra que la hoja repite y repartir los lados medidos sobre el
+    dibujo son reglas del plano, y solo del plano. En otra hoja hacían daño: un
+    avalúo repite los metros de cada construcción, y un formulario terminaba con
+    un frente y un fondo que esa hoja no declara."""
+
+    def setUp(self):
+        self.captures, self.documents = FakeCaptures(), FakeDocuments()
+        self.folders = FakeRegisteredFolders(self.documents)
+        self.photo = self.captures.create("arq-1", "p.png", "image/png", b"x", b"t")
+
+    def _read(self, doc_type, data):
+        document = CreateDocumentUseCase(self.documents, self.captures, self.folders).execute(
+            doc_type, [self.photo.id], "arq-1", None, "possessors"
+        )
+        AnalyzeDocumentUseCase(self.documents, self.captures, FakeQueue()).execute(
+            document.id, "arq-1"
+        )
+        RunServerReadingUseCase(
+            self.documents, self.captures, {doc_type: FakeExtractor(data)}, folders=self.folders
+        ).execute(document.id, "arq-1")
+        return self.documents.get(document.id, "arq-1").extracted_data["values"]
+
+    # Lo que el lector deja en una página cuando midió el dibujo: es lo que
+    # dispara el reparto de lados.
+    DRAWING = {
+        "full_text": "CROQUIS",
+        "pages": [{"fields": [], "dimensions": [12.5, 25.0, 12.5, 25.0], "street": None}],
+        "reading": {"observations": []},
+    }
+
+    def test_a_form_does_not_get_sides_it_never_declared(self):
+        values = self._read(DocumentType.FORM, self.DRAWING)
+        self.assertEqual(sorted(values), ["notary_number", "owner_name", "statement_dates"])
+
+    def test_an_appraisal_does_not_get_them_either(self):
+        values = self._read(DocumentType.APPRAISAL, self.DRAWING)
+        self.assertEqual(sorted(values), ["cadastral_code", "usable_area"])
+
+    def test_the_repeated_figure_is_not_the_surface_of_an_appraisal(self):
+        """La cifra más repetida de un avalúo son los metros de sus
+        construcciones."""
+        values = self._read(
+            DocumentType.APPRAISAL,
+            {
+                "full_text": "1 2009 A 93.00 M2 2 2020 A 93.00 M2 3 2024 A 93.00 M2",
+                "pages": [],
+                "reading": {"observations": []},
+            },
+        )
+        self.assertIsNone(values["usable_area"])
 
 
 if __name__ == "__main__":

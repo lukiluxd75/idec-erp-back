@@ -125,7 +125,9 @@ class UserRoleAreaModel(Base):
 
     user = relationship("UserModel", back_populates="assignments")
     role = relationship("InternalRoleModel", back_populates="assignments")
-    area = relationship("AreaModel")
+    # El camino completo porque el dominio cite tiene otra clase AreaModel (su
+    # tabla `area`): con el nombre a secas la referencia es ambigua.
+    area = relationship("app.domains.security.infrastructure.models.AreaModel")
 
 
 class PermissionModel(Base):

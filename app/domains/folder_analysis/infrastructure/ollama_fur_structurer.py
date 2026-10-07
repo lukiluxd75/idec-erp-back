@@ -25,9 +25,7 @@ from app.domains.folder_analysis.domain.exceptions import (
 from app.domains.folder_analysis.domain.ports import TaxStructurerPort
 from app.domains.folder_analysis.domain.services.fur_parser import FIELDS
 
-# What each key is called on the form, so the model looks for the printed label
-# and not for our English key name. Built from the parser's own labels, plus the
-# values that are printed as a whole line instead of next to a label.
+# What each key is called on the form, so the model looks for the printed label and not for our English key name.
 _HINTS: Dict[str, str] = {
     **{key: f'el valor rotulado "{labels[0]}"' for key, labels, _kind in FIELDS},
     "receipt_type": 'el tipo de comprobante (ej. "FUR - COMPROBANTE DE PAGO")',
@@ -78,14 +76,11 @@ class OllamaFurStructurer(TaxStructurerPort):
         borrow: Optional[Callable[[str, float], ContextManager[None]]] = None,
     ):
         self._base = (base_url if base_url is not None else settings.TAX_RECEIPT_OLLAMA_URL).rstrip("/")
-        # `is not None`, not `or`: an empty model is a choice (the pass off), not a
-        # missing argument to fall back on.
+        # `is not None`, not `or`: an empty model is a choice (the pass off), not a missing argument to fall back on.
         self._model = model if model is not None else settings.TAX_RECEIPT_LLM_MODEL
         self._timeout = timeout or settings.TAX_RECEIPT_LLM_TIMEOUT_SECONDS
         self._max_tokens = max_tokens or settings.TAX_RECEIPT_LLM_MAX_TOKENS
         self._host_provider = host_provider
-        # Marks the PC as busy while the call runs, so the monitor screen sees it,
-        # and hands back the "Detener" flag that monitor can raise.
         self._borrow = borrow or (lambda _host, _seconds: nullcontext(lambda: False))
 
     def is_configured(self) -> bool:
@@ -137,8 +132,7 @@ class OllamaFurStructurer(TaxStructurerPort):
                         {"role": "user", "content": prompt},
                     ],
                     "format": "json",
-                    # Streamed although the JSON is only usable whole: it is what
-                    # lets the monitor's "Detener" reach a call already underway.
+                    # Streamed although the JSON is only usable whole: it is what lets the monitor's "Detener" reach a call already underway.
                     "stream": True,
                     "keep_alive": KEEP_ALIVE,
                     "options": {"temperature": 0, "num_predict": self._max_tokens},

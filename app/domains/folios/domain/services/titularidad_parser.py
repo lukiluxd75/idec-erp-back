@@ -45,8 +45,6 @@ _ASIENTO_RE = re.compile(r"^A?S?IENTO(?:NUMERO|NRO|N)?([0-9LIOSBZ]{1,3})$")
 _ULTIMO_RE = re.compile(r"ULTIMOASIENTO(?:NRO|NUMERO|N)?([0-9LIOSBZ]{1,3})")
 _CI_RE = re.compile(r"(?:C\s*/\s*\.?\s*)?C\s*\.?\s*I\s*\.?\s*:?\s*(\d[\d\s]{3,11}\d)\s*-?\s*([A-Z]{2,3})?\b")
 _DATE_RE = re.compile(r"(\d{1,2})\s*/\s*([\dLIO]{1,2})\s*/\s*(\d{4})")
-# Low-resolution photos lose the 'CI' ('ol..c/14482143'): 'c/' + a digit run,
-# where a leading 1 is usually the 'I' misread.
 _CI_LOOSE_RE = re.compile(r"C\s*/\s*\.?\s*[I1L]?\s*\.?\s*(\d{5,10})\s*([A-Z]{2,3})?")
 _SECTION_WORDS = ("VENDEDOR", "COMPRADOR", "DONANTE", "DONATARIO", "HEREDERO", "CAUSANTE",
                   "TRANSFERENTE", "ADQUIRENTE", "CEDENTE", "CESIONARIO")
@@ -85,11 +83,6 @@ def _asiento_number(line: str) -> Optional[int]:
     m = _ASIENTO_RE.match(c)
     if m:
         return _digits(m.group(1))
-    # OCR noise in "ASIENTONUMERO": a wrong letter ('ASIENTONUNERO0'), or a
-    # missing one when the column crop clips the left edge ('SIENTOMUMERO0'),
-    # which shifts everything and so rules out a fixed offset. The cut that
-    # matches the word best wins; the longest one wins ties, so the word's own
-    # final 'O' is not taken for a zero when the digit was dropped.
     cuts = [cut for cut in range(12, 17) if cut <= len(c)]
     score, cut = max(((similar(c[:cut], "ASIENTONUMERO"), cut) for cut in cuts), default=(0.0, 0))
     if score >= 0.84:
@@ -124,16 +117,12 @@ def _civil_status(norm: str) -> Optional[str]:
 
 
 def _parse_ci(norm: str) -> Optional[Dict[str, Optional[str]]]:
-    # Works on glued OCR too ('SO1.C/CI4482143CBA'); the civil-status token's
-    # digit lookalikes are handled separately in _civil_status.
     m = _CI_RE.search(norm) or _CI_LOOSE_RE.search(norm)
     if not m:
         return None
     return {"ci": re.sub(r"\s+", "", m.group(1)), "expedido": m.group(2)}
 
 
-# The married-name particle, printed in lower case at the end of an otherwise
-# all-caps typed name: "RONDAL BORDA MARGARITA de", "SILES vda. de".
 _NAME_PARTICLE = re.compile(r"(?:\s+V(?:IU)?D[AO]?\.?)?\s+DE(?:\s+LA)?\.?$", re.IGNORECASE)
 
 
@@ -145,9 +134,7 @@ def _is_name(norm: str, raw: str) -> bool:
     letters = re.sub(r"[^A-Z]", "", norm)
     if len(letters) < 6:
         return False
-    # Typed names are all caps; lower-case letters mean a descriptive line. The
-    # married-name particle at the end is the one exception -- without it every
-    # "NOMBRE APELLIDO de" on the form was dropped.
+    # Typed names are all caps; lower-case letters mean a descriptive line.
     return sum(1 for ch in _NAME_PARTICLE.sub("", raw.strip()) if ch.islower()) <= 1
 
 
@@ -284,8 +271,7 @@ def parse_titularidad(lines: Sequence[ColumnLine], trace: Optional[List[Dict[str
             note(f"persona:{current['_role']}")
             continue
 
-        # An act never carries digits (those lines are CI / dates the rules
-        # could not read -- they stay in `texto`).
+        # An act never carries digits (those lines are CI / dates the rules could not read -- they stay in `texto`).
         if (
             stage in ("people", "act")
             and current["acto"] is None

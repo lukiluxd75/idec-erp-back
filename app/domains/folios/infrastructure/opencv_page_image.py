@@ -6,15 +6,10 @@ import numpy as np
 from app.domains.folios.domain.exceptions import InvalidFolioUploadException
 from app.domains.folios.domain.ports.page_image_port import PageImagePort, Rect, RotatedImage
 
-# Long side cap: phone scans come at ~2-4k px; bigger adds OCR upload time and
-# nothing readable (the OCR service downsizes anyway -- that is why we crop).
 MAX_SIDE = 3500
-# Every step re-encodes (normalize -> rotate -> crop); high quality keeps small
-# letters from degrading generation after generation.
 JPEG_QUALITY = 95
 
-# angle (CCW, degrees) -> (cv2.rotate code, source->rotated matrix builder for a
-# w x h source). Same mapping as cv2.rotate, so OCR boxes carried over match.
+# angle (CCW, degrees) -> (cv2.rotate code, source->rotated matrix builder for a w x h source).
 _QUARTER_TURNS = {
     90: (cv2.ROTATE_90_COUNTERCLOCKWISE, lambda w, h: ((0.0, 1.0, 0.0), (-1.0, 0.0, float(w - 1)))),
     270: (cv2.ROTATE_90_CLOCKWISE, lambda w, h: ((0.0, -1.0, float(h - 1)), (1.0, 0.0, 0.0))),

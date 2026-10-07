@@ -33,16 +33,12 @@ from app.domains.folder_analysis.domain.services.plan_layout import Segment, Tab
 
 logger = logging.getLogger("uvicorn.error")
 
-# A tilt beyond this is not a crooked photo, it is a misdetection (the long
-# diagonal of a drawing read as a rule). Better to leave the page as it came.
+# A tilt beyond this is not a crooked photo, it is a misdetection (the long diagonal of a drawing read as a rule).
 MAX_SKEW_DEGREES = 10.0
 
-# A rule is long: at least this share of the page across, to be one of the lines
-# the page is squared against. Only the sheet's own long rules square a page.
+# A rule is long: at least this share of the page across, to be one of the lines the page is squared against.
 SKEW_LINE_RATIO = 0.4
-# A row of a cuadro, on the other hand, can be short -- the cuadro de superficies
-# often takes up a corner. What makes it a table is the company it keeps, not its
-# length, so this only keeps the noise out.
+# A row of a cuadro, on the other hand, can be short -- the cuadro de superficies often takes up a corner.
 GRID_LINE_RATIO = 0.08
 MIN_GRID_LINE_PX = 60
 # A column line only has to cross its own cuadro, top to bottom.
@@ -107,8 +103,6 @@ def fit_to(frame: np.ndarray, width: int, height: int) -> np.ndarray:
 
 
 def _binarize(frame: np.ndarray) -> np.ndarray:
-    # Otsu: separates ink from paper without a fixed threshold -- the light in a
-    # phone photo of a plano is never twice the same.
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     return binary

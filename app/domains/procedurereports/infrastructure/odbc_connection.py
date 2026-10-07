@@ -11,16 +11,12 @@ _PREFERRED_DRIVERS = (
     "ODBC Driver 18 for SQL Server",
     "ODBC Driver 17 for SQL Server",
     "FreeTDS",
-    # Last resorts on Windows: these ship with the OS (sqlsrv32.dll) or come with
-    # an old SQL Server install. They speak no modern TLS, but they do connect --
-    # without them a Windows box that never got ODBC 17/18 loses the reports
-    # module entirely even though it has a usable SQL Server driver installed.
+    # Last resorts on Windows: these ship with the OS (sqlsrv32.dll) or come with an old SQL Server install.
     "SQL Server Native Client 11.0",
     "SQL Server",
 )
 
-# Keywords only the modern drivers understand. The legacy "SQL Server" driver
-# rejects the connection outright when it is handed Encrypt/TrustServerCertificate.
+# Keywords only the modern drivers understand.
 _TLS_AWARE_PREFIXES = ("odbc driver ", "sql server native client")
 
 
@@ -57,10 +53,6 @@ def resolve_odbc_driver(explicit: str) -> str:
         key = requested.lower()
         if key in available:
             return available[key]
-        # Only widen to the SQL Server family: the substring match used to reach
-        # across every installed driver, so a typo could land on the Access or
-        # Excel driver -- installed on any Windows with Office -- and fail later
-        # with an unrelated error instead of here.
         for name in _PREFERRED_DRIVERS:
             k = name.lower()
             if k in available and (key in k or k in key):

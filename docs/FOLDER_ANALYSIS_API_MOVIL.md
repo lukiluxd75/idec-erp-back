@@ -34,7 +34,7 @@ Authorization: Bearer <access_token de Keycloak>
 
 | Campo | Tipo | Detalle |
 |---|---|---|
-| `files` | archivo, **se repite** | Una o varias fotos, en el orden en que se sacaron. Máximo **10 por envío** y **15 MB por archivo**. Formatos: JPEG, PNG, WEBP o **PDF**. |
+| `files` | archivo, **se repite** | Una o varias fotos, en el orden en que se sacaron. **No hay tope de cuántas**: lo único que se limita es **15 MB por archivo** y **300 MB por envío** (lo que el servidor sostiene en memoria mientras lo lee entero). Formatos: JPEG, PNG, WEBP o **PDF**. |
 
 Un documento de varias páginas, como un folio o un plano grande, se puede enviar en un
 solo envío con varias `files`, o en varios envíos. En el escritorio el arquitecto
@@ -69,7 +69,8 @@ clasificar. La app no necesita guardar el `id` para nada más.
 
 ### PDF
 
-Un PDF se separa en el servidor en **una foto por página** (máximo 20 páginas), y
+Un PDF se separa en el servidor en **una foto por página**, sin tope de páginas --una
+carpeta entera escaneada de una vez es un caso normal--, y
 desde ahí es indistinguible de una foto del celular: se clasifica, se ordena y se
 lee igual, en los tres carriles. Por eso la respuesta puede traer **más entradas
 que archivos enviados**: cada página vuelve como su propia captura, en orden de
@@ -83,7 +84,7 @@ Todas las respuestas de error tienen la forma `{"detail": "<mensaje en español 
 |---|---|
 | `401` | Token ausente, vencido o inválido. Renovar el token y reintentar. |
 | `403` | El rol del usuario no tiene `folder-analysis.edit`. |
-| `422` | Sin archivos, más de 10, uno vacío o de más de 15 MB, un archivo que no es una imagen legible, o un PDF ilegible, con contraseña o de más de 20 páginas. El mensaje empieza con el nombre del archivo que falló (por ejemplo, `folio.pdf: El PDF no se pudo abrir…`). **Si falla uno, no se guarda ninguno.** |
+| `422` | Sin archivos, un envío de más de 300 MB en total, uno vacío o de más de 15 MB, un archivo que no es una imagen legible, o un PDF ilegible o con contraseña. El mensaje empieza con el nombre del archivo que falló (por ejemplo, `folio.pdf: El PDF no se pudo abrir…`); el del envío demasiado pesado dice que se manden en dos tandas. **Si falla uno, no se guarda ninguno.** |
 
 ---
 

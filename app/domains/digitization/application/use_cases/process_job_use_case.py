@@ -31,10 +31,6 @@ class ProcessJobUseCase:
             self._repository.mark_failed(job.id, "No se encontró la imagen del documento.")
             return
 
-        # Let go of the database before handing the image over: `extract` can hold
-        # this thread for minutes, and the read above keeps a transaction -- and a
-        # lock on the jobs table -- open for exactly that long otherwise. The writes
-        # below open their own transaction when they need one.
         self._repository.end_read()
 
         try:
@@ -43,8 +39,7 @@ class ProcessJobUseCase:
             self._repository.mark_stopped(job.id, "Detenido desde el monitor de computadoras.")
             return
         except WorkerTimeoutException as exc:
-            # Not given back to the queue: the next PC would spend the same time
-            # on the same image. Whoever sent it decides whether to insist.
+            # Not given back to the queue: the next PC would spend the same time on the same image.
             self._repository.mark_failed(job.id, f"Se cortó la digitalización porque {exc}.")
             return
         except WorkerUnavailableException as exc:

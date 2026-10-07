@@ -243,7 +243,7 @@ class KeycloakAdapter(AuthProviderPort):
             return
 
         if response.status_code == 401:
-            raise TokenExpiredException("La sesión expiró. Vuelve a iniciar sesión para cambiar la contraseña.")
+            raise TokenExpiredException("La sesión expiró. Inicie sesión nuevamente para cambiar la contraseña.")
 
         try:
             error_data = response.json()

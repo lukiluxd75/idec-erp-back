@@ -5,10 +5,6 @@ from app.domains.folder_analysis.domain.folder_types import document_fields
 from app.domains.folder_analysis.domain.services import drawing_sides, plan_checks
 from app.domains.folder_analysis.domain.services.field_harvest import harvest
 
-# The labels of the drawing of PlanoPoseedoresV2 as the OCR gave them over the
-# drawing alone (centre and size, in pixels): the lot has its frente on the right
-# beside "CALLE DE 10.00 mts.", a contra frente on the left, a fondo above and one
-# below, and a diagonal of 30.18 m inside it that is not a side.
 V2_DIMENSIONS = [
     {"value": 29.61, "x": 740, "y": 348, "w": 138, "h": 63},
     {"value": 9.96, "x": 201, "y": 400, "w": 52, "h": 126},

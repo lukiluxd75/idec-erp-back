@@ -11,10 +11,6 @@ import requests
 
 from app.core.config.settings import settings
 
-# Same hosts the frontend already hardcodes (see AlignmentMap.jsx's
-# GIS_HOSTS) -- validated here too since get_wms_image() takes `host` as a
-# client-supplied parameter and proxies a real HTTP request to it (SSRF
-# guard: only ever fetch from a GIS host we know about).
 _ALLOWED_HOSTS = {
     "https://gs.catastrocbba.com",
     "http://192.168.105.219:6080",

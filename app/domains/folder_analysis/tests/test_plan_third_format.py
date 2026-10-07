@@ -5,8 +5,6 @@ from app.domains.folder_analysis.domain.folder_types import document_fields
 from app.domains.folder_analysis.domain.services import cadastral_code, plan_checks, plan_survey
 from app.domains.folder_analysis.domain.services.field_harvest import harvest
 
-# The table of coordinates of PlanoPoseedoresV3 as the OCR gave it: the P1..P4 column
-# is lost and the OCR swapped the rows of P2 and P3.
 V3_TABLE = (
     "PUNTOS PERIMETROS DE LOTE\nCOORDENADAS GPS. UTM. WGS-84\nPUNTOS ESTE(X NORTE (Y)_DISTANCIA (Mts)\n"
     "E795805.354 N 8065810.909\n"

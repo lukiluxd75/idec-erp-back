@@ -30,58 +30,31 @@ from app.core.presence.models import DevicePresenceModel
 
 logger = logging.getLogger("uvicorn.error")
 
-# --- canales -----------------------------------------------------------------
-#
-# Constantes y no cadenas sueltas, para que un typo no haga que un escritor y un
-# lector dejen de verse en silencio (el indicador simplemente no se encenderia).
-# Viven aqui y no en __init__ porque is_phone_connected() necesita CHANNEL_SESSION.
 CHANNEL_GEOEXTRACTION = "geoextraction"
 CHANNEL_RESOLUTIONS = "resolutions"
 CHANNEL_FOLDER_ANALYSIS = "folder-analysis"
-# Canal transversal: "la app movil tiene sesion abierta con el ERP". No pertenece
-# a ningun modulo -- lo escribe el login/refresh/logout (dominio security) y lo
-# cuenta el indicador de cualquier modulo.
+# Canal transversal: "la app movil tiene sesion abierta con el ERP".
 CHANNEL_SESSION = "session"
 
 # --- lifetimes ---------------------------------------------------------------
 
-# Websocket-backed presence. Sized against the heartbeat below, not picked
-# round: 70s tolerates two missed beats before the badge goes grey -- enough
-# that a slow network does not make it blink, short enough that closing the app
-# is noticed within about a minute.
+# Websocket-backed presence.
 SOCKET_TTL = timedelta(seconds=70)
 
-# Socket heartbeat period. Must stay comfortably under SOCKET_TTL.
+# Socket heartbeat period.
 HEARTBEAT_SECONDS = 25.0
 
-# Activity-backed presence. Deliberately much longer than SOCKET_TTL: there is
-# no connection here, only "the app made a request". An architect photographing
-# a folder sends a batch, then spends a couple of minutes on the next document
-# before sending again, and the phone is obviously still connected throughout.
-# Three minutes keeps the badge steady across those gaps while still going grey
-# a few minutes after the app is actually put away.
+# Activity-backed presence.
 ACTIVITY_TTL = timedelta(minutes=3)
 
-# Presencia de SESION: "el arquitecto inicio sesion en la app movil y no la ha
-# cerrado". No describe una conexion viva sino una sesion abierta, asi que dura
-# mucho mas que las dos anteriores y la refresca cualquier peticion autenticada
-# que llegue desde la app (el login, el refresh del token, una subida de fotos).
-#
-# Se borra en el acto cuando la app cierra sesion (DELETE /api/presence/session).
-# El TTL es la red de seguridad para el caso en el que eso no llega nunca --
-# la app se mata desde el administrador de tareas, el celular se queda sin
-# bateria -- y por eso no es de horas: dos horas sin que la app diga nada es
-# señal suficiente de que ya no esta ahi.
+# Presencia de SESION: "el arquitecto inicio sesion en la app movil y no la ha cerrado".
 SESSION_TTL = timedelta(hours=2)
 
-# Rows long past their expiry are dropped on the next lookup. Housekeeping
-# only: `is_mobile_present` already ignores anything expired.
+# Rows long past their expiry are dropped on the next lookup.
 _PURGE_AFTER = timedelta(hours=6)
 
 
 def _now() -> datetime:
-    # Naive UTC, matching DateTime(timezone=False) used across this codebase's
-    # models (geoextraction_captures, folder analysis) so comparisons line up.
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
@@ -259,9 +232,7 @@ class SqlPresenceStore:
             self._db.commit()
         except Exception:
             self._db.rollback()
-            # Presence is cosmetic: a failed write must never break the request
-            # that carried it (an upload, a socket connect). Worst case the
-            # badge stays grey for a cycle.
+            # Presence is cosmetic: a failed write must never break the request that carried it (an upload, a socket connect).
             logger.warning("presence: no se pudo registrar %s/%s", channel, device_id, exc_info=True)
 
     def _purge_old(self) -> None:

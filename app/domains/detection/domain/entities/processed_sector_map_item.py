@@ -17,12 +17,6 @@ class ProcessedSectorMapItem:
     n_new_parcels: int
     n_removed_parcels: int
     n_changed_parcels: int
-    # Validation outcome of the sector's MOST RECENT processing_run only (see
-    # SqlSectorHistoryRepository.list_map_items) -- what the map polygon's
-    # color actually means: green = only confirmed (real) changes, red = only
-    # rejected (all false positives), orange = a mix of both, grey = nothing
-    # reviewed yet. Independent of n_new/n_removed/n_changed, which count
-    # findings by type, not by validation outcome.
     n_confirmed_parcels: int = 0
     n_rejected_parcels: int = 0
     n_pending_parcels: int = 0
