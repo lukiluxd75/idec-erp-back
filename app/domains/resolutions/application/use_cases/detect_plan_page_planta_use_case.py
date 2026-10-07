@@ -2,8 +2,13 @@ import logging
 
 from app.domains.resolutions.domain.entities.resolution import PlanPage, PlantaStatus
 from app.domains.resolutions.domain.exceptions import PlanOcrUnavailableException, PlanPageNotFoundException
-from app.domains.resolutions.domain.plan_tiles import LADOS, mosaicos, recortes_de_titulo
-from app.domains.resolutions.domain.plan_title import TitleBlock, detect_plantas, parece_trozo_de_titulo
+from app.domains.resolutions.domain.plan_tiles import LADOS, mosaicos, recortes_de_titulo, variantes_de_recorte
+from app.domains.resolutions.domain.plan_title import (
+    TitleBlock,
+    detect_plantas,
+    parece_escala,
+    parece_trozo_de_titulo,
+)
 from app.domains.resolutions.domain.ports.plan_ocr_port import PlanOcrPort
 from app.domains.resolutions.domain.ports.resolution_repository_port import ResolutionRepositoryPort
 
@@ -73,8 +78,19 @@ class DetectPlanPagePlantaUseCase:
 
     def _releer_trozos(self, content: bytes, order_index: int, bloques: list) -> list:
         anclas = [(b.x0, b.y0, b.x1, b.y1) for b in bloques if parece_trozo_de_titulo(b.text)]
+        # El título va justo encima de la escala: se relee la zona de arriba de cada "ESC.1/100".
+        for b in bloques:
+            if parece_escala(b.text):
+                alto = max(b.y1 - b.y0, 20)
+                anclas.append((b.x0, b.y0 - 3 * alto, b.x1, b.y1))
         nuevos = []
         for n, (jpg, x0, y0) in enumerate(recortes_de_titulo(content, anclas)):
-            for b in self._ocr.read(jpg, f"plano_{order_index}_r{n}.jpg"):
-                nuevos.append(TitleBlock(b.text, b.x0 + x0, b.y0 + y0, b.x1 + x0, b.y1 + y0))
+            # El OCR lee distinto cada versión del recorte: se prueban hasta que sale el título.
+            for v, (variante, escala) in enumerate(variantes_de_recorte(jpg)):
+                for b in self._ocr.read(variante, f"plano_{order_index}_r{n}v{v}.jpg"):
+                    nuevos.append(
+                        TitleBlock(b.text, b.x0 / escala + x0, b.y0 / escala + y0, b.x1 / escala + x0, b.y1 / escala + y0)
+                    )
+                if detect_plantas(bloques + nuevos).plantas:
+                    return nuevos
         return nuevos
