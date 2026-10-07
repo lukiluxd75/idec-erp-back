@@ -444,13 +444,23 @@ class TitulosDeLosFormatos2y3Test(unittest.TestCase):
     def test_trozos_de_titulo_cortado(self):
         from app.domains.resolutions.domain.plan_title import parece_trozo_de_titulo
 
-        for texto in ("PLANTA 6", "PLANTA3F", "6°PIS0", "PLANT"):
+        for texto in ("PLANTA 6", "PLANTA3F", "6°PIS0", "PLANT", "NTA3PISO...", "TA1°PISO..", "A5°PISO"):
             with self.subTest(texto):
                 self.assertTrue(parece_trozo_de_titulo(texto))
         # Un titulo completo no es un trozo, ni lo es un rotulo cualquiera.
         for texto in ("PLANTA BAJA", "PLANTA 6PISO", "COCINA", "ESC: 1:100"):
             with self.subTest(texto):
                 self.assertFalse(parece_trozo_de_titulo(texto))
+
+    def test_rotulo_de_escala(self):
+        from app.domains.resolutions.domain.plan_title import parece_escala
+
+        for texto in ("ESC.1/100", ".ESC.10O..", "ESC.17100..", "..ESC.ATOO..", "ESC: 1:100"):
+            with self.subTest(texto):
+                self.assertTrue(parece_escala(texto))
+        for texto in ("ESCALERA", "ESTAR DE RECEPCION", "PLANTA 3 PISO"):
+            with self.subTest(texto):
+                self.assertFalse(parece_escala(texto))
 
     def test_terraza_es_una_planta_valida(self):
         from app.domains.resolutions.domain.plantas import PLANTAS_RESUMEN
@@ -519,6 +529,85 @@ class ReleerTrozosDeTituloTest(unittest.TestCase):
         self.assertEqual(page.plantas, _pisos(6))
         self.assertEqual(page.planta_status, PlantaStatus.DETECTADA)
         self.assertTrue(any("_r" in f for f in ocr.llamadas))
+
+
+class VariantesDeRecorteTest(unittest.TestCase):
+    def test_original_mitad_y_binaria(self):
+        import cv2
+        import numpy as np
+
+        from app.domains.resolutions.domain.plan_tiles import variantes_de_recorte
+
+        ok, jpg = cv2.imencode(".jpg", np.full((400, 1000, 3), 200, np.uint8))
+        variantes = variantes_de_recorte(jpg.tobytes())
+        self.assertEqual([e for _, e in variantes], [1.0, 0.5, 1.0])
+        mitad = cv2.imdecode(np.frombuffer(variantes[1][0], np.uint8), cv2.IMREAD_COLOR)
+        self.assertEqual(mitad.shape[:2], (200, 500))
+        self.assertEqual(variantes_de_recorte(b"no es una imagen"), [(b"no es una imagen", 1.0)])
+
+
+class OcrTituloSoloEnLaMitad(PlanOcrPort):
+    """OCR de mentira: el recorte entero solo da la escala; reducido a la mitad
+    da el titulo (en coordenadas de la mitad)."""
+
+    def __init__(self):
+        self.llamadas = []
+
+    def read(self, image_bytes, filename="plano.jpg"):
+        self.llamadas.append(filename)
+        if "_m" in filename:
+            return []
+        if filename.endswith("v1.jpg"):
+            return [TitleBlock("PLANTA 3 PISO", 100, 50, 300, 90)]
+        if "_r" in filename:
+            return [TitleBlock(".ESC.10O..", 10, 10, 90, 30)]
+        return [TitleBlock(".ESC.10O..", 1000, 2800, 1200, 2830)]
+
+
+class OcrSoloLeeLaEscalaYElTituloEnRecorte(PlanOcrPort):
+    """OCR de mentira: la pagina y los mosaicos solo leen el rotulo de escala (el
+    titulo no sale ni a trozos); el recorte que se hace encima de la escala si
+    lee el titulo."""
+
+    def __init__(self):
+        self.llamadas = []
+
+    def read(self, image_bytes, filename="plano.jpg"):
+        self.llamadas.append(filename)
+        if "_r" in filename:
+            return [TitleBlock("PLANTA 3 PISO", 0, 0, 500, 60)]
+        if "_m" in filename:
+            return []
+        return [TitleBlock(".ESC.10O..", 1000, 2800, 1200, 2830)]
+
+
+class ReleerArribaDeLaEscalaTest(unittest.TestCase):
+    def test_titulo_ilegible_se_relee_encima_de_la_escala(self):
+        import cv2
+        import numpy as np
+
+        repo = _new_repo()
+        ok, jpg = cv2.imencode(".jpg", np.full((3000, 1500, 3), 255, np.uint8))
+        AddPlanPagesUseCase(repo).execute("res-1", [(jpg.tobytes(), "image/jpeg", [])], "app", USER)
+        ocr = OcrSoloLeeLaEscalaYElTituloEnRecorte()
+        page = DetectPlanPagePlantaUseCase(repo, ocr).execute("res-1", 1)
+        self.assertEqual(page.plantas, _pisos(3))
+        self.assertEqual(page.planta_status, PlantaStatus.DETECTADA)
+
+
+class ReleerVariantesDelRecorteTest(unittest.TestCase):
+    def test_si_el_recorte_no_da_el_titulo_se_prueba_reducido(self):
+        import cv2
+        import numpy as np
+
+        repo = _new_repo()
+        ok, jpg = cv2.imencode(".jpg", np.full((3000, 1500, 3), 255, np.uint8))
+        AddPlanPagesUseCase(repo).execute("res-1", [(jpg.tobytes(), "image/jpeg", [])], "app", USER)
+        ocr = OcrTituloSoloEnLaMitad()
+        page = DetectPlanPagePlantaUseCase(repo, ocr).execute("res-1", 1)
+        self.assertEqual(page.plantas, _pisos(3))
+        self.assertTrue(any(f.endswith("v1.jpg") for f in ocr.llamadas))
+        self.assertFalse(any(f.endswith("v2.jpg") for f in ocr.llamadas))
 
 
 if __name__ == "__main__":

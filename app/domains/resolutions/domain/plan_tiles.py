@@ -86,3 +86,26 @@ def recortes_de_titulo(image_bytes: bytes, anclas: List[Tuple[float, float, floa
         if ok:
             salida.append((jpg.tobytes(), x0, y0))
     return salida
+
+
+def variantes_de_recorte(jpeg: bytes) -> List[Tuple[bytes, float]]:
+    """[(jpeg, escala)]: el mismo recorte en versiones que el OCR lee distinto --
+    tal cual, reducido a la mitad y binarizado (Otsu). El servicio OCR a veces
+    lee solo el rótulo de escala de un recorte donde el título se ve perfecto, y
+    el título sí sale en otra versión. `escala` = tamaño de la versión / tamaño
+    del recorte (para devolver los bloques a las coordenadas del recorte)."""
+    imagen = cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR)
+    if imagen is None:
+        return [(jpeg, 1.0)]
+    variantes = [(jpeg, 1.0)]
+    alto, ancho = imagen.shape[:2]
+    mitad = cv2.resize(imagen, (max(ancho // 2, 1), max(alto // 2, 1)), interpolation=cv2.INTER_AREA)
+    ok, jpg = cv2.imencode(".jpg", mitad, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    if ok:
+        variantes.append((jpg.tobytes(), 0.5))
+    gris = cv2.cvtColor(imagen, cv2.COLOR_BGR2GRAY)
+    _, binaria = cv2.threshold(gris, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    ok, jpg = cv2.imencode(".jpg", binaria, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    if ok:
+        variantes.append((jpg.tobytes(), 1.0))
+    return variantes

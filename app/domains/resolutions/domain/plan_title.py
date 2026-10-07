@@ -71,7 +71,10 @@ _RE_PISOS = re.compile(
 )
 
 
-_RE_TROZO = re.compile(r"^(?:PLANT|PLANTA ?(?:TIPO ?)?(?:\d{1,2}|[IL])?|[A-Z]?\d{1,2} ?PIS[O0]?)")
+# El final del título llega con la cola de la palabra cortada ("NTA3PISO", "TA1PISO", "A5PISO").
+_RE_TROZO = re.compile(r"^(?:PLANT|PLANTA ?(?:TIPO ?)?(?:\d{1,2}|[IL])?|[A-Z]{0,5} ?\d{1,2} ?PIS[O0]?)")
+# Rótulo de escala bajo el título ("ESC.1/100", que el OCR lee como ".ESC.10O..", "ESC.17100").
+_RE_ESCALA = re.compile(r"^ESC\b")
 
 
 def parece_trozo_de_titulo(texto: str) -> bool:
@@ -79,6 +82,14 @@ def parece_trozo_de_titulo(texto: str) -> bool:
     ("PLANTA 6", "PLANTA3F", "6°PIS0"). Sirve para saber DÓNDE releer."""
     t = _normalizar(texto)
     return len(t) >= 5 and bool(_RE_TROZO.match(t)) and plantas_de_titulo(texto) is None
+
+
+def parece_escala(texto: str) -> bool:
+    """¿Es el rótulo de escala ("ESC.1/100")? El dibujante lo pone justo debajo
+    del título, así que sirve de ancla para releer ahí cuando el título mismo
+    no se leyó (o se leyó tan roto que no parece un trozo)."""
+    t = _normalizar(texto)
+    return len(t) <= 14 and bool(_RE_ESCALA.match(t))
 
 
 def _numero(s: str) -> int:
