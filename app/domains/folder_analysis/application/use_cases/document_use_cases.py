@@ -13,6 +13,7 @@ from app.domains.folder_analysis.domain.entities import (
     FolderDocument,
     PageStatus,
     ReadingStage,
+    RegisteredFolder,
 )
 from app.domains.folder_analysis.domain.exceptions import (
     CaptureNotAvailableException,
@@ -29,7 +30,7 @@ from app.domains.folder_analysis.domain.folder_types import (
     document_fields,
     folder_type,
 )
-from app.domains.folder_analysis.domain.services import drawing_sides, plan_survey
+from app.domains.folder_analysis.domain.services import drawing_sides, plan_survey, shared_values
 from app.domains.folder_analysis.domain.services.field_harvest import (
     from_seals,
     from_vision,
@@ -415,18 +416,25 @@ class RunServerReadingUseCase:
             )
             return
 
-        data = self._with_harvested_values(document, data, observations, images)
+        # La carpeta se lee una sola vez: la usan las tres cosas que pasan
+        # después de leer una hoja -- tomar de los documentos hermanos lo que esta
+        # no trajo, llenar la hoja de la carpeta, y prestarles a los hermanos lo
+        # que esta sí trajo y a ellos les faltaba.
+        folder = self._folder_of(document, user_sub)
+        data = self._with_harvested_values(document, folder, data, observations, images)
 
         logger.info(
             "Folder analysis: %s %s leído con %d observación(es)",
             document.doc_type, document_id, len(observations),
         )
         self._save(document_id, pages, PageStatus.DONE, DocumentStatus.EXTRACTED, data, None)
-        self._feed_folder_sheet(document, user_sub, data)
+        self._feed_folder_sheet(document, folder, data)
+        self._lend_to_siblings(document, folder, data)
 
     def _with_harvested_values(
         self,
         document: FolderDocument,
+        folder: Optional[RegisteredFolder],
         data: Dict[str, Any],
         observations: List[str],
         images: List[bytes],
@@ -439,6 +447,11 @@ class RunServerReadingUseCase:
         the label it is printed with, and stored under `values` next to the text.
         Nothing replaces the reading: what was not found stays empty and is named
         in the observations.
+
+        Las pasadas van de la hoja hacia afuera, y lo que se nombra como vacío se
+        decide al final: lo que llenó el sello, la foto, el dibujo del plano o
+        otro documento de la carpeta ya está leído, y mandarlo a cargar a mano
+        sería mandar a copiar lo que está a la vista.
         """
         specs = document_fields(document.folder_type, document.doc_type)
         if not specs or not isinstance(data, dict):
@@ -446,25 +459,134 @@ class RunServerReadingUseCase:
         values, _missing = harvest(data, specs)
         stamped = self._from_seals(document.id, specs, values, images)
         seen = self._from_vision(document.id, specs, values, images)
+        # Solo para el plano, como dice su nombre: buscar la cifra que la hoja
+        # repite y repartir los lados medidos sobre el dibujo son reglas del
+        # plano. Un avalúo repite "93.00 M2" por cada construcción, así que la
+        # más repetida no es su superficie; y a un formulario le agregaba
+        # frente y fondo que esa hoja no declara.
+        completed = (
+            self._complete_plan_values(data, values)
+            if document.doc_type == DocumentType.PLAN
+            else None
+        )
+        # Lo último, cuando ya se intentó todo con esta hoja: lo que esta no dijo
+        # y otra hoja de la misma carpeta sí dice.
+        borrowed = self._from_siblings(document, folder, values)
+        # Se aplica antes de nombrar lo que falta: un valor prestado ya está
+        # leído, y pedirlo a mano sería pedir que se copie de la hoja de al lado.
+        lent_by = shared_values.apply(values, borrowed)
         notes = [
             stamped,
             seen,
+            completed,
+            shared_values.observation(borrowed),
             observation(missing_labels(values, specs)),
-            # Solo para el plano, como dice su nombre: buscar la cifra que la hoja
-            # repite y repartir los lados medidos sobre el dibujo son reglas del
-            # plano. Un avalúo repite "93.00 M2" por cada construcción, así que la
-            # más repetida no es su superficie; y a un formulario le agregaba
-            # frente y fondo que esa hoja no declara.
-            self._complete_plan_values(data, values)
-            if document.doc_type == DocumentType.PLAN
-            else None,
         ]
         reading = data.get("reading")
         for note in filter(None, notes):
             observations.append(note)
             if isinstance(reading, dict):
                 reading.setdefault("observations", []).append(note)
-        return {**data, "values": values}
+        read = {**data, "values": values}
+        return {**read, shared_values.BORROWED: lent_by} if lent_by else read
+
+    def _from_siblings(
+        self,
+        document: FolderDocument,
+        folder: Optional[RegisteredFolder],
+        values: Dict[str, Optional[str]],
+    ) -> List[shared_values.Borrowed]:
+        """Lo que esta hoja no trajo y otro documento de la misma carpeta sí.
+
+        El plano y el avalúo de una carpeta de poseedores declaran los dos la
+        superficie útil y el código catastral del mismo predio: cuando una de las
+        dos hojas lo trae leído y en la otra quedó vacío, el dato ya está en la
+        carpeta y pedirlo a mano otra vez es hacer copiar lo que el sistema tiene
+        a la vista. Qué campos se comparten lo dice el catálogo, por su clave
+        (domain/services/shared_values.py); esto solo junta los hermanos.
+
+        Se prefiere el documento que el arquitecto ya revisó: ahí el valor no es
+        una lectura sino algo confirmado por una persona.
+
+        Se devuelve sin aplicar, para que lo prestado se aplique junto con lo que
+        queda anotado de dónde salió.
+        """
+        if folder is None:
+            return []
+        siblings = [
+            sibling
+            for sibling in folder.documents
+            if sibling.id != document.id and sibling.current_data
+        ]
+        siblings.sort(key=lambda sibling: sibling.reviewed_data is None)
+        return shared_values.borrow(
+            document.folder_type,
+            document.doc_type,
+            values,
+            [shared_values.lender(s.doc_type, s.current_data) for s in siblings],
+        )
+
+    def _lend_to_siblings(
+        self, document: FolderDocument, folder: Optional[RegisteredFolder], data: Dict[str, Any]
+    ) -> None:
+        """Lo que esta hoja trajo, a los documentos de la carpeta que lo necesitaban.
+
+        Es la otra mitad de _from_siblings, y es la que hace que no importe el
+        orden: una carpeta no se lee de arriba abajo, y cuando el avalúo se leyó
+        antes que el plano, el plano todavía no existía para prestarle su
+        superficie útil.
+
+        Solo a un documento ya leído y todavía sin revisar: lo que el arquitecto
+        guardó es suyo y no lo toca la lectura de otra hoja. Y solo donde no hay
+        nada escrito, o donde lo que hay es lo que este mismo documento prestó
+        antes -- así volver a analizar la hoja de la que salió el dato corrige lo
+        prestado en vez de dejar el valor viejo pegado para siempre.
+
+        Nunca levanta: un hermano que no se pudo completar no puede tirar abajo la
+        lectura que acaba de salir bien.
+        """
+        if folder is None or not isinstance(data, dict) or not data.get("values"):
+            return
+        mine = shared_values.lender(document.doc_type, data)
+        for sibling in folder.documents:
+            if sibling.id == document.id or sibling.status != DocumentStatus.EXTRACTED:
+                continue
+            try:
+                self._lend_to(document, mine, sibling)
+            except Exception:
+                logger.exception(
+                    "Folder analysis: no se pudo completar %s con lo leído de %s",
+                    sibling.id, document.id,
+                )
+
+    def _lend_to(
+        self, document: FolderDocument, mine: shared_values.Lender, sibling: FolderDocument
+    ) -> None:
+        read = dict(sibling.extracted_data or {})
+        values = dict(read.get("values") or {})
+        if not values:
+            return
+        sources = dict(read.get(shared_values.BORROWED) or {})
+        taken = shared_values.borrow(
+            sibling.folder_type,
+            sibling.doc_type,
+            values,
+            [mine],
+            replacing=[key for key, lent_by in sources.items() if lent_by == document.doc_type],
+        )
+        if not taken:
+            return
+        sources.update(shared_values.apply(values, taken))
+        read["values"] = values
+        read[shared_values.BORROWED] = sources
+        reading = read.get("reading")
+        if isinstance(reading, dict):
+            note = shared_values.observation(taken)
+            read["reading"] = {
+                **reading,
+                "observations": [*(reading.get("observations") or []), note],
+            }
+        self._documents.save_shared_values(sibling.id, read)
 
     def _from_seals(
         self,
@@ -617,8 +739,17 @@ class RunServerReadingUseCase:
                 values[key] = value
         return result["note"]
 
+    def _folder_of(self, document: FolderDocument, user_sub: str) -> Optional[RegisteredFolder]:
+        """La carpeta en la que está el documento, con los demás documentos que
+        tiene y lo que se les leyó. None para una hoja del tablero suelto, que no
+        está en ninguna: ahí no hay hoja que llenar ni hermanos a los que
+        preguntarle lo que esta no dijo."""
+        if not self._folders or not document.folder_id:
+            return None
+        return self._folders.get(document.folder_id, user_sub)
+
     def _feed_folder_sheet(
-        self, document: FolderDocument, user_sub: str, data: Dict[str, Any]
+        self, document: FolderDocument, folder: Optional[RegisteredFolder], data: Dict[str, Any]
     ) -> None:
         """Copies what was just read into the carpeta's own sheet.
 
@@ -627,10 +758,7 @@ class RunServerReadingUseCase:
         never overwritten by a re-reading.
         """
         values = data.get("values") if isinstance(data, dict) else None
-        if not values or not self._folders or not document.folder_id:
-            return
-        folder = self._folders.get(document.folder_id, user_sub)
-        if folder is None:
+        if not values or folder is None:
             return
         sheet = dict(folder.data or {})
         filled = False

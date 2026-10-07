@@ -213,6 +213,13 @@ class SqlDocumentRepository(DocumentRepositoryPort):
         row.stage = stage
         self._db.commit()
 
+    def save_shared_values(self, document_id: str, extracted_data: Dict[str, Any]) -> None:
+        row = self._row(document_id, with_data=True)
+        if row is None:
+            return
+        row.extracted_data = extracted_data
+        self._db.commit()
+
     def save_review(self, document_id: str, data: Dict[str, Any]) -> None:
         row = self._row(document_id, with_data=True)
         reviewed_at = _now()

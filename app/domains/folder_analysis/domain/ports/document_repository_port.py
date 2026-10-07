@@ -77,4 +77,17 @@ class DocumentRepositoryPort(ABC):
         de lo leído."""
 
     @abstractmethod
+    def save_shared_values(self, document_id: str, extracted_data: Dict[str, Any]) -> None:
+        """Vuelve a guardar lo leído de un documento que ya estaba leído, sin
+        tocar nada más de él.
+
+        Es para una sola cosa: cuando se lee una hoja de la carpeta y otra, leída
+        antes que ella, necesitaba un dato que esta trae
+        (domain/services/shared_values.py). Va suelto y no por save_progress
+        porque ahí lo que se guarda es el resultado de una lectura con el estado
+        de sus páginas, y esto no es una lectura de este documento: no cambia su
+        estado, ni sus páginas, ni su revisión, ni la fecha en que se lo analizó.
+        """
+
+    @abstractmethod
     def save_review(self, document_id: str, data: Dict[str, Any]) -> None: ...

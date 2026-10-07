@@ -27,6 +27,7 @@ from app.domains.folder_analysis.application.use_cases import (
     ListRegisteredFoldersUseCase,
     RegisteredFolderService,
     RemoveDocumentFromRegisteredFolderUseCase,
+    SameParcelFoldersUseCase,
     SaveBoardToFolderUseCase,
     ReviewDocumentUseCase,
     RunServerReadingUseCase,
@@ -87,6 +88,7 @@ from app.domains.folder_analysis.domain.services.field_harvest import (
     vision_wanted,
 )
 from app.domains.folder_analysis.domain.services.cadastral_code import to_gis_code
+from app.domains.folder_analysis.domain.services import shared_values
 from app.domains.folder_analysis.domain.services.spanish_dates import (
     any_date,
     leading_number,
@@ -237,6 +239,10 @@ class FakeDocuments(DocumentRepositoryPort):
         self.stages.append(stage)
         if document_id in self.rows:
             self.rows[document_id] = replace(self.rows[document_id], stage=stage)
+
+    def save_shared_values(self, document_id, extracted_data):
+        # Solo lo leído: ni el estado, ni las páginas, ni la revisión (su puerto lo dice).
+        self.rows[document_id] = replace(self.rows[document_id], extracted_data=extracted_data)
 
     def save_review(self, document_id, data):
         self.rows[document_id] = replace(self.rows[document_id], reviewed_data=data, status=DocumentStatus.REVIEWED)
@@ -1424,6 +1430,10 @@ class FakeRegisteredFolders(RegisteredFolderRepositoryPort):
     def list(self, user_sub):
         rows = [r for fid, r in self.rows.items() if self._owners.get(fid) == user_sub]
         return [self._entity(r) for r in sorted(rows, key=lambda r: r["name"].lower())]
+
+    def list_sheets(self, user_sub):
+        # Sin sus documentos, como el repositorio de verdad (su puerto lo dice).
+        return [replace(folder, documents=[]) for folder in self.list(user_sub)]
 
     def search_by_name(self, name, user_sub=None, limit=50):
         term = (name or "").strip().lower()
@@ -2875,6 +2885,196 @@ class LecturaQueLlenaLaCarpetaTests(unittest.TestCase):
         self.assertTrue(any("No se encontraron" in note for note in notes), notes)
 
 
+class LoQueUnaHojaNoDiceYOtraDeLaCarpetaSiTests(unittest.TestCase):
+    """El plano y el avalúo de una carpeta de poseedores hablan del mismo predio:
+    los dos imprimen el código catastral y la superficie útil. Cuando una de las
+    dos hojas lo trae leída y en la otra quedó vacío, el dato ya está en la
+    carpeta y no hay por qué pedirlo a mano otra vez."""
+
+    CODE = "00-33-432-012-0-00-000-000"
+    AREA = "299.02 M2"
+
+    def setUp(self):
+        self.captures, self.documents = FakeCaptures(), FakeDocuments()
+        self.folders = FakeRegisteredFolders(self.documents)
+        self.service = RegisteredFolderService(self.folders, self.documents)
+        self.folder = CreateRegisteredFolderUseCase(self.folders, self.service).execute(
+            "arq-1", "Poseedores Sarco", None, folder_type_key="possessors"
+        )
+
+    def _read(self, doc_type, text, folder=True):
+        photo = self.captures.create("arq-1", "p.png", "image/png", b"x", b"t")
+        document = CreateDocumentUseCase(self.documents, self.captures, self.folders).execute(
+            doc_type, [photo.id], "arq-1", self.folder.id if folder else None, "possessors"
+        )
+        AnalyzeDocumentUseCase(self.documents, self.captures, FakeQueue()).execute(
+            document.id, "arq-1"
+        )
+        reading = {"full_text": text, "pages": [], "reading": {"observations": []}}
+        RunServerReadingUseCase(
+            self.documents,
+            self.captures,
+            {doc_type: FakeExtractor(reading)},
+            folders=self.folders,
+        ).execute(document.id, "arq-1")
+        return self.documents.get(document.id, "arq-1")
+
+    def _plan(self, area=None):
+        return self._read(
+            DocumentType.PLAN,
+            "PLANO DE UBICACION Codigo Catastral: {} SUP. TOTAL UTIL {}".format(
+                self.CODE, area or self.AREA
+            ),
+        )
+
+    def _appraisal_without_its_surface(self):
+        """El avalúo al que el OCR no le pudo leer la superficie útil: imprime la
+        del lote, que es otra, y la útil quedó pegada al croquis."""
+        return self._read(
+            DocumentType.APPRAISAL,
+            "ACTUALIZACION DE DATOS TECNICOS {} Superficie Lote: 294.66".format(self.CODE),
+        )
+
+    def _values(self, document):
+        return self.documents.get(document.id, "arq-1").extracted_data["values"]
+
+    def _notes(self, document):
+        return self.documents.get(document.id, "arq-1").extracted_data["reading"]["observations"]
+
+    def test_the_appraisal_takes_the_surface_of_the_plano_already_read(self):
+        self._plan()
+        appraisal = self._appraisal_without_its_surface()
+        self.assertEqual(self._values(appraisal)["usable_area"], self.AREA)
+
+    def test_it_says_where_it_took_it_from(self):
+        """Tomarlo en silencio es lo que no se puede hacer: el arquitecto tiene
+        que poder mirar la foto."""
+        self._plan()
+        notes = self._notes(self._appraisal_without_its_surface())
+        borrowed = next(note for note in notes if "otro documento" in note)
+        self.assertIn("Superficie útil", borrowed)
+        self.assertIn(self.AREA, borrowed)
+        self.assertIn("del plano", borrowed)
+
+    def test_it_is_written_down_which_document_lent_it(self):
+        self._plan()
+        appraisal = self._appraisal_without_its_surface()
+        data = self.documents.get(appraisal.id, "arq-1").extracted_data
+        self.assertEqual(data[shared_values.BORROWED], {"usable_area": DocumentType.PLAN})
+
+    def test_what_was_lent_is_not_sent_to_be_typed_by_hand(self):
+        """Nombrarlo como vacío mandaría a copiar lo que está a la vista."""
+        self._plan()
+        notes = self._notes(self._appraisal_without_its_surface())
+        missing = [note for note in notes if "No se encontraron" in note]
+        self.assertFalse(any("Superficie útil" in note for note in missing), notes)
+
+    def test_the_order_in_which_the_carpeta_is_read_does_not_matter(self):
+        """Una carpeta no se lee de arriba abajo: cuando el avalúo se leyó
+        primero, el plano todavía no existía para prestarle su superficie."""
+        appraisal = self._appraisal_without_its_surface()
+        self.assertIsNone(self._values(appraisal)["usable_area"])
+        self._plan()
+        self.assertEqual(self._values(appraisal)["usable_area"], self.AREA)
+        notes = self._notes(appraisal)
+        self.assertTrue(any("del plano" in note for note in notes), notes)
+
+    def test_what_the_sheet_itself_said_is_never_replaced(self):
+        """Dos hojas que declaran superficies distintas es justamente lo que hay
+        que ver, no algo que se arregle eligiendo una."""
+        self._plan()
+        appraisal = self._read(
+            DocumentType.APPRAISAL,
+            "ACTUALIZACION DE DATOS TECNICOS SUPERFICIE TOTAL UTIL: 280.00 M2",
+        )
+        self.assertEqual(self._values(appraisal)["usable_area"], "280.00 M2")
+
+    def test_a_document_already_reviewed_is_left_alone(self):
+        """Lo que el arquitecto guardó es suyo: no lo toca la lectura de otra hoja."""
+        appraisal = self._appraisal_without_its_surface()
+        ReviewDocumentUseCase(self.documents).execute(
+            appraisal.id, "arq-1", {"values": {"usable_area": None}}
+        )
+        self._plan()
+        saved = self.documents.get(appraisal.id, "arq-1")
+        self.assertIsNone(saved.reviewed_data["values"]["usable_area"])
+        self.assertIsNone(saved.extracted_data["values"]["usable_area"])
+
+    def test_only_what_the_two_sheets_declare_travels(self):
+        """El formulario no declara la superficie ni el código, así que no los
+        recibe; y el avalúo no recibe el notario ni los poseedores."""
+        self._plan()
+        form = self._read(DocumentType.FORM, "ante mí, Notaria de Fe Pública Nº 3")
+        self.assertEqual(
+            sorted(self._values(form)), ["notary_number", "owner_name", "statement_dates"]
+        )
+        self.assertNotIn(
+            shared_values.BORROWED, self.documents.get(form.id, "arq-1").extracted_data
+        )
+
+    def test_a_sheet_of_the_loose_board_has_no_siblings_to_ask(self):
+        self._plan()
+        appraisal = self._read(
+            DocumentType.APPRAISAL, "ACTUALIZACION DE DATOS TECNICOS", folder=False
+        )
+        self.assertIsNone(self._values(appraisal)["usable_area"])
+
+    def test_reading_the_lender_again_corrects_what_it_had_lent(self):
+        """Volver a analizar el plano con la superficie bien leída tiene que
+        corregir la que le había prestado al avalúo, no dejar la vieja pegada."""
+        self._plan()
+        appraisal = self._appraisal_without_its_surface()
+        self._plan(area="305.50 M2")
+        self.assertEqual(self._values(appraisal)["usable_area"], "305.50 M2")
+
+    def test_what_is_borrowed_is_not_lent_again(self):
+        """Un valor se toma de la hoja que lo trae impreso, no de una tercera que
+        ya lo tenía prestado."""
+        taken = shared_values.borrow(
+            "possessors",
+            DocumentType.APPRAISAL,
+            {"usable_area": None, "cadastral_code": None},
+            [
+                shared_values.Lender(
+                    DocumentType.PLAN,
+                    {"usable_area": self.AREA},
+                    borrowed={"usable_area": DocumentType.APPRAISAL},
+                )
+            ],
+        )
+        self.assertEqual(taken, [])
+
+    def test_the_first_lender_of_the_list_is_the_one_that_answers(self):
+        """El orden es de preferencia: la lectura le pregunta antes al documento
+        que el arquitecto ya revisó, porque ahí el valor lo confirmó una
+        persona."""
+        self.assertEqual(
+            shared_values.borrow(
+                "possessors",
+                DocumentType.APPRAISAL,
+                {"usable_area": None},
+                [
+                    shared_values.Lender(DocumentType.PLAN, {"usable_area": "280.00 M2"}),
+                    shared_values.Lender(DocumentType.PLAN, {"usable_area": self.AREA}),
+                ],
+            ),
+            [
+                shared_values.Borrowed(
+                    "usable_area", "Superficie útil", "280.00 M2", DocumentType.PLAN
+                )
+            ],
+        )
+
+    def test_the_shared_fields_of_poseedores_are_the_ones_of_the_predio(self):
+        """Hoy son dos, y las dos son del predio: lo que el plano y el avalúo
+        dicen los dos del mismo lote."""
+        self.assertEqual(
+            shared_values.shared_keys("possessors", DocumentType.APPRAISAL),
+            {"cadastral_code", "usable_area"},
+        )
+        self.assertEqual(shared_values.shared_keys("possessors", DocumentType.FORM), set())
+
+
 class BuscarCarpetasDeOtrosUsuariosTests(unittest.TestCase):
     """Buscar una carpeta registrada por su nombre.
 
@@ -2989,6 +3189,145 @@ class BuscarCarpetasDeOtrosUsuariosTests(unittest.TestCase):
             {folder.name: folder.user_sub for folder in found},
             {"Carpeta 1024": "arq-1", "Carpeta 2048": "arq-2", "Carpeta 2049": "arq-2"},
         )
+
+
+class CarpetasDelMismoPredioTests(unittest.TestCase):
+    """Dos carpetas son del mismo predio cuando su código catastral es el mismo,
+    y eso es lo único que las hace comparables: son dos trámites distintos, de
+    dos momentos distintos, sobre el mismo lote.
+
+    Se avisa, no se aplica: la carpeta vieja puede tener un dato mal cargado, y
+    el trámite que se está haciendo ahora es el que manda."""
+
+    # El mismo predio escrito de las dos formas: el plano lo imprime con el par
+    # de adelante y el avalúo sin él.
+    PRINTED = "00-33-432-012-0-00-000-000"
+    SHORT = "33-432-012-0-00-000-000"
+    OTHER = "00-33-432-015-0-00-000-000"
+
+    def setUp(self):
+        self.captures, self.documents = FakeCaptures(), FakeDocuments()
+        self.folders = FakeRegisteredFolders(self.documents)
+        self.service = RegisteredFolderService(self.folders, self.documents)
+        self.use_case = SameParcelFoldersUseCase(self.folders, self.service)
+
+    def _folder(self, name, kind="possessors", **data):
+        return CreateRegisteredFolderUseCase(self.folders, self.service).execute(
+            "arq-1", name, None, folder_type_key=kind, data=data
+        )
+
+    def _ask(self, folder, user_sub="arq-1"):
+        return self.use_case.execute(folder.id, user_sub)
+
+    def test_the_other_carpeta_of_the_same_predio_is_reported(self):
+        self._folder("1245", cadastral_code=self.SHORT, usable_area="299.02 M2")
+        found = self._ask(self._folder("1310", cadastral_code=self.PRINTED))
+        self.assertEqual([item["name"] for item in found], ["1245"])
+
+    def test_the_two_ways_of_printing_the_code_are_the_same_predio(self):
+        """Los dos primeros dígitos no son parte del código: lo dice
+        cadastral_code.to_gis_code() desde antes que esto existiera."""
+        self._folder("1245", cadastral_code=self.SHORT, usable_area="299.02 M2")
+        found = self._ask(self._folder("1310", cadastral_code=self.PRINTED))
+        self.assertEqual(found[0]["printed_code"], self.PRINTED)
+
+    def test_another_predio_is_not_the_same_predio(self):
+        self._folder("1245", cadastral_code=self.OTHER, usable_area="299.02 M2")
+        self.assertEqual(self._ask(self._folder("1310", cadastral_code=self.PRINTED)), [])
+
+    def test_only_what_belongs_to_the_predio_is_offered(self):
+        """La superficie y las medidas son del lote. El notario, los poseedores y
+        la fecha son de ESE trámite y de su gente: no se ofrecen aunque el lote
+        sea el mismo."""
+        self._folder(
+            "1245",
+            cadastral_code=self.SHORT,
+            usable_area="299.02 M2",
+            frontage="12.50",
+            street="Av. Blanco Galindo",
+            notary_number="23",
+            owner_name="MARIA LOPEZ",
+            statement_dates="12/03/2025",
+        )
+        found = self._ask(self._folder("1310", cadastral_code=self.PRINTED))
+        self.assertEqual(
+            [value["key"] for value in found[0]["values"]],
+            ["cadastral_code", "street", "frontage", "usable_area"],
+        )
+
+    def test_the_label_the_screen_shows_comes_with_the_value(self):
+        self._folder("1245", cadastral_code=self.SHORT, usable_area="299.02 M2")
+        found = self._ask(self._folder("1310", cadastral_code=self.PRINTED))
+        area = next(value for value in found[0]["values"] if value["key"] == "usable_area")
+        self.assertEqual(area, {"key": "usable_area", "label": "Superficie útil", "value": "299.02 M2"})
+
+    def test_nothing_is_filled_in(self):
+        """Avisar es todo lo que hace: la hoja de esta carpeta queda como estaba."""
+        self._folder("1245", cadastral_code=self.SHORT, usable_area="299.02 M2")
+        mine = self._folder("1310", cadastral_code=self.PRINTED)
+        self._ask(mine)
+        self.assertIsNone(self.folders.get(mine.id, "arq-1").data["usable_area"])
+
+    def test_a_carpeta_without_a_code_has_nothing_to_compare(self):
+        self._folder("1245", cadastral_code=self.SHORT, usable_area="299.02 M2")
+        self.assertEqual(self._ask(self._folder("1310")), [])
+
+    def test_a_half_typed_code_is_not_a_predio_either(self):
+        """Un código a medio escribir no es un error que haya que contar: es una
+        carpeta que todavía no dice de qué predio es."""
+        self._folder("1245", cadastral_code=self.SHORT, usable_area="299.02 M2")
+        self.assertEqual(self._ask(self._folder("1310", cadastral_code="00-33-432")), [])
+
+    def test_the_carpeta_does_not_report_itself(self):
+        mine = self._folder("1310", cadastral_code=self.PRINTED, usable_area="299.02 M2")
+        self.assertEqual(self._ask(mine), [])
+
+    def test_a_carpeta_of_the_predio_with_nothing_written_is_not_named(self):
+        """Nombrarla no le serviría a nadie: no tiene nada que ofrecer."""
+        self._folder("1245", cadastral_code=None)
+        self.assertEqual(self._ask(self._folder("1310", cadastral_code=self.PRINTED)), [])
+
+    def test_the_carpetas_of_another_user_are_not_looked_at(self):
+        """Una carpeta ajena no aparece en la lista de nadie, y esto no es una
+        forma de averiguar qué carpetas hay."""
+        CreateRegisteredFolderUseCase(self.folders, self.service).execute(
+            "arq-2", "1245", None, folder_type_key="possessors",
+            data={"cadastral_code": self.SHORT, "usable_area": "299.02 M2"},
+        )
+        self.assertEqual(self._ask(self._folder("1310", cadastral_code=self.PRINTED)), [])
+
+    def test_the_code_read_from_a_document_answers_while_the_sheet_is_empty(self):
+        """La hoja se llena sola con el código del plano, pero la carpeta recién
+        leída todavía no la guardó."""
+        self._folder("1245", cadastral_code=self.SHORT, usable_area="299.02 M2")
+        mine = self._folder("1310")
+        document = self.documents.create("arq-1", DocumentType.PLAN, ["foto"], "possessors")
+        self.documents.save_progress(
+            document.id,
+            document.pages,
+            DocumentStatus.EXTRACTED,
+            {"values": {"cadastral_code": self.PRINTED}},
+            None,
+        )
+        self.folders.file_document(mine.id, document.id)
+        self.assertEqual([item["name"] for item in self._ask(mine)], ["1245"])
+
+    def test_a_kind_of_carpeta_with_no_data_of_the_predio_asks_nothing(self):
+        """La carpeta general no declara datos del predio, así que no hay nada
+        que comparar entre dos."""
+        self.assertEqual(self._ask(self._folder("1310", kind="general")), [])
+
+    def test_only_a_handful_of_carpetas_are_answered(self):
+        """Con más de un puñado, lo que hay que mirar es el predio y no una lista."""
+        for number in range(8):
+            self._folder(f"12{number}0", cadastral_code=self.SHORT, usable_area="299.02 M2")
+        found = self._ask(self._folder("1310", cadastral_code=self.PRINTED))
+        self.assertEqual(len(found), 5)
+
+    def test_a_carpeta_that_is_not_the_users_is_not_found(self):
+        mine = self._folder("1310", cadastral_code=self.PRINTED)
+        with self.assertRaises(RegisteredFolderNotFoundException):
+            self._ask(mine, user_sub="arq-2")
 
 
 class CatalogoDeCarpetasTests(unittest.TestCase):

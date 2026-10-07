@@ -44,8 +44,8 @@ class SqlRegisteredFolderRepository(RegisteredFolderRepositoryPort):
         ).scalars()
         return {str(row.id): row for row in rows}
 
-    def _to_entity(self, row: RegisteredFolderModel) -> RegisteredFolder:
-        ids = [str(item.document_id) for item in row.items]
+    def _to_entity(self, row: RegisteredFolderModel, with_documents: bool = True) -> RegisteredFolder:
+        ids = [str(item.document_id) for item in row.items] if with_documents else []
         documents = self._documents_by_id(ids)
         return RegisteredFolder(
             id=str(row.id),
@@ -69,6 +69,15 @@ class SqlRegisteredFolderRepository(RegisteredFolderRepositoryPort):
     def find_any(self, folder_id: str) -> Optional[RegisteredFolder]:
         row = self._row(folder_id)
         return None if row is None else self._to_entity(row)
+
+    def list_sheets(self, user_sub: str) -> List[RegisteredFolder]:
+        # Sin la consulta de los documentos: la hoja de la carpeta es su propia fila (su puerto lo dice).
+        rows = self._db.execute(
+            select(RegisteredFolderModel)
+            .where(RegisteredFolderModel.user_sub == user_sub)
+            .order_by(func.lower(RegisteredFolderModel.name))
+        ).scalars()
+        return [self._to_entity(row, with_documents=False) for row in rows]
 
     def list(self, user_sub: str) -> List[RegisteredFolder]:
         rows = self._db.execute(

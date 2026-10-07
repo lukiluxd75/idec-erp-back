@@ -30,15 +30,18 @@ from app.domains.folder_analysis.domain.exceptions import (
     CaptureNotFoundException,
     DocumentAlreadyFiledException,
     DocumentNotFoundException,
+    InvalidDocumentRequestException,
     InvalidRegisteredFolderException,
     RegisteredFolderNameTakenException,
     RegisteredFolderNotFoundException,
 )
 from app.domains.folder_analysis.domain.folder_types import (
     FOLDER_TYPES,
+    PARCEL_CODE_KEY,
     clean_folder_data,
     folder_type,
 )
+from app.domains.folder_analysis.domain.services import cadastral_code
 from app.domains.folder_analysis.application.use_cases.capture_use_cases import (
     GetCaptureImageUseCase,
     forget_previews,
@@ -245,6 +248,120 @@ class GetRegisteredFolderUseCase:
 
     def execute(self, folder_id: str, user_sub: str) -> RegisteredFolder:
         return self._service.require_folder(folder_id, user_sub)
+
+
+# Cuántas carpetas del mismo predio se contestan. Son los trámites anteriores
+# del mismo lote: con más de un puñado, lo que hay que mirar es el predio y no
+# una lista.
+MAX_SAME_PARCEL = 5
+
+
+class SameParcelFoldersUseCase:
+    """Las otras carpetas del usuario que son del mismo predio que esta.
+
+    Dos carpetas son del mismo predio cuando su código catastral es el mismo
+    -- el del GIS, que es el que no cambia aunque una hoja lo imprima con el par
+    de adelante y la otra sin él (cadastral_code.to_gis_code). Y eso es lo único
+    que las hace comparables: son dos trámites distintos, de dos momentos
+    distintos, sobre el mismo lote. Sin el código, dos carpetas no tienen nada
+    que decirse -- traerle un dato de otra sería meter el número de otro predio
+    sin que nada lo garantice.
+
+    De esas carpetas se contesta solo lo que es del PREDIO (el apartado que el
+    catálogo marca así, FolderFieldGroup.about_the_parcel): la superficie, las
+    medidas, la calle y las colindancias son del lote y no cambian de un trámite
+    al otro. El notario, los poseedores y la fecha de la declaración son de este
+    trámite y de su gente, así que no se ofrecen aunque el lote sea el mismo.
+
+    No llena nada: contesta para que la pantalla lo avise y el arquitecto
+    decida. Una carpeta vieja puede tener un dato mal cargado, y el trámite que
+    se está haciendo ahora es el que manda.
+
+    Solo entre carpetas del mismo tipo y del mismo dueño: las claves de la hoja
+    significan lo que dice el catálogo de ese tipo, y una carpeta ajena no
+    aparece en la lista de nadie (ver SearchRegisteredFoldersUseCase).
+    """
+
+    def __init__(
+        self, folders: RegisteredFolderRepositoryPort, service: RegisteredFolderService
+    ):
+        self._folders = folders
+        self._service = service
+
+    def execute(self, folder_id: str, user_sub: str) -> List[Dict[str, Any]]:
+        folder = self._service.require_folder(folder_id, user_sub)
+        kind = folder_type(folder.folder_type)
+        fields = kind.parcel_fields
+        code = self._code_of(folder)
+        if not fields or code is None:
+            return []
+        found: List[Dict[str, Any]] = []
+        for other in self._folders.list_sheets(user_sub):
+            if other.id == folder.id or folder_type(other.folder_type).key != kind.key:
+                continue
+            if _gis_code(other.data.get(PARCEL_CODE_KEY)) != code:
+                continue
+            values = [
+                {"key": field.key, "label": field.label, "value": value}
+                for field in fields
+                for value in [_written(other.data.get(field.key))]
+                if value is not None
+            ]
+            if not values:
+                # La misma carpeta del predio sin nada escrito todavía: nombrarla no ayuda a nadie.
+                continue
+            found.append(
+                {
+                    "id": other.id,
+                    "name": other.name,
+                    "folder_type": folder_type(other.folder_type).key,
+                    "printed_code": cadastral_code.printed(code),
+                    "updated_at": other.updated_at,
+                    "values": values,
+                }
+            )
+            if len(found) == MAX_SAME_PARCEL:
+                break
+        return found
+
+    @staticmethod
+    def _code_of(folder: RegisteredFolder) -> Optional[str]:
+        """El código catastral de la carpeta: el de su hoja y, si ahí no está
+        todavía, el que le leyeron a sus documentos.
+
+        La hoja se llena sola con el código del plano en cuanto se lo lee, así
+        que casi siempre está ahí; los documentos quedan para la carpeta recién
+        leída, cuya hoja todavía no se guardó.
+        """
+        code = _gis_code(folder.data.get(PARCEL_CODE_KEY))
+        if code is not None:
+            return code
+        for document in folder.documents:
+            values = (document.current_data or {}).get("values") or {}
+            code = _gis_code(values.get(PARCEL_CODE_KEY))
+            if code is not None:
+                return code
+        return None
+
+
+def _gis_code(value: Any) -> Optional[str]:
+    """El código como lo conoce el GIS, o None cuando lo escrito no es un código.
+
+    Un código a medio escribir no es un error que haya que contar: es una
+    carpeta que todavía no dice de qué predio es.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return cadastral_code.to_gis_code(value)
+    except InvalidDocumentRequestException:
+        return None
+
+
+def _written(value: Any) -> Optional[str]:
+    if value is None or isinstance(value, (dict, list, bool)):
+        return None
+    return " ".join(str(value).split()) or None
 
 
 class CreateRegisteredFolderUseCase:

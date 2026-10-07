@@ -247,6 +247,35 @@ class UpdateRegisteredFolderRequest(BaseModel):
     document_ids: Optional[List[str]] = None
 
 
+class SameParcelValueOut(BaseModel):
+    """Un dato del predio que otra carpeta del mismo lote ya tiene escrito."""
+
+    key: str
+    label: str
+    value: str
+
+
+class SameParcelFolderOut(BaseModel):
+    """Otra carpeta del mismo predio que esta: el trámite anterior del mismo lote.
+
+    Trae lo que esa carpeta dice de lo que es del PREDIO y nada más -- la
+    superficie, las medidas, la calle, las colindancias. Lo de su trámite (el
+    notario, sus poseedores, la fecha de su declaración) no se ofrece: es de ese
+    trámite y de su gente.
+
+    Se avisa, no se aplica: copiar un dato de la carpeta vieja a esta es cosa del
+    arquitecto.
+    """
+
+    id: str
+    name: str
+    folder_type: str
+    # El código catastral del predio que las dos comparten, como lo imprime el plano.
+    printed_code: str
+    updated_at: datetime
+    values: List[SameParcelValueOut]
+
+
 # -------------------------------------------------------------------- catalogo
 
 

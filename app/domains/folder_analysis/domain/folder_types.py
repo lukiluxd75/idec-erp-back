@@ -20,6 +20,12 @@ from app.domains.folder_analysis.domain.entities.folder_document import Document
 from app.domains.folder_analysis.domain.services import spanish_dates
 
 
+# La clave con la que la hoja de una carpeta guarda el código catastral: es lo
+# que identifica al predio, y lo único que dice que dos carpetas son del mismo
+# lote (ver el caso de uso de carpetas del mismo predio).
+PARCEL_CODE_KEY = "cadastral_code"
+
+
 class FieldSource:
     """Where the value of a carpeta's own field comes from.
 
@@ -60,6 +66,15 @@ class FolderFieldGroup:
     key: str
     title: str
     fields: Tuple[FolderField, ...]
+    # Si lo que agrupa es del PREDIO y no de este trámite.
+    #
+    # La superficie, las medidas, la calle y las colindancias son del lote: dos
+    # carpetas del mismo predio dicen lo mismo, y por eso una le puede ofrecer a
+    # la otra lo que tiene escrito (ver el caso de uso de carpetas del mismo
+    # predio). El notario, los poseedores y la fecha de la declaración son de
+    # este trámite y de su gente: dos trámites sobre el mismo lote son de dos
+    # momentos distintos y no tienen por qué coincidir, así que no se ofrecen.
+    about_the_parcel: bool = False
 
 
 @dataclass(frozen=True)
@@ -87,6 +102,16 @@ class FolderTypeSpec:
     @property
     def fields(self) -> Tuple[FolderField, ...]:
         return tuple(field for group in self.field_groups for field in group.fields)
+
+    @property
+    def parcel_fields(self) -> Tuple[FolderField, ...]:
+        """Lo que la hoja dice del predio y no de este trámite (FolderFieldGroup)."""
+        return tuple(
+            field
+            for group in self.field_groups
+            if group.about_the_parcel
+            for field in group.fields
+        )
 
     def holds(self, doc_type: str) -> bool:
         return doc_type in self.document_types
@@ -188,6 +213,7 @@ POSSESSORS = FolderTypeSpec(
         FolderFieldGroup(
             key="plan",
             title="Datos de plano",
+            about_the_parcel=True,
             fields=(
                 FolderField(
                     key="cadastral_code",

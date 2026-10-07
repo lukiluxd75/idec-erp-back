@@ -10,6 +10,7 @@ from app.domains.folder_analysis.application.use_cases import (
     GetRegisteredFolderUseCase,
     ListRegisteredFoldersUseCase,
     RemoveDocumentFromRegisteredFolderUseCase,
+    SameParcelFoldersUseCase,
     SaveBoardToFolderUseCase,
     SearchRegisteredFoldersUseCase,
     UpdateRegisteredFolderUseCase,
@@ -22,6 +23,7 @@ from app.domains.folder_analysis.presentation.deps import (
     get_get_registered_folder_use_case,
     get_list_registered_folders_use_case,
     get_remove_folder_document_use_case,
+    get_same_parcel_folders_use_case,
     get_save_board_to_folder_use_case,
     get_search_registered_folders_use_case,
     get_update_registered_folder_use_case,
@@ -32,6 +34,7 @@ from app.domains.folder_analysis.presentation.schemas.folder_analysis_schema imp
     AddRegisteredFolderDocumentsRequest,
     CreateRegisteredFolderRequest,
     RegisteredFolderOut,
+    SameParcelFolderOut,
     SaveBoardToFolderRequest,
     UpdateRegisteredFolderRequest,
 )
@@ -116,6 +119,25 @@ def get_folder(
     user: UserProfile = Depends(require_permission("folder-analysis.view")),
 ):
     return RegisteredFolderOut.from_entity(use_case.execute(folder_id, user.sub))
+
+
+@router.get("/{folder_id}/same-parcel", response_model=List[SameParcelFolderOut])
+def same_parcel_folders(
+    folder_id: str,
+    use_case: SameParcelFoldersUseCase = Depends(get_same_parcel_folders_use_case),
+    user: UserProfile = Depends(require_permission("folder-analysis.view")),
+):
+    """Las otras carpetas del usuario que son del mismo predio que esta.
+
+    El mismo predio quiere decir el mismo código catastral, que es lo único que
+    lo dice: dos carpetas son dos trámites distintos sobre el mismo lote. De cada
+    una se contesta lo que tiene escrito de lo que es del predio, para que la
+    pantalla lo avise y el arquitecto decida si lo trae. Nada se copia solo.
+
+    Vacío cuando esta carpeta todavía no tiene código catastral, cuando su tipo
+    no declara datos del predio, o cuando no hay otra carpeta de ese lote.
+    """
+    return use_case.execute(folder_id, user.sub)
 
 
 @router.get("/{folder_id}/photos/{capture_id}")

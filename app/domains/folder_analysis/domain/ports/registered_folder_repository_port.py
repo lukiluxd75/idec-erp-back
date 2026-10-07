@@ -28,6 +28,17 @@ class RegisteredFolderRepositoryPort(ABC):
         """The user's carpetas A->Z by name, each with its documents."""
 
     @abstractmethod
+    def list_sheets(self, user_sub: str) -> List[RegisteredFolder]:
+        """Las carpetas del usuario con su hoja y SIN sus documentos, A->Z.
+
+        Para la pregunta que compara una carpeta con las demás por lo que tienen
+        escrito --si hay otra del mismo predio-- y no necesita nada de sus
+        documentos: leerlos sería traerse de la base la lectura entera de cada
+        documento de cada carpeta del usuario para contestar algo que está en la
+        hoja.
+        """
+
+    @abstractmethod
     def find_any(self, folder_id: str) -> Optional[RegisteredFolder]:
         """La carpeta sea de quien sea, sin comprobar el dueño.
 

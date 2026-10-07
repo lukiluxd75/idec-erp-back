@@ -38,6 +38,7 @@ from app.domains.folder_analysis.application.use_cases import (
     LookupCadastralParcelUseCase,
     RegisteredFolderService,
     RemoveDocumentFromRegisteredFolderUseCase,
+    SameParcelFoldersUseCase,
     SaveBoardToFolderUseCase,
     SearchRegisteredFoldersUseCase,
     ReviewDocumentUseCase,
@@ -323,6 +324,13 @@ def get_search_registered_folders_use_case(
     folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
 ) -> SearchRegisteredFoldersUseCase:
     return SearchRegisteredFoldersUseCase(folders)
+
+
+def get_same_parcel_folders_use_case(
+    folders: RegisteredFolderRepositoryPort = Depends(get_registered_folder_repository),
+    service: RegisteredFolderService = Depends(get_registered_folder_service),
+) -> SameParcelFoldersUseCase:
+    return SameParcelFoldersUseCase(folders, service)
 
 
 def get_get_registered_folder_use_case(
