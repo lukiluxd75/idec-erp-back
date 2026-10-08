@@ -91,7 +91,6 @@ class TituloDePlantaTest(unittest.TestCase):
             "DUPLEX PLANTA ALTA",
             "PLANTA 4° - 2° PISO",
             "PLANTA 31° PISO",
-            "PLANTA CUBIERTA",
         ):
             with self.subTest(texto):
                 self.assertIsNone(plantas_de_titulo(texto))
@@ -237,7 +236,7 @@ class PaginasDelPlanoTest(unittest.TestCase):
         self.add.execute("res-1", [(b"a", "image/jpeg", [])], "app", USER)
         uc = SetPlanPagePlantasUseCase(self.repo)
         with self.assertRaises(InvalidPlantaException):
-            uc.execute("res-1", 1, ["PLANTA CUBIERTA"], USER)
+            uc.execute("res-1", 1, ["PLANTA AZOTEA"], USER)
         with self.assertRaises(InvalidPlantaException):
             uc.execute("res-1", 1, [], USER)
         with self.assertRaises(PlanPageNotFoundException):
@@ -247,7 +246,7 @@ class PaginasDelPlanoTest(unittest.TestCase):
 
     def test_planta_invalida_al_subir(self):
         with self.assertRaises(InvalidPlantaException):
-            self.add.execute("res-1", [(b"a", "image/jpeg", ["PLANTA CUBIERTA"])], "app", USER)
+            self.add.execute("res-1", [(b"a", "image/jpeg", ["PLANTA AZOTEA"])], "app", USER)
 
     def test_filas_viejas_con_una_sola_planta(self):
         # Páginas subidas antes de la columna `plantas`: se lee `planta`.
@@ -437,8 +436,10 @@ class TitulosDeLosFormatos2y3Test(unittest.TestCase):
             with self.subTest(texto):
                 self.assertEqual(plantas_de_titulo(texto), plantas)
 
-    def test_cubierta_no_es_una_planta(self):
-        self.assertIsNone(plantas_de_titulo("PLANO DE CUBIERTA BLOQUE II"))
+    def test_cubierta_es_una_planta(self):
+        for texto in ("PLANO DE CUBIERTA BLOQUE II", "...PLANO DE CUBIERTA BLOQUE II...", "PLANTA CUBIERTA"):
+            with self.subTest(texto):
+                self.assertEqual(plantas_de_titulo(texto), ["PLANTA CUBIERTA"])
         self.assertIsNone(plantas_de_titulo("CUBIERTA CALAMINA SOBRE ESTRUCTURA METALICA"))
 
     def test_trozos_de_titulo_cortado(self):
