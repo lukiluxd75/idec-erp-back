@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class MapLayerItem(BaseModel):
@@ -94,6 +94,11 @@ class AdvertisementUpdatePayload(BaseModel):
 
 
 class HealthResponse(BaseModel):
+    # El atributo NO puede llamarse `schema`: pisa BaseModel.schema() y pydantic
+    # avisa al importar. El alias mantiene intacto el JSON de /health, que FastAPI
+    # serializa con by_alias=True.
+    model_config = ConfigDict(populate_by_name=True)
+
     ok: bool
-    schema: str
+    schema_name: str = Field(alias="schema")
     service: str

@@ -45,7 +45,33 @@ _ADDED_COLUMNS = (
 
 
 def ensure_added_columns(engine: Engine) -> None:
-    table = f"{ResolutionPlanPageModel.__table_args__['schema']}.{ResolutionPlanPageModel.__tablename__}"
+    """Agrega las columnas de _ADDED_COLUMNS que falten, y solo esas.
+
+    `ADD COLUMN IF NOT EXISTS` toma un ACCESS EXCLUSIVE sobre la tabla aunque la
+    columna ya exista, asi que sin este chequeo previo cada arranque peleaba por
+    un lock que no necesitaba: basta una consulta en curso sobre
+    resolution_plan_pages para que el lock_timeout lo cancele y el arranque
+    termine con un WARNING que no significa nada. Despues del primer deploy no
+    falta ninguna columna y esta funcion no toca la tabla.
+    """
+    schema = ResolutionPlanPageModel.__table_args__["schema"]
+    table = ResolutionPlanPageModel.__tablename__
     with engine.begin() as conn:
-        for column in _ADDED_COLUMNS:
-            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column}"))
+        existing = {
+            row[0]
+            for row in conn.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = :schema AND table_name = :table"
+                ),
+                {"schema": schema, "table": table},
+            )
+        }
+        missing = [column for column in _ADDED_COLUMNS if column.split()[0] not in existing]
+        if not missing:
+            return
+        conn.execute(text("SET LOCAL lock_timeout = '5s'"))
+        for column in missing:
+            conn.execute(
+                text(f"ALTER TABLE {schema}.{table} ADD COLUMN IF NOT EXISTS {column}")
+            )

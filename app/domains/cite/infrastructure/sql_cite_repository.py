@@ -147,7 +147,7 @@ class SqlCiteRepository(CiteRepositoryPort):
              concurrentes del MISMO prefijo/gestión.
           2. MAX(correlativo) + 1, o 1 si la tabla aún está vacía para esa config.
           3. INSERT físico del prefijo (columna generada no se toca).
-          4. REFRESH para leer codigo_cite_completo calculado por MySQL.
+          4. REFRESH para leer codigo_cite_completo calculado por PostgreSQL.
         """
         try:
             # ── 1. Bloqueo optimista de la fila de configuración ──────────────
@@ -189,7 +189,7 @@ class SqlCiteRepository(CiteRepositoryPort):
                 id_funcionario_remitente=id_funcionario_remitente,
             )
             self._db.add(nuevo_doc)
-            self._db.flush()   # dispara el INSERT; MySQL calcula codigo_cite_completo
+            self._db.flush()   # dispara el INSERT; la BD calcula codigo_cite_completo
             self._db.refresh(nuevo_doc)  # re-lee la fila, incluyendo la columna GENERATED
 
             return _map_documento(nuevo_doc)

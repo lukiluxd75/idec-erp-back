@@ -64,7 +64,7 @@ class CiteRepositoryPort(ABC):
         Operación atómica con bloqueo de fila:
           1. SELECT ... FOR UPDATE del último correlativo de id_configuracion.
           2. Calcula siguiente correlativo (MAX + 1 ó 1 si no hay registros).
-          3. Inserta documento_cite con prefijo físico (workaround MySQL error 3102).
+          3. Inserta documento_cite con prefijo físico (la columna generada no se escribe).
           4. Devuelve la entidad con el código CITE completo.
         Lanza CiteGenerationException si hay un fallo irrecuperable.
         """

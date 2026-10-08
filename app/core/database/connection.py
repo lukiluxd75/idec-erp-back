@@ -104,7 +104,10 @@ def init_db_tables() -> bool:
         from app.domains.chatbot.infrastructure import models as chatbot_models  # noqa: F401
         from app.domains.folios.infrastructure import models as folios_models  # noqa: F401
         from app.domains.cadastralviewer.infrastructure import models as cadastralviewer_models  # noqa: F401
-        from app.domains.cite.infrastructure import models as cite_models  # noqa: F401
+        # El dominio 'cite' tampoco se registra aca: sus tablas (gestion, area,
+        # configuracion_cite, documento_cite) se crean a mano en PostgreSQL con
+        # database/cite_postgresql.sql. Usa su propia base declarativa para que
+        # create_all() no las vea -- ver cite/infrastructure/models.py.
         from app.domains.templates.infrastructure import models as templates_models  # noqa: F401
 
         if not db_uri.startswith("sqlite"):
