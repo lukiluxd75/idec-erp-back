@@ -10,4 +10,5 @@ PLANTAS_RESUMEN = (
     "PLANTA BAJA",
     *[f"PLANTA {i}º PISO" for i in range(1, 31)],
     "PLANTA TERRAZA",
+    "PLANTA CUBIERTA",
 )

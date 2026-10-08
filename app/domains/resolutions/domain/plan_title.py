@@ -66,6 +66,8 @@ _NUM = r"(\d{1,2}|[IL])"
 _RE_ESPECIAL = re.compile(r"^PLANTA ?(SEMI ?SOTANO|SOTANO|[BS8]AJA)$")
 # La terraza se titula sola ("TERRAZA / Esc:1:100") o como "PLANTA TERRAZA".
 _RE_TERRAZA = re.compile(r"^(?:PLANTA ?)?TERRAZA$")
+# La cubierta se titula "PLANO DE CUBIERTA BLOQUE II" (el bloque es opcional).
+_RE_CUBIERTA = re.compile(r"^(?:PLANO ?DE ?|PLANTA ?(?:DE ?)?)?CUBIERTA(?: ?BLOQUE ?[A-Z0-9]{1,4})?$")
 _RE_PISOS = re.compile(
     rf"^PLANTA ?(?:TIPO ?)?{_NUM} ?{_ORDINAL}(?: ?(?:-|A|AL|Y) ?{_NUM} ?{_ORDINAL})? ?{_PISO}$"
 )
@@ -106,6 +108,8 @@ def plantas_de_titulo(texto: str) -> Optional[List[str]]:
         return [f"PLANTA {nombre}"]
     if _RE_TERRAZA.match(t):
         return ["PLANTA TERRAZA"]
+    if _RE_CUBIERTA.match(t):
+        return ["PLANTA CUBIERTA"]
     m = _RE_PISOS.match(t)
     if not m:
         return None
